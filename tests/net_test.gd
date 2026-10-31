@@ -5,6 +5,8 @@ extends Node
 ## or by hand:
 ##   godot --headless --path . res://tests/net_test.tscn -- --role=host --port=24711
 ##   godot --headless --path . res://tests/net_test.tscn -- --role=client --port=24711
+##   (a second client with --delay=20 joins mid-run: it must get everything changed so far)
+## Without --headless (e.g. under xvfb-run) with --shots=DIR, the client saves what it sees.
 ## The driver lives on the scene tree's root, so it survives the scene changes of joining and
 ## restarting.
 
@@ -16,6 +18,10 @@ func _ready() -> void:
 			d.role = a.trim_prefix("--role=")
 		elif a.begins_with("--port="):
 			d.port = int(a.trim_prefix("--port="))
+		elif a.begins_with("--delay="):
+			d.delay = float(a.trim_prefix("--delay="))
+		elif a.begins_with("--shots="):
+			d.shots = a.trim_prefix("--shots=")
 	get_tree().root.add_child.call_deferred(d)
 
 
@@ -23,6 +29,8 @@ class Driver extends Node:
 	const MAIN := "res://src/main.tscn"
 	var role := "host"
 	var port := 24711
+	var delay := 0.5               # client: seconds before joining
+	var shots := ""                # where to save screenshots ("" = none)
 	var fails := 0
 	var _replies := {}
 	var _step := 0
@@ -155,6 +163,27 @@ class Driver extends Node:
 		await _wait(1.5)
 		await _compare_cells("water flows the same", Rect2i(wpos.x - 10, wpos.y - 8, 20, 22))
 
+		await _ask("shot", "client_water")
+
+		# someone joins mid-run: they get every chunk changed so far, and the crew as it is
+		var three: bool = await _until(func(): return main().players.size() == 3, 40.0)
+		_check("a second client joins mid-run", three)
+		if three:
+			var late: int = m.players[2].peer
+			await _wait(1.5)
+			var r: Rect2i = Rect2i(m.world.cell_at(hole) - Vector2i(10, 8), Vector2i(20, 30))
+			_check("the late joiner gets the ground dug before they came",
+				await _ask("cells", [r.position.x, r.position.y, r.size.x, r.size.y], late) == _checksum(r))
+			var sc: Vector2i = m.world.cell_at(m.drill.global_position)
+			r = Rect2i(sc.x - 16, sc.y - 10, 32, 28)
+			_check("and the drill's shaft", await _ask("cells", [r.position.x, r.position.y, r.size.x, r.size.y], late) == _checksum(r))
+			var seen: Array = await _ask("players", null, late)
+			_check("and sees the whole crew", seen.size() == 3, str(seen.size()))
+			await _ask("shot", "late_joiner", late)
+			await _ask("leave", null, late)
+			_check("leaving takes their miner out of the run",
+				await _until(func(): return main().players.size() == 2, 5.0))
+
 		# the crew's money is the host's; toasts reach everyone
 		Progress.add_money(37)
 		m.hud.toast("hello crew", 3.0)
@@ -177,8 +206,8 @@ class Driver extends Node:
 		World.fixed_seed = 99         # (tests keep their seed; a real restart picks a random one)
 		var old_run := m.get_instance_id()
 		m._restart()
-		await _until(func(): return main() != null and main().get_instance_id() != old_run
-			and main().get("session") != null, 10.0)
+		var next_run := func(): return main() != null and main().get_instance_id() != old_run and main().get("session") != null
+		await _until(next_run, 10.0)
 		var rejoined := await _until(func(): return main().players.size() == 2, 20.0)
 		_check("the crew comes along to the next run", rejoined)
 		if rejoined:
@@ -210,10 +239,13 @@ class Driver extends Node:
 				liquid += int(clampf(w.get_liquid(gx, gy), 0.0, 1.0) * 255.0) / 8   # (a little slack)
 		return [fill, liquid]
 
-	func _ask(kind: String, data: Variant = null) -> Variant:
+	## Ask the client (`peer`, or the first one) and wait for its answer.
+	func _ask(kind: String, data: Variant = null, peer := 0) -> Variant:
 		_step += 1
 		var step := _step
-		Net.send_all("test", [step, kind, data])
+		if peer == 0:
+			peer = main().players[1].peer if main().players.size() > 1 else 0
+		Net.send(peer, "test", [step, kind, data])
 		var got := await _until(func(): return _replies.has(step), 15.0)
 		if not got:
 			_check("client answered " + kind, false)
@@ -231,7 +263,7 @@ class Driver extends Node:
 	# ------------------------------------------------------------ client: does and reports
 
 	func _client() -> void:
-		await _wait(0.5)                        # (the host is starting up)
+		await _wait(delay)                      # (the host is starting up)
 		Net.join("127.0.0.1", port)
 		await _until(func(): return main() != null and main().get("session") != null, 20.0)
 		print("client: in the run, seed %d" % main().world.seed)
@@ -277,4 +309,14 @@ class Driver extends Node:
 				r = m.shop.visible
 			"close_shop":
 				m.shop.close()
+			"shot":
+				if shots != "" and DisplayServer.get_name() != "headless":
+					await RenderingServer.frame_post_draw
+					get_viewport().get_texture().get_image().save_png("%s/%s.png" % [shots, data])
+			"leave":
+				Net.send(1, "test_reply", [step, true])
+				await _wait(0.2)
+				Net.leave()
+				get_tree().quit()
+				return
 		Net.send(1, "test_reply", [step, r])

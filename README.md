@@ -2,8 +2,8 @@
 
 A 2D side-view game about a crew boring toward the Earth's core in a giant drilling machine,
 "Barotrauma, but a drill": keep the machine running, go outside to dig for coal and ore,
-repair the hull, and don't get left behind. Local co-op works (a second player on a controller);
-online co-op is next, and no system assumes there's only one player.
+repair the hull, and don't get left behind. Up to 4 players crew the same drill online, or two
+on one machine (a second player on a controller).
 
 Built with **Godot 4.7**.
 
@@ -31,6 +31,13 @@ Or open `project.godot` in the Godot editor and press F5.
 theirs; player one keeps keyboard + mouse). The camera frames both. A downed player is back in
 the drill after a few seconds while the other plays on; the run ends when everyone is down or
 the drill is wrecked. Menus answer either player.
+
+**Online co-op (up to 4):** title screen → **Play online**. One player picks **Host a game**
+(the toast shows the addresses to share); the others type that address and **Join**, any time
+during the run. Everyone crews the same drill. The host's machine runs the game, so the host's
+money and upgrades are the crew's. Only the host restarts runs, and everyone comes along to the
+next one. Over the internet the host has to forward the port (default 24680, UDP) on their router.
+Online the pause menu doesn't stop the game.
 
 Bindings live in `src/game/controls.gd`.
 
@@ -94,7 +101,19 @@ All game code is in `src/` (one system per file):
 | `player_input.gd` | One player's controls (action prefix, mouse or not); all player input goes through it |
 | **creatures/** | `crawler.gd`, `bat.gd`, `worm.gd`, `watcher.gd`, `spawner.gd` (who spawns where) |
 | **fx/** | `fx.gd` (particles, impacts, hit-stop), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
-| **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / run summary / notes), `ui_style.gd` |
+| **net/** (online co-op) | |
+| `net.gd` | Autoload `Net`: hosting / joining (ENet), the handshake, sending messages, echoing the host's calls |
+| `net_session.gd` | One online run: who's in the crew, what's sent 20×/s, menus and buying for remote players |
+| `net_input.gd` | A remote miner's controls (and packing this machine's to send) |
+| `net_world.gd` | Dug rock + liquid: changed cells in batches, whole chunks for late joiners |
+| `net_entities.gd` | Snapshots of the drill, miners, creatures and things; smoothing them on clients |
+| **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / online / run summary / notes), `ui_style.gd` |
+
+**How online works:** the host simulates everything; clients generate the same world from the
+seed, send their controls, and show what the host sends back. A synced thing joins group `net`
+and has `puppet` (true on clients: shown, not simulated), `net_state()` and `net_apply()`; new
+kinds are registered in `NetEntities.TYPES`. Effects, sounds and toasts called on the host play
+on clients too (`Net.echo` in `Fx`, `Sfx`, `Hud`).
 
 ## Tests
 
@@ -110,6 +129,16 @@ godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 breaches, heat + coolant, sonar, the worm vs the turrets), layers, camps + notes, bats, water
 and lava, mouse aiming, ropes, a crawler fight, the dodge roll and a falling boulder, and prints
 PASS/FAIL. Tests use a fixed world seed and never write the real save.
+
+```
+tests/net_test.sh                # online: a host and two clients as separate processes on localhost
+SHOTS=/tmp/shots tests/net_test.sh   # same, rendered offscreen, saving what the clients see
+```
+
+The host acts and asks the clients what they see: same ground, same dug holes and water, the
+drill and miners in the same places, the client's controls and pickaxe working, creatures,
+money, toasts, a station menu on the right screen, a player joining mid-run and leaving, and the
+whole crew moving to the next run.
 
 ## Art pipeline
 
