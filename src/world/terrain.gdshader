@@ -17,6 +17,8 @@ uniform sampler2D t_magma : filter_nearest, repeat_enable;
 uniform sampler2D n_magma : filter_nearest, repeat_enable;
 uniform sampler2D t_floor : filter_nearest, repeat_enable;
 uniform sampler2D n_floor : filter_nearest, repeat_enable;
+uniform sampler2D t_ice : filter_nearest, repeat_enable;
+uniform sampler2D n_ice : filter_nearest, repeat_enable;
 
 
 // Crack network: edges of a small Voronoi pattern. More damage = wider and more of it.
@@ -70,8 +72,10 @@ void fragment() {
 		col = texture(t_crystal, tuv).rgb; nm = texture(n_crystal, tuv).rgb; rim = vec3(0.62, 0.46, 0.9);
 	} else if (mat == 5) {
 		col = texture(t_magma, tuv).rgb; nm = texture(n_magma, tuv).rgb; rim = vec3(0.5, 0.22, 0.12);
-	} else {
+	} else if (mat == 6) {
 		col = texture(t_floor, tuv).rgb; nm = texture(n_floor, tuv).rgb; rim = vec3(0.45, 0.42, 0.62);
+	} else {
+		col = texture(t_ice, tuv).rgb; nm = texture(n_ice, tuv).rgb; rim = vec3(0.75, 0.9, 1.0);
 	}
 
 	col *= mix(1.0, 0.38, s.g);   // rock gets darker deep inside

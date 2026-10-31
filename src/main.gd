@@ -130,6 +130,13 @@ func _ready() -> void:
 	spawner.lit_parent = self
 	spawner.glow_parent = glow_layer
 	spawner.crawler_killed.connect(_on_crawler_killed)
+	spawner.creature_killed.connect(func(pos, bounty):
+		kills += 1
+		fx.gore(pos)
+		var p := _nearest_player(pos)
+		if p:
+			p.add_value(bounty))
+	spawner.brood_spawned.connect(_on_brood_spawned)
 	add_child(spawner)
 
 	add_child(hud)
@@ -201,6 +208,9 @@ func _music(depth_m: float) -> String:
 		return "music_ending"
 	if eye and eye.is_awake() and eye.state < TheEye.State.DYING:
 		return "music_boss"
+	for b: Broodmother in get_tree().get_nodes_in_group("boss").filter(func(n): return n is Broodmother):
+		if b.is_awake():
+			return "music_boss"
 	return "music_deep" if depth_m > 300.0 else ""
 
 
@@ -409,6 +419,21 @@ func _spawn_eye() -> void:
 		hud.set_boss("THE EYE", 1.0))
 	eye.health_changed.connect(func(f): hud.set_boss("THE EYE", f))
 	eye.died.connect(_on_eye_died)
+
+
+## The Broodmother's lair has opened: a boss bar while she's awake, a reward when she's dead.
+func _on_brood_spawned(b: Broodmother) -> void:
+	hud.toast("The ice splits open beside the shaft. Something stirs.", 3.0)
+	b.woke.connect(func(): hud.set_boss("THE BROODMOTHER", 1.0))
+	b.health_changed.connect(func(f): hud.set_boss("THE BROODMOTHER", f))
+	b.died.connect(func(pos):
+		hud.set_boss("", 0.0)
+		kills += 1
+		fx.gore(pos)
+		fx.explosion(pos + Vector2(0, -40), 30.0)
+		add_shake(1.6, pos)
+		Progress.add_money(Broodmother.REWARD)
+		hud.toast("The Broodmother is dead. +$%d for the crew" % Broodmother.REWARD, 3.0))
 
 
 ## The eye is dead: the Floor cracks and light pours up. The end of the run.

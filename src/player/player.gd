@@ -35,6 +35,7 @@ const ROLL_COOLDOWN := 0.55
 const BLEED_OUT := 30.0         # seconds down before it's too late to help them up
 const CARRY_SPEED := 0.65       # how fast you go with a crewmate on your shoulders
 const BAG := 15                 # ore + coal you can carry (more with the sled, as a miner)
+const ICE_GRIP := 0.35          # on ice you speed up and stop this much slower
 
 # each miner's work clothes and name tag: blue, red, green, violet (by player number)
 const CREW_COLORS := [Color("3f8fd8"), Color("d84a3f"), Color("4fb84a"), Color("9a5ad8")]
@@ -193,9 +194,9 @@ func _move(dt: float, dir: float) -> void:
 		pass                       # knocked back: no control for a moment
 	elif dir != 0:
 		var top := SPEED * (WATER_DRAG if in_water else 1.0) * (CARRY_SPEED if carrying else 1.0)
-		velocity.x = move_toward(velocity.x, dir * top, ACCEL * dt)
+		velocity.x = move_toward(velocity.x, dir * top, ACCEL * dt * (ICE_GRIP if on_ice() else 1.0))
 	else:
-		velocity.x = move_toward(velocity.x, 0, FRICTION * dt)
+		velocity.x = move_toward(velocity.x, 0, FRICTION * dt * (ICE_GRIP * 0.4 if on_ice() else 1.0))
 	var fall_speed := velocity.y
 	move_and_slide()
 	if is_on_floor() and not was_on_floor and fall_speed > 150:
@@ -258,6 +259,11 @@ func _roll(dt: float) -> void:
 	velocity.x = _roll_dir * ROLL_SPEED * (0.4 + 0.6 * k)
 	velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
 	move_and_slide()
+
+
+## Standing on ice (slippery)?
+func on_ice() -> bool:
+	return is_on_floor() and world.mat_at(global_position + Vector2(0, HALF_HEIGHT + 3.0)) == World.M.ICE
 
 
 func is_rolling() -> bool:

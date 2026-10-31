@@ -6,7 +6,8 @@ class_name WorldGen
 ## seed (tests) gives the same one.
 
 const PROP_NAMES := ["lantern", "beam", "crystal_p", "crystal_t", "skeleton", "roots", "cart", "crate", "chains",
-	"tent_ruin", "bunk", "table", "barrel", "lamp_post"]
+	"tent_ruin", "bunk", "table", "barrel", "lamp_post", "mushroom_big", "mushroom_small", "spore_pod", "icicle",
+	"ice_crystal", "ruin_pillar", "ruin_statue", "ruin_door", "rubble"]
 # liquid pockets: water from WATER_FROM m down to the magma layer, lava inside it
 const WATER_FROM := 8.0
 const LIQUID_POCKETS := 0.32     # noise threshold: higher = fewer, smaller pockets
@@ -76,8 +77,10 @@ func cell(gx: int, gy: int) -> Vector2:
 	if py < surf:
 		return Vector2(0.0, World.M.DIRT)
 	var depth := py / World.METER
-	# caves: none right under the grass, bigger the deeper you go
+	# caves: none right under the grass, bigger the deeper you go (and roomy in the fungal caves)
 	var t := 0.2 - minf(depth / 800.0, 0.08) + maxf(0.0, 8.0 - depth) * 0.15
+	if fungal(px, py, depth):
+		t -= 0.06
 	var fill := clampf(0.5 + (t - noise_cave.get_noise_2d(px, py)) * 5.0, 0.0, 1.0)
 	fill = minf(fill, clampf((py - surf) / World.CELL + 0.5, 0.0, 1.0))
 	if depth >= World.CAVERN_FROM and depth < World.BOTTOM:
@@ -111,8 +114,10 @@ func material(px: float, py: float, depth: float) -> int:
 		return World.M.FLOOR
 	if d >= World.MAGMA_FROM:
 		return World.M.HARD if m > 0.78 else World.M.MAGMA
-	if d >= World.CRYSTAL_TO:
-		return World.M.MAGMA if m < clampf((d - World.CRYSTAL_TO) / 400.0, 0.0, 0.2) else World.M.HARD
+	if d >= World.MAGMA_FROM - 15.0:
+		return World.M.MAGMA if m < 0.2 else World.M.HARD
+	if d >= World.CRYSTAL_TO:                                   # the ice layer, with veins of hard rock
+		return World.M.HARD if m > 0.74 else World.M.ICE
 	if d >= World.CRYSTAL_FROM:
 		return World.M.HARD if m > 0.72 else World.M.CRYSTAL
 	var mat := World.M.DIRT
@@ -121,6 +126,12 @@ func material(px: float, py: float, depth: float) -> int:
 	if m < clampf((depth - 50.0) / 250.0, 0.0, 0.7):
 		mat = World.M.HARD
 	return mat
+
+
+## In the fungal caves? (a band that wanders like the other layers)
+func fungal(px: float, py: float, depth: float) -> bool:
+	var d := layer_depth(px, py, depth)
+	return d >= World.FUNGAL_FROM and d < World.FUNGAL_TO
 
 
 ## Liquid pockets in natural caves (noise), then settled: in every column, each run of open
@@ -221,6 +232,7 @@ func populate(ch: World.Chunk) -> void:
 				_floor_props(Vector2i(gx, gy), surf, depth)
 	_place_boulders(ch)
 	Camps.try_place(world, ch)
+	Ruins.try_place(world, ch)
 	# ceilings: an air cell right under rock
 	for j in World.C:
 		for i in World.C:
@@ -269,6 +281,15 @@ func _ore_kind(depth: float) -> int:
 
 func _floor_props(cell: Vector2i, p: Vector2, depth: float) -> void:
 	var r := rng.randf()
+	if fungal(p.x, p.y, depth) and r < 0.09:                   # the fungal caves' forests
+		var big := rng.randf() < 0.35
+		place_prop("mushroom_big" if big else "mushroom_small", p + Vector2(0, 2), false, cell,
+			Color("3fe0d0") if rng.randf() < 0.5 else Color(0, 0, 0, 0))
+		return
+	if world.get_mat(cell.x, cell.y) == World.M.ICE and r < 0.04:
+		place_prop("ice_crystal", p + Vector2(0, 2), false, cell, Color("7fd0ff") if rng.randf() < 0.3 else Color(0, 0, 0, 0))
+		return
+	r = rng.randf()
 	if depth > 4 and depth < 180 and r < 0.03:
 		# mine support beam: needs a flat floor and a ceiling 8-11 cells up
 		var h := 1
@@ -295,6 +316,13 @@ func _floor_props(cell: Vector2i, p: Vector2, depth: float) -> void:
 
 func _ceiling_props(cell: Vector2i, p: Vector2, depth: float) -> void:
 	var r := rng.randf()
+	if fungal(p.x, p.y, depth) and r < 0.05:
+		place_prop("spore_pod", p - Vector2(0, 2), true, cell)
+		return
+	if world.get_mat(cell.x, cell.y) == World.M.ICE and r < 0.12:
+		place_prop("icicle", p - Vector2(0, 2), true, cell)
+		return
+	r = rng.randf()
 	if depth > 2 and depth < 45 and world.get_mat(cell.x, cell.y) == World.M.DIRT and r < 0.05:
 		place_prop("roots", p - Vector2(0, 3), true, cell)
 	elif depth > 6 and depth < 150 and r < 0.058:

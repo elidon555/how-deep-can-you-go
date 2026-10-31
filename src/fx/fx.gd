@@ -8,7 +8,7 @@ class_name Fx
 ## Where bursts go: `lit` is darkened by the cave lighting, `glow` blooms.
 var lit: Node
 var glow: Node
-const HIT_SOUND := ["hit_dirt", "hit_stone", "hit_hard", "bonk", "crystal_hit", "hit_hard"]   # by World.M
+const HIT_SOUND := ["hit_dirt", "hit_stone", "hit_hard", "bonk", "crystal_hit", "hit_hard", "bonk", "ice_crack"]   # by World.M
 
 var hitstop_enabled := true
 var _hitstop_id := 0

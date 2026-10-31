@@ -19,14 +19,16 @@ const C := 32                   # chunk size in cells (code uses >>5 / &31)
 const CHUNK_PX := C * CELL
 const WIDTH_PX := W * CELL
 const R_INT := 5                # how far (cells) the "deep inside rock" darkening reaches
-enum M { DIRT, STONE, HARD, BEDROCK, CRYSTAL, MAGMA, FLOOR }
-const HARDNESS := [1.0, 2.6, 5.5, INF, 3.8, 6.5, INF]
+enum M { DIRT, STONE, HARD, BEDROCK, CRYSTAL, MAGMA, FLOOR, ICE }
+const HARDNESS := [1.0, 2.6, 5.5, INF, 3.8, 6.5, INF, 2.2]
 const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924"), Color("7a58b0"), Color("3a2420"),
-	Color("1c1f2a")]
-const MAT_NAMES := ["dirt", "stone", "hard", "bedrock", "crystal", "magma", "floor"]
+	Color("1c1f2a"), Color("8fc8e0")]
+const MAT_NAMES := ["dirt", "stone", "hard", "bedrock", "crystal", "magma", "floor", "ice"]
 # Depth layers (m). Their boundaries wander with noise, so every world is different.
+const FUNGAL_FROM := 60.0       # the fungal caves: bigger caves, glowing mushrooms, mite swarms
+const FUNGAL_TO := 140.0
 const CRYSTAL_FROM := 150.0     # the crystal caverns
-const CRYSTAL_TO := 300.0
+const CRYSTAL_TO := 300.0       # then the ice layer (slippery), down to the magma
 const MAGMA_FROM := 400.0       # the magma layer
 const CAVERN_FROM := 585.0      # the vast cavern above the bottom
 const BOTTOM := 620.0           # the Floor: carved, glowing, unbreakable. Something lives below.
@@ -94,7 +96,7 @@ func _ready() -> void:
 		var key: String = "bed" if n == "bedrock" else n                                          # shader names
 		tx["t_" + key] = load("res://assets/terrain/%s.png" % f)
 		tx["n_" + key] = load("res://assets/terrain/%s_n.png" % f)
-	for n in ["crystal", "magma", "floor"]:
+	for n in ["crystal", "magma", "floor", "ice"]:
 		var g := "res://assets/terrain/%s_glow.png" % n
 		glow_tx["g_" + n] = load(g) if ResourceLoader.exists(g) else null
 	gen = WorldGen.new(self)
@@ -134,7 +136,7 @@ func _gen_chunk(key: Vector2i) -> void:
 			var v := gen.cell(key.x * C + i, key.y * C + j)
 			ch.fill[j * C + i] = v.x
 			ch.mat[j * C + i] = int(v.y)
-			if int(v.y) >= M.CRYSTAL:      # crystal, magma, the Floor: they glow
+			if int(v.y) >= M.CRYSTAL:      # crystal, magma, the Floor, ice: they glow
 				ch.glows = true
 	gen.liquid_pockets(ch)
 	ch.rect = ColorRect.new()

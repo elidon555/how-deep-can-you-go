@@ -18,9 +18,10 @@ const LOOKAHEAD := 0.2         # s of velocity to extrapolate at most
 static var TYPES := [
 	["survivor", Survivor, "main"], ["player", Player, "main"], ["bat", Bat, "main"], ["crawler", Crawler, "main"],
 	["worm", Worm, "main"], ["eye", TheEye, "main"], ["vein", TheEye.Vein, "main"],
-	["orb", TheEye.Orb, "main"], ["bolt", Turret.Bolt, "main"], ["gas", GasCloud, "main"],
+	["orb", TheEye.Orb, "main"], ["mite", Mite, "main"], ["borer", Borer, "main"],
+	["brood", Broodmother, "main"], ["bolt", Turret.Bolt, "main"], ["gas", GasCloud, "main"],
 	["boulder", Boulder, "world"], ["crate", CampItems.LootCrate, "world"],
-	["note", CampItems.Note, "world"], ["drone", Drone, "main"],
+	["note", CampItems.Note, "world"], ["relic", CampItems.Relic, "world"], ["drone", Drone, "main"],
 ]
 
 var main                       # the run (src/main.gd)

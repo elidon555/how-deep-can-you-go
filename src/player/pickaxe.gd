@@ -207,7 +207,8 @@ func _strike(dir: int) -> void:
 func _hit_things(at: Vector2) -> void:
 	var damage := 1 + Progress.level("pick") / 2
 	for n in get_tree().get_nodes_in_group("hittable"):
-		if (n as Node2D).global_position.distance_to(at) < 22.0:
+		var hits: bool = n.is_hit_by(at) if n.has_method("is_hit_by") else (n as Node2D).global_position.distance_to(at) < 22.0
+		if hits:
 			n.hit(damage, player.global_position)
 			hit_thing.emit(at)
 

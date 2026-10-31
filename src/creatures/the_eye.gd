@@ -308,14 +308,16 @@ class Orb extends Node2D:
 	var drill: Drill
 	var world: World
 	var puppet := false
+	var tint := Color(1.4, 0.5, 2.2)     # violet from the Eye (the Broodmother's acid is green)
 	var _life := 6.0
 
 	func net_state() -> Array:
-		return [velocity, _life]
+		return [velocity, _life, tint]
 
 	func net_apply(s: Array) -> void:
 		velocity = s[0]
 		_life = s[1]
+		tint = s[2]
 
 	func _ready() -> void:
 		add_to_group("net")
@@ -345,5 +347,5 @@ class Orb extends Node2D:
 
 	func _draw() -> void:
 		var k := 0.8 + 0.2 * sin(_life * 20.0)
-		draw_circle(Vector2.ZERO, 7.0 * k, Color(1.4, 0.5, 2.2, 0.6))
+		draw_circle(Vector2.ZERO, 7.0 * k, Color(tint, 0.6))
 		draw_circle(Vector2.ZERO, 3.5, Color(2.4, 1.8, 2.8))

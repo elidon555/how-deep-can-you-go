@@ -39,6 +39,8 @@ func _ready() -> void:
 	_calm()
 	await _jobs_and_quakes()
 	_calm()
+	await _deep_things()
+	_calm()
 	_layers()
 	await _sonar_and_worm()
 	_calm()
@@ -224,7 +226,7 @@ func _heat() -> void:
 ## Layers are generated from noise: count the rock types in bands at different depths.
 func _layers() -> void:
 	var counts := {}
-	for band: float in [200.0, 460.0]:
+	for band: float in [200.0, 350.0, 460.0]:
 		var c := {}
 		for i in 400:
 			var px := randf_range(40.0, World.WIDTH_PX - 40.0)
@@ -233,6 +235,12 @@ func _layers() -> void:
 		counts[band] = c
 	_check("crystal caverns around 200 m", counts[200.0].get(World.M.CRYSTAL, 0) > 200, str(counts[200.0]))
 	_check("magma layer around 460 m", counts[460.0].get(World.M.MAGMA, 0) > 200, str(counts[460.0]))
+	_check("the ice layer around 350 m", counts[350.0].get(World.M.ICE, 0) > 200, str(counts[350.0]))
+	var fungal := 0
+	for i in 200:
+		var px := randf_range(40.0, World.WIDTH_PX - 40.0)
+		fungal += int(w.gen.fungal(px, 100.0 * World.METER, 100.0))
+	_check("fungal caves around 100 m", fungal > 150, "%d / 200" % fungal)
 
 
 func _sonar_and_worm() -> void:
@@ -772,6 +780,90 @@ func _jobs_and_quakes() -> void:
 		blocked += int(not w.is_air(shaft + Vector2(0, dy)))
 	_check("and caves in the shaft above the drill", blocked > 0)
 	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(10)
+
+
+## Deeper things: ice underfoot, ruins with relics, a mite swarm, a borer breaking in, and the
+## Broodmother.
+func _deep_things() -> void:
+	var d: Drill = main.drill
+	# ice is slippery: you slide further when you let go
+	var slide := {}
+	for mat in [World.M.STONE, World.M.ICE]:
+		_arena(40)
+		for gy in range(40, 42):
+			for gx in range(30, 98):
+				var ch: World.Chunk = w.chunks.get(Vector2i(gx >> 5, gy >> 5))
+				ch.mat[(gy & 31) * World.C + (gx & 31)] = mat
+		p.global_position = Vector2(300, 40 * World.CELL - Player.HALF_HEIGHT - 1)
+		p.velocity = Vector2.ZERO
+		await _frames(10)
+		await _hold(["right"], 0.6)
+		var x0 := p.global_position.x
+		await _frames(40)
+		slide[mat] = p.global_position.x - x0
+	_check("ice is slippery", slide[World.M.ICE] > slide[World.M.STONE] + 8.0, str(slide))
+	# ruins
+	w.ensure_generated(int(575 * World.METER))
+	var relics := get_tree().get_nodes_in_group("net").filter(func(n): return n is CampItems.Relic)
+	_check("ancient halls with relics deep down", relics.size() > 0, "%d relics" % relics.size())
+	if relics.size() > 0:
+		var money := p.ore_value
+		relics[0].interact(p)
+		_check("a relic is worth a lot", p.ore_value >= money + 30)
+		p.lose_bag()
+	# mites
+	_arena(40)
+	p.global_position = Vector2(300, 40 * World.CELL - Player.HALF_HEIGHT - 1)
+	p.heal_full()
+	await _frames(10)
+	var mites := []
+	for i in 3:
+		var m := Mite.new()
+		m.world = w
+		m.glow_parent = main.glow_layer
+		m.position = p.global_position + Vector2(90 + i * 8, 10)
+		main.add_child(m)
+		mites.append(m)
+	await get_tree().create_timer(2.5).timeout
+	_check("a mite swarm bites", p.health < p.max_health, "hp %d" % p.health)
+	mites[0].hit(1, p.global_position)
+	_check("one hit kills a mite", mites[0].state == Mite.State.DEAD)
+	for m in mites:
+		if is_instance_valid(m):
+			m.queue_free()
+	# a borer tunnels to the drill and breaks in
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	p.heal_full()
+	for b in d.get_breaches():
+		d.repair(b)
+	await _frames(3)
+	var bo: Borer = main.spawner.spawn_borer()
+	bo.global_position = d.global_position + Vector2(Drill.HW + 70.0, 20.0)
+	for i in 60 * 10:
+		await get_tree().physics_frame
+		if bo.state == Borer.State.INSIDE:
+			break
+	_check("a borer chews through the hull and gets in", bo.state == Borer.State.INSIDE and d.get_breaches().size() > 0,
+		"state %d" % bo.state)
+	bo.hit(99, p.global_position)
+	_check("and dies to the pick", bo.state == Borer.State.DEAD)
+	for b in d.get_breaches():
+		d.repair(b)
+	# the Broodmother
+	var bm: Broodmother = main.spawner.spawn_brood()
+	_check("the Broodmother's lair opens below the drill", bm != null and w.is_air(bm.global_position + Vector2(0, -40)))
+	p.global_position = bm.global_position + Vector2(-150, -30)
+	await _frames(20)
+	_check("she wakes when someone comes near", bm.is_awake())
+	var money := Progress.money
+	bm.hit(Broodmother.HP, p.global_position)
+	await _frames(5)
+	_check("killing her pays the crew", bm.state == Broodmother.State.DEAD and Progress.money >= money + Broodmother.REWARD)
+	for m in get_tree().get_nodes_in_group("mite"):
+		m.queue_free()
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	p.heal_full()
 	await _frames(10)
 
 

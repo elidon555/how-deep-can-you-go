@@ -1,5 +1,6 @@
 class_name CampItems
-## Things in ruined camps you can use (E): crates to search and notes to read.
+## Things in ruined camps (and the ancient halls) you can use (E): crates to search, notes to
+## read, relics to take.
 
 
 ## An old supply crate: search it once for whatever the last crew left (ore, coal, flares).
@@ -90,3 +91,39 @@ class Note extends Station:
 		# a faint glint so it can be spotted in the dark (a colour pulse, nothing moves)
 		var a := 0.35 + 0.35 * sin(_bob * 3.0)
 		draw_rect(Rect2(-1, -_tex.get_height() - 1, 2, 2), Color(1.6, 1.4, 1.0, a))
+
+
+## A relic in an ancient hall (Ruins): a glowing carved thing. Take it (E): it's worth a lot.
+class Relic extends Station:
+	var value := 40
+	var puppet := false        # online client: the host's relic
+	var _t := randf() * 10.0
+
+	func _ready() -> void:
+		super._ready()
+		add_to_group("net")
+
+	func net_state() -> Array:
+		return [value]
+
+	func net_apply(s: Array) -> void:
+		value = s[0]
+
+	func prompt(_p: Player) -> String:
+		return "E: take the relic ($%d)" % value
+
+	func interact(p: Player) -> void:
+		p.add_value(value)
+		Sfx.play("pickup", global_position)
+		get_tree().call_group("hud", "toast", "A relic! Worth $%d at the workbench" % value, 2.0)
+		queue_free()
+
+	func _process(dt: float) -> void:
+		_t += dt
+		queue_redraw()
+
+	func _draw() -> void:
+		draw_rect(Rect2(-5, -4, 10, 4), Color("2a2a36"))                 # its plinth
+		var k := 0.8 + 0.2 * sin(_t * 2.0)
+		draw_circle(Vector2(0, -9), 4.0, Color(0.4 * k, 1.8 * k, 1.6 * k))
+		draw_circle(Vector2(0, -9), 2.0, Color(2.0, 2.4, 2.2))

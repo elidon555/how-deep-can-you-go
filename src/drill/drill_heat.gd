@@ -7,7 +7,7 @@ class_name DrillHeat
 
 const MAX := 100.0
 const RESUME := 65.0           # an overheated drill restarts once it's back under this
-const FROM_CUTTING := [0.6, 1.2, 2.2, 0.0, 2.0, 6.0]   # per second, by World.M rock
+const FROM_CUTTING := [0.6, 1.2, 2.2, 0.0, 2.0, 6.0, 0.0, -1.5]   # per second, by World.M rock (ice cools)
 const COOLING := 1.6           # per second, toward the ambient heat
 const OVERHEAT_DAMAGE := 1.5   # hull per second while overheated
 const VENT := 45.0             # what one coolant flush takes off

@@ -7,6 +7,7 @@ render_mode unshaded, blend_add;
 uniform sampler2D g_crystal : filter_nearest, repeat_enable;
 uniform sampler2D g_magma : filter_nearest, repeat_enable;
 uniform sampler2D g_floor : filter_nearest, repeat_enable;
+uniform sampler2D g_ice : filter_nearest, repeat_enable;
 
 void fragment() {
 	vec2 local = floor(UV * cells * cell_px) + 0.5;
@@ -23,6 +24,8 @@ void fragment() {
 			g = texture(g_magma, tuv) * vec4(2.2, 1.2, 0.5, 1.0) * pulse;
 		} else if (mat == 6) {          // the Floor's glyphs breathe slowly
 			g = texture(g_floor, tuv) * vec4(1.3, 1.2, 2.0, 1.0) * (0.6 + 0.4 * sin(TIME * 0.8 + wp.x * 0.01));
+		} else if (mat == 7) {          // a faint cold light inside the ice
+			g = texture(g_ice, tuv) * vec4(0.6, 1.0, 1.4, 1.0) * 0.7;
 		}
 		COLOR = vec4(g.rgb * g.a * (1.0 - s.g * 0.6), 1.0);   // dimmer deep inside the rock
 	}

@@ -7,13 +7,20 @@ class_name Backdrop
 # fog colours per depth zone (m): backdrop, far, mid, near
 const ZONES := [
 	[0.0, Color("0e252b"), Color("2b616b"), Color("1b444c"), Color("0f2b32")],     # teal caves
-	[150.0, Color("17112a"), Color("4a3870"), Color("33264f"), Color("1d1530")],   # purple deep
-	[400.0, Color("1c0a08"), Color("5c2418"), Color("3d1810"), Color("200c08")],   # red, near the mantle
+	[55.0, Color("082220"), Color("1f6a5e"), Color("164a44"), Color("0b2a26")],    # the fungal caves
+	[140.0, Color("082220"), Color("1f6a5e"), Color("164a44"), Color("0b2a26")],
+	[155.0, Color("17112a"), Color("4a3870"), Color("33264f"), Color("1d1530")],   # purple deep (crystal)
+	[300.0, Color("0e1a28"), Color("4a7aa0"), Color("2e5070"), Color("142438")],   # the ice
+	[390.0, Color("0e1a28"), Color("4a7aa0"), Color("2e5070"), Color("142438")],
+	[420.0, Color("1c0a08"), Color("5c2418"), Color("3d1810"), Color("200c08")],   # red, near the mantle
 ]
 const SKY := [["hills_far", 0.08, 0.3, Color("3b4652")], ["hills_near", 0.2, 0.5, Color("2a333c")],
 	["forest", 0.35, 0.7, Color("181d23")]]
 const CAVE := [["cave_far", 0.15], ["cave_mid", 0.35], ["cave_near", 0.6]]
-const DEEP_FAR_FROM := 350.0   # m: the far layer becomes the vast deep cavern
+const DEEP_FAR_FROM := 400.0   # m: the far layer becomes the vast deep cavern
+# far layers of their own for the fungal caves and the ice (m from, m to, texture)
+const LAYER_FAR := [[World.FUNGAL_FROM, World.FUNGAL_TO, "res://assets/bg/cave_far_fungal.png"],
+	[World.CRYSTAL_TO, World.MAGMA_FROM, "res://assets/bg/cave_far_ice.png"]]
 const BOTTOM_FAR_FROM := World.CAVERN_FROM - 15.0   # and then the carved void above the Floor
 
 var wall := ColorRect.new()
@@ -24,6 +31,7 @@ var _cave_clip := Control.new()
 var _sky := []    # [TextureRect, horizontal scroll, vertical scroll, tint]
 var _cave := []   # [TextureRect, scroll, zone colour index]
 var _far_tex: Texture2D
+var _layer_far := []         # [from, to, Texture2D]
 var _far_deep_tex: Texture2D
 var _far_bottom_tex: Texture2D
 
@@ -60,6 +68,9 @@ func _ready() -> void:
 	_far_tex = _cave[0][0].texture
 	var deep := "res://assets/bg/cave_far_deep.png"
 	_far_deep_tex = load(deep) if ResourceLoader.exists(deep) else _far_tex
+	for l in LAYER_FAR:
+		if ResourceLoader.exists(l[2]):
+			_layer_far.append([l[0], l[1], load(l[2])])
 	var bottom := "res://assets/bg/cave_far_bottom.png"
 	_far_bottom_tex = load(bottom) if ResourceLoader.exists(bottom) else _far_deep_tex
 
@@ -80,6 +91,9 @@ func follow(cam: Camera2D, depth_m: float) -> void:
 		_cave[0][0].texture = _far_bottom_tex
 	else:
 		_cave[0][0].texture = _far_deep_tex if depth_m > DEEP_FAR_FROM else _far_tex
+		for l in _layer_far:
+			if depth_m >= l[0] and depth_m < l[1]:
+				_cave[0][0].texture = l[2]
 	_fill.color = Color("4a5663").lerp(zc[0], clampf(depth_m / 6.0, 0.0, 1.0))
 	for L in _sky:
 		var t: TextureRect = L[0]
