@@ -21,6 +21,7 @@ var money := 0
 var best := 0
 var levels := {}   # upgrade id -> level bought
 var found_notes: Array = []   # Lore.NOTES ids you've read, ever
+var beaten := false           # the Floor has been opened at least once
 var dry_run := false   # tests: keep everything in memory
 
 
@@ -51,6 +52,11 @@ func buy(id: String) -> bool:
 
 func can_afford(price: int) -> bool:
 	return GameConfig.infinite_resources() or money >= price
+
+
+func beat_the_game() -> void:
+	beaten = true
+	save()
 
 
 func find_note(id: int) -> void:
@@ -113,7 +119,8 @@ func save() -> void:
 		return
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels, "notes": found_notes}))
+		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels, "notes": found_notes,
+			"beaten": beaten}))
 	changed.emit()
 
 
@@ -127,5 +134,6 @@ func _load() -> void:
 				levels[k] = int(d.levels[k])
 			for n in d.get("notes", []):
 				found_notes.append(int(n))
+			beaten = bool(d.get("beaten", false))
 	elif FileAccess.file_exists(OLD_BEST_PATH):
 		best = int(FileAccess.get_file_as_string(OLD_BEST_PATH))

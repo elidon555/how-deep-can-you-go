@@ -6,6 +6,7 @@ class_name DrillCutter
 ## in front gives way, free-falls when it breaks into a cave, and crashes if it falls far.
 
 signal chewed(points: Array, mat: int)   # rock that just broke off (for debris)
+signal knocked(pos: Vector2)             # the cutters hit the Floor, which nothing can cut
 
 const DESCENT := [0.0, 0.35, 0.9]      # m/s it sinks at when the rock in front gives way
 const HEAD_POWER := [0.0, 0.5, 1.0]
@@ -29,6 +30,7 @@ var _bite_power := 0.0         # cutting power saved up until the next bite
 var _bite_clock := 0.0
 var _bite_t := 0.0             # keeps "drilling" steady between bites
 var _fall_v := 0.0
+var _knock_t := 0.0
 
 
 ## Digs the pit the drill starts in, shaped to its head.
@@ -58,6 +60,13 @@ func update(dt: float, running: bool) -> void:
 				judder = Vector2(randf_range(-1, 1), randf_range(0, 1)).round()
 				chewed.emit(bite.points, bite.mat)
 	drilling = running and _bite_t > 0.0
+	_knock_t -= dt
+	if running and _knock_t <= 0.0 and free_below_face(3.0) < 1.0:
+		var tip := drill.global_position + Vector2(0, 110)
+		if drill.world.mat_at(tip) == World.M.FLOOR:
+			_knock_t = 2.0
+			Sfx.play("knock", tip, 4.0)
+			knocked.emit(tip)
 	moving = false
 	if not _fall(dt):
 		_sink(dt, running)

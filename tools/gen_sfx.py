@@ -4,7 +4,7 @@
 Pure numpy (scipy.signal.lfilter is used only to speed up filtering if installed).
 Fixed seeds, so every run writes identical files. One-shots get a short fade in/out
 and are peak-normalized to -3 dBFS. Loops (amb_*, drill_loop, drill_idle, turret_turn,
-worm_burrow, bat_flap, lava_bubble, music_*, gas_hiss, water_leak, pump) are built periodic: every sine, LFO and
+worm_burrow, bat_flap, lava_bubble, music_* except music_ending, gas_hiss, water_leak, pump, vein_pulse) are built periodic: every sine, LFO and
 noise spectrum has a whole number of cycles per loop, events near the end wrap round
 to the start, and reverb runs in steady state, so they loop seamlessly. Each loop is
 normalized to its own quieter peak (see the finish_loop() call in its function).
@@ -1124,9 +1124,10 @@ def ui_close(v=0):
 MUSIC_LOOP = 32.0  # seconds
 
 
-def bell(f, decay=4.0):
-    """Distant church-ish bell (hum, prime, minor tierce, quint, nominal, ...) as a 12 s strike."""
-    ratios = np.array([0.5, 1.0, 1.2, 1.5, 2.0, 2.74])
+def bell(f, decay=4.0, tierce=1.2):
+    """Distant church-ish bell (hum, prime, tierce, quint, nominal, ...) as a 12 s strike.
+    tierce=1.2 gives the usual dark minor-third bell, 1.25 a brighter major one."""
+    ratios = np.array([0.5, 1.0, tierce, 1.5, 2.0, 2.74])
     decays = decay * np.array([1.2, 1.0, 0.7, 0.5, 0.4, 0.2])
     return modes(secs(12), f * ratios, decays, [0.4, 1.0, 0.5, 0.3, 0.45, 0.2])
 
@@ -1273,6 +1274,192 @@ def air_bubbles(v=0):
     return finish(biquad(unit(x) + 0.5 * glug, "lp", 2500), fade_out=0.1)    # muffled: underwater
 
 
+# ----------------------------------------------------------------------------- the eye (final boss)
+
+def eye_open(v=0):
+    rng = np.random.default_rng(8000 + v)
+    n = secs(2.5)
+    t = times(n)
+    swell = np.sin(np.pi * np.clip(t / 2.5, 0, 1) ** 1.6) ** 2          # peaks around 1.6 s
+    deep = unit(biquad(biquad(noise(n, rng), "lp", 60), "lp", 60))
+    pressure = (osc(glide(30, 40, n, 2.0)) + 0.8 * deep) * swell
+    clicks, tc = np.zeros(n), 0.2                                      # the lid grinding open
+    while tc < 2.2:
+        clicks[secs(tc)] += rng.uniform(0.4, 1.0)
+        tc += 1 / ((15 + 30 * (tc - 0.2) / 2.0) * rng.uniform(0.6, 1.4))
+    slide = 1 + 0.3 * t / 2.5
+    creak = formants(clicks, [(180 * slide, 6, 1.0), (420 * slide, 8, 0.6), (900, 8, 0.3)])
+    f0 = np.interp(t, [0, 1.2, 2.5], [26, 34, 28]) * (1 + 0.08 * wobble(n, rng, 3))
+    groan = np.tanh(2 * worm_voice(f0, rng)) * np.clip(t / 0.5, 0, 1) * np.clip((2.5 - t) / 0.6, 0, 1)
+    wet = svf(biquad(noise(n, rng), "lp", 1500) * rough(n, rng, 12) ** 2, 300 + 200 * wobble(n, rng, 3), q=3)
+    blub = unit(bubbles(n, rng, 10, 0.3, 2.2, 80, 220))
+    grit = unit(grains(n, rng, 80, 0.2, 2.3, 300, 2500, decay=1e9, skew=1.0)) * swell
+    x = 0.9 * pressure + 0.5 * unit(creak) + 0.6 * groan + 0.35 * unit(wet) + 0.25 * blub + 0.2 * grit
+    return finish(reverb(biquad(x, "lp", 1800), size=2.5, fb=0.75, mix=0.3, damp=1000), fade_out=0.3)
+
+
+def eye_hurt(v=0):
+    rng = np.random.default_rng(8100 + v)
+    n = secs(1.0)
+    t = times(n)
+    f0 = np.interp(t, [0, 0.12, 0.5, 1.0], [90, 165, 120, 70]) * (1 + 0.08 * v)
+    f0 = f0 * (1 + 0.03 * np.sin(TAU * 9 * t) + 0.03 * wobble(n, rng, 60))
+    src = sum(a * harmonic(f0 * r, tilt=0.7, fmax=6000) for r, a in [(1.0, 1.0), (1.03, 0.7), (0.5, 0.6)])  # inhuman chorus
+    voice = formants(src, [(650 * (1 + 0.2 * wobble(n, rng, 4)), 4, 1.0),
+                           (1400 * (1 + 0.1 * wobble(n, rng, 4)), 5, 0.7), (2700, 6, 0.4)]) + 0.2 * unit(src)
+    shriek = np.tanh(3 * unit(voice)) * np.clip(t / 0.03, 0, 1) * np.exp(-np.maximum(t - 0.35, 0) / 0.25)
+    grind_amp = np.clip(t / 0.05, 0, 1) * np.exp(-t / 0.4)
+    grind = unit(biquad(noise(n, rng) * rough(n, rng, 20) * grind_amp, "bp", 700, 0.8))
+    gravel = unit(grains(n, rng, 50, 0.0, 0.8, 300, 3000, decay=0.4))
+    x = shriek + 0.3 * grind + 0.2 * gravel
+    return finish(reverb(x, size=2.0, fb=0.7, mix=0.3, damp=3000), fade_out=0.15)
+
+
+def eye_die(v=0):
+    rng = np.random.default_rng(8200 + v)
+    n, boom_t = secs(5.0), 3.2
+    t = times(n)
+    f0 = 80 * (20 / 80) ** np.clip(t / 4.0, 0, 1) * (1 + 0.06 * wobble(n, rng, 3) + 0.02 * wobble(n, rng, 40))
+    moan = np.tanh(2 * worm_voice(f0, rng, fmax=3000)) * np.clip(t / 0.3, 0, 1) * np.exp(-np.maximum(t - 2.0, 0) / 0.8)
+    cracks = sum(burst(n, rng, 0.0003, 0.01, "hp", 1800, delay=tc) + 0.6 * burst(n, rng, 0.001, 0.05, "bp", 900, 0.8, delay=tc)
+                 for tc in [0.8, 1.5, 2.1, 2.6])                       # the floor giving way
+    debris = unit(grains(n, rng, 200, 1.0, 4.2, 300, 4000, decay=1.2))
+    m = n - secs(boom_t)
+    boom = place(n, boom_t, osc(glide(60, 28, m, 0.5)) * env(m, 0.005, 0.6))
+    boom += 0.6 * burst(n, rng, 0.003, 0.4, "lp", 200, delay=boom_t)
+    hollow = unit(modes(n, [55, 92, 141, 210, 330], [1.5, 1.2, 0.9, 0.6, 0.4], [1.0, 0.7, 0.5, 0.35, 0.2], delay=boom_t))
+    ring = modes(n, [880, 1320], [1.5, 1.2], [1.0, 0.6], delay=boom_t) + 0.6 * osc(3150, n) * np.clip((t - 3.4) / 0.5, 0, 1)
+    x = 0.8 * moan + 0.5 * unit(cracks) + 0.3 * debris + np.tanh(1.5 * unit(boom)) + 0.5 * hollow + 0.04 * unit(ring)
+    return finish(reverb(x, size=3.0, fb=0.8, mix=0.35, damp=1500), fade_out=0.8)
+
+
+def vein_pulse(v=0):
+    rng = np.random.default_rng(8300 + v)
+    T = 1.6
+    n, m = secs(T), secs(0.5)
+    buf = np.zeros(2 * n)
+    for t0, a in [(0.1, 1.0), (0.38, 0.7)]:                            # lub ... dub
+        thump = osc(glide(70, 38, m, 0.06)) * env(m, 0.003, 0.08)
+        body = burst(m, rng, 0.003, 0.05, "lp", 220)
+        squish = unit(svf(noise(m, rng) * env(m, 0.005, 0.04), glide(200, 700, m, 0.08), q=3))
+        buf += a * place(2 * n, t0, thump + 0.5 * body + 0.25 * squish)
+    gurgle = loop_noise(n, rng, band(150, 0.5)) * loop_rough(n, rng, 5)
+    return finish_loop(fold(buf, n) + 0.08 * gurgle, -14.0)
+
+
+def vein_burst(v=0):
+    rng = np.random.default_rng(8400 + v)
+    n = secs(0.8)
+    t = times(n)
+    wet = biquad(noise(n, rng), "lp", 2500) * env(n, 0.002, 0.08)
+    squelch = unit(svf(wet, np.interp(t, [0, 0.05, 0.25], [300, 1800, 250]), q=3))
+    splat = burst(n, rng, 0.002, 0.05, "lp", 600)
+    thump = osc(glide(100, 45, n, 0.05)) * env(n, 0.002, 0.06)
+    blub = unit(bubbles(n, rng, 8, 0.02, 0.3, 150, 500))
+    crack = burst(n, rng, 0.0003, 0.004, "hp", 3000, delay=0.01)          # the crystal core
+    shards = unit(pings(n, rng, 25, 0.01, 0.4, 3000, 10000, decay=(0.01, 0.05), fade=0.15, skew=1.5))
+    chime = unit(modes(n, [2200, 3333, 5900], [0.25, 0.15, 0.08], [1.0, 0.5, 0.3], delay=0.01))
+    x = 0.8 * squelch + 0.5 * splat + 0.6 * thump + 0.3 * blub + 0.5 * crack + 0.4 * shards + 0.2 * chime
+    return finish(reverb(x, size=1.3, fb=0.65, mix=0.2), fade_out=0.1)
+
+
+def knock(v=0):
+    rng = np.random.default_rng(8500 + v)
+    n = secs(1.5)
+    f = 62 * np.array([1, 1.62, 2.31, 2.98, 3.7, 4.53]) * (1 + rng.uniform(-0.01, 0.01, 6))
+    decays, amps = [1.2, 0.9, 0.7, 0.5, 0.35, 0.25], np.array([1.0, 0.8, 0.6, 0.45, 0.3, 0.2])
+    bong = unit(modes(n, f, decays, amps) + modes(n, f * 1.003 + 0.3, decays, 0.5 * amps))  # vast stone slab
+    thump = osc(glide(120, 55, n, 0.06)) * env(n, 0.002, 0.08)
+    impact = burst(n, rng, 0.0005, 0.01, "lp", 2000)
+    head = unit(modes(n, [900, 1500, 2400], [0.05, 0.03, 0.02], [1.0, 0.6, 0.3]))       # the drill head
+    x = np.tanh(1.4 * (bong + 0.8 * thump + 0.5 * impact)) + 0.15 * head
+    return finish(reverb(x, size=3.0, fb=0.75, mix=0.4, damp=1500), fade_out=0.3)
+
+
+# ----------------------------------------------------------------------------- boss / ending music
+
+def add_at(buf, i, x):
+    """Mix x into buf starting at sample i (buf must be long enough)."""
+    buf[i:i + len(x)] += x
+
+
+def music_boss(v=0):
+    rng = np.random.default_rng(8600 + v)
+    beat = 24000                     # samples per beat (110.25 bpm), so every event lands exactly
+    eighth = beat // 2
+    n = 64 * beat                    # 16 bars of 4/4, ~34.8 s
+    E, F, As = 41.20, 43.65, 58.27   # E1, F1, A#1: a semitone grind and a tritone
+    roots = [E] * 4 + [F] * 4 + [E] * 4 + [As] * 2 + [F] * 2
+    chords = {E: [164.81, 174.61, 246.94], F: [174.61, 185.0, 261.63], As: [116.54, 123.47, 164.81]}
+    m = secs(0.3)
+    pulse = {f: unit(biquad(harmonic(np.full(m, f), 1.0, 2500) * env(m, 0.003, 0.12), "lp", 700))
+             for f in set(roots) | {2 * r for r in roots}}
+    ms = secs(0.45)
+    tm = times(ms)
+    stab = {}
+    for root, chord in chords.items():                                 # brassy detuned-saw stabs
+        src = sum(harmonic(np.full(ms, f * d), 1.0, 6000) for f in chord for d in (0.996, 1.004))
+        stab[root] = np.tanh(1.5 * unit(svf(src, 300 + 2200 * np.exp(-tm / 0.08), q=1.2, mode="lp") * env(ms, 0.012, 0.15)))
+    mh = secs(0.4)
+    lub = osc(glide(60, 35, mh, 0.06)) * env(mh, 0.003, 0.07)
+    heart = lub + 0.7 * np.concatenate([np.zeros(secs(0.22)), lub])[:mh]
+    tick = burst(secs(0.03), rng, 0.0003, 0.004, "hp", 6000)
+    low, hits, ticks = np.zeros(2 * n), np.zeros(2 * n), np.zeros(2 * n)
+    for bar, root in enumerate(roots):
+        b0 = bar * 4 * beat
+        for k in range(8):                                             # driving eighths, octave on the offbeat
+            note = pulse[root] if k % 2 == 0 else 0.6 * pulse[2 * root]
+            add_at(low, b0 + k * eighth, (1.0 if k in (0, 4) else 0.6) * note)
+        steps = 8 if bar < 8 else 16                                   # hats double up halfway
+        for k in range(steps):
+            add_at(ticks, b0 + k * (4 * beat // steps), (0.5 if k % 2 else 0.3) * rng.uniform(0.8, 1.0) * tick)
+        if bar % 2 == 0 or bar >= 12:
+            add_at(hits, b0, stab[root])
+            add_at(hits, b0 + int(2.5 * beat), 0.7 * stab[root])
+    for b in range(0, 64, 2):
+        add_at(low, b * beat, 0.8 * heart)
+    stabs = periodic(fold(hits, n), lambda x: reverb(x, size=1.5, fb=0.7, mix=0.5, damp=3000))
+    start = 48 * beat                                                  # last 4 bars: riser into the loop point
+    L = n - start
+    pr = np.arange(L) / L
+    cut = np.clip((L - 1 - np.arange(L)) / secs(0.02), 0, 1)
+    riser = unit(svf(noise(L, rng) * pr ** 2, 400 * 10 ** pr, q=2.0))
+    tr = times(L)
+    cluster = (osc(329.63 * (1 + 0.06 * pr)) + osc(349.23 * (1 + 0.06 * pr))) * (0.6 + 0.4 * np.sin(TAU * 8 * tr)) * pr ** 1.5
+    tension = np.zeros(n)
+    add_at(tension, start, (0.25 * riser + 0.1 * cluster) * cut)
+    x = fold(low, n) + 0.5 * stabs + 0.15 * fold(ticks, n) + tension
+    return finish_loop(x, -12.0)
+
+
+def music_ending(v=0):
+    rng = np.random.default_rng(8700 + v)
+    n = secs(40.0)
+    t = times(n)
+    swell = np.clip(t / 6, 0, 1) * (0.6 + 0.4 * np.clip((t - 14) / 10, 0, 1))
+    minor = np.clip((16 - t) / 4, 0, 1)                               # C3 fades out...
+    major = np.clip((t - 16) / 8, 0, 1)                                # ...C#3 fades in: the turn to hope
+    drone = (osc(55.0, n) * (0.8 + 0.2 * np.sin(TAU * t / 9)) + 0.5 * osc(82.41, n) + 0.25 * osc(110.0, n)
+             + 0.2 * minor * osc(130.81, n) + 0.25 * major * osc(138.59, n)) * swell
+    pad = np.zeros(n)
+    for start, end, chord in [(12.0, 22.0, [146.83, 185.0, 220.0]),             # D major
+                              (19.0, 40.0, [110.0, 138.59, 164.81, 220.0])]:      # A major
+        m = secs(end - start)
+        tm = times(m)
+        src = sum(harmonic(np.full(m, f * d), 1.2, 1500) for f in chord for d in (0.997, 1.003))
+        pad += place(n, start, biquad(src, "lp", 900) * np.clip(tm / 3, 0, 1) * np.clip((end - start - tm) / 4, 0, 1))
+    bells = np.zeros(n)
+    for t0, f, a, tierce in [(2.0, 440.0, 0.8, 1.2), (6.5, 523.25, 0.7, 1.2), (10.5, 659.25, 0.6, 1.2),
+                             (14.5, 587.33, 0.6, 1.2),                              # the title motif, minor
+                             (19.0, 440.0, 0.9, 1.25), (22.0, 554.37, 0.8, 1.25), (25.0, 659.25, 0.8, 1.25),
+                             (28.5, 587.33, 0.7, 1.25), (31.5, 493.88, 0.7, 1.25), (34.5, 440.0, 0.9, 1.25),
+                             (37.0, 880.0, 0.4, 1.25)]:                             # ...answered in A major
+        bells += a * place(n, t0, bell(f, tierce=tierce))
+    bells = reverb(biquad(bells, "lp", 2500), size=3.0, fb=0.8, mix=0.8, damp=2500)
+    x = unit(drone) + 0.35 * unit(pad) + 0.45 * unit(bells)
+    return finish(x, peak_db=-12.0, fade_in=1.0, fade_out=6.0)
+
+
 # ----------------------------------------------------------------------------- table / main
 
 def variants(name, fn, count):
@@ -1343,6 +1530,14 @@ SOUNDS = {
     "pump": pump,
     **variants("splash", splash, 2),
     "bubbles": air_bubbles,
+    "eye_open": eye_open,
+    **variants("eye_hurt", eye_hurt, 2),
+    "eye_die": eye_die,
+    "vein_pulse": vein_pulse,
+    "vein_burst": vein_burst,
+    "knock": knock,
+    "music_boss": music_boss,
+    "music_ending": music_ending,
 }
 
 

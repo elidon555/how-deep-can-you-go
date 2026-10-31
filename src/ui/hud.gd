@@ -26,6 +26,7 @@ var _prompt := Label.new()
 var _help := Label.new()
 var _hearts := Hearts.new()
 var _breath := Breath.new()
+var _boss := BossBar.new()
 var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
@@ -51,6 +52,8 @@ func _ready() -> void:
 	add_child(_hearts)
 	_breath.position = Vector2(30, 248)
 	add_child(_breath)
+	_boss.position = Vector2(340, 640)
+	add_child(_boss)
 	_label(_ore, Vector2(28, 150), 24, GOLD)
 	_label(_money, Vector2(28, 180), 24, Color("9fd88a"))
 	_label(_ropes, Vector2(28, 210), 24, Color("d9b98a"))
@@ -88,6 +91,13 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.health = health
 	_hearts.max_health = max_health
 	_hearts.queue_redraw()
+
+
+## A boss health bar at the bottom of the screen; name "" hides it.
+func set_boss(name: String, frac: float) -> void:
+	_boss.boss = name
+	_boss.frac = frac
+	_boss.queue_redraw()
 
 
 func set_breath(left: float) -> void:
@@ -177,6 +187,20 @@ class DrillPanel extends Control:
 		var bad := frac > 0.8 if high_is_bad else frac <= 0.25
 		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206 * clampf(frac, 0.0, 1.0), 14)),
 			Color("ff3a2a") if bad and fmod(Time.get_ticks_msec() / 1000.0, 0.5) < 0.25 else (c if not bad else Color("d04a3f")))
+
+
+class BossBar extends Control:
+	var boss := ""
+	var frac := 1.0
+
+	func _draw() -> void:
+		if boss == "":
+			return
+		var font := get_theme_default_font()
+		draw_string(font, Vector2(0, -8), boss, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("e0b8ff"))
+		draw_rect(Rect2(0, 0, 600, 16), Color(0.08, 0.04, 0.1, 0.85))
+		draw_rect(Rect2(0, 0, 600 * clampf(frac, 0.0, 1.0), 16), Color("a040d0"))
+		draw_rect(Rect2(0, 0, 600, 16), Color("e0b8ff"), false, 1.5)
 
 
 ## Air bubbles while underwater: they pop one by one; hidden when your breath is full.

@@ -1,0 +1,32 @@
+{
+ "cell_w": 160,
+ "cell_h": 96,
+ "columns": 6,
+ "anims": {
+  "closed": {
+   "row": 0,
+   "frames": 2
+  },
+  "opening": {
+   "row": 1,
+   "frames": 6
+  },
+  "open_look": {
+   "row": 2,
+   "frames": 5
+  },
+  "hurt": {
+   "row": 3,
+   "frames": 2
+  },
+  "dying": {
+   "row": 4,
+   "frames": 6
+  },
+  "blink": {
+   "row": 5,
+   "frames": 3
+  }
+ },
+ "anchor": "bottom-centre of the cell = the floor surface line under the eye's centre; the eye bulges ~75 px up"
+}

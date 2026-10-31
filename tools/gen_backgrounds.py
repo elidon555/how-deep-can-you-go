@@ -506,6 +506,89 @@ def cave_far_deep(name, S, rng):
     print("wrote", name, f"{m.mean():.0%} solid")
 
 
+def over_va(v_top, a_top, v_bot, a_bot):
+    """Composite one value+alpha layer over another."""
+    a = a_top + a_bot * (1 - a_top)
+    v = np.where(a > 0, (v_top * a_top + v_bot * a_bot * (1 - a_top)) / np.maximum(a, 1e-6), 1.0)
+    return v, a
+
+
+def cave_far_bottom(name, S, rng):
+    """The bottom of the world: a colossal cathedral-like void above the Floor. Enormous carved
+    pillars on stepped plinths fade up into darkness, a faint ring structure on the far wall,
+    dust shafts falling through. Value only (tinted per zone)."""
+    yy, xx = np.mgrid[0:S, 0:S].astype(float)
+    floor_y = 470
+    # far wall: a huge faint ring structure (concentric bands, segmented by spokes)
+    rc_x, rc_y = 250.0, 250.0
+    dx = (xx - rc_x + S / 2) % S - S / 2
+    dy = (yy - rc_y + S / 2) % S - S / 2
+    r = np.hypot(dx, dy)
+    ang = np.degrees(np.arctan2(dy, dx)) % 360
+    ring = np.zeros((S, S))
+    for r0, w, a in ((196, 5, 0.3), (178, 2, 0.22), (150, 4, 0.28), (112, 2, 0.2), (84, 3, 0.17)):
+        ring = np.maximum(ring, np.where(np.abs(r - r0) <= w / 2, a, 0))
+    spokes = (r > 152) & (r < 176) & ((ang % 10) < 1.4)
+    ring = np.maximum(ring, np.where(spokes, 0.16, 0))
+    glyph_band = (r > 114) & (r < 148) & ((ang % 7.5) < 2.5) & (np.abs(r - 131) < 6) & ((ang // 7.5) % 3 != 0)
+    ring = np.maximum(ring, np.where(glyph_band, 0.1, 0))
+    ring *= np.clip((yy - 40) / 260, 0, 1) ** 0.7        # fades into darkness towards the top
+    ring = np.where(yy < floor_y, ring, 0)
+    v, a = np.full((S, S), 0.95), ring
+    # dust shafts: soft slanted beams from above with motes in them
+    shafts = np.zeros((S, S))
+    for sx, w, slope, amp in ((90, 16, 0.18, 0.13), (300, 26, 0.22, 0.16), (420, 10, 0.16, 0.1)):
+        cx = sx + yy * slope
+        d = np.abs(((xx - cx) + S / 2) % S - S / 2)
+        beam = np.clip(1 - d / w, 0, 1) ** 1.5 * amp * np.clip(1 - yy / floor_y, 0, 1) ** 0.6
+        shafts = np.maximum(shafts, beam)
+        motes = (d < w * 0.8) & (rng.random((S, S)) < 0.004) & (yy < floor_y - 10)
+        shafts = np.where(motes, 0.45, shafts)
+    v, a = over_va(np.ones((S, S)), steps(shafts, 24), v, a)
+    # enormous pillars: plinth steps, fluted shaft, carved bands, fading upward
+    pil = Canvas(S, S)
+    detail = np.zeros((S, S))                    # -1 dark groove, +1 lit edge
+    for px, w in ((40, 62), (236, 74), (400, 54)):
+        x0, x1 = px - w / 2, px + w / 2
+        pil.rect(x0, 0, x1, floor_y, 255)
+        for k, (ext, h) in enumerate(((16, 8), (10, 8), (5, 6))):   # stepped plinth
+            yb = floor_y - sum(hh for _, hh in ((16, 8), (10, 8), (5, 6))[:k])
+            pil.rect(x0 - ext, yb - h, x1 + ext, yb, 255)
+        xs = np.arange(int(x0) + 6, int(x1) - 4, 7)                    # fluting
+        for fx in xs:
+            col = (xx % S == fx % S) & (yy < floor_y - 26)
+            detail = np.where(col, -1, detail)
+            detail = np.where((xx % S == (fx + 1) % S) & (yy < floor_y - 26), 1, detail)
+        for by in (floor_y - 90, floor_y - 210, floor_y - 330):        # carved bands with a ring motif
+            band = (np.abs(yy - by) <= 5) & (((xx - x0) % S) < w)
+            detail = np.where(band, 0.5, detail)
+            detail = np.where((np.abs(yy - by) == 6) & (((xx - x0) % S) < w), -1, detail)
+            cr = np.hypot(((xx - px + S / 2) % S - S / 2), yy - by)
+            detail = np.where((np.abs(cr - 9) < 0.8) | (np.abs(cr - 4) < 0.7), -1, detail)
+    pm = pil.mask() & (yy < floor_y)
+    pv = shade_rock(pm, rng, 0.62, 0.78, 0.12, maxd=24)
+    pv = np.where(pm & (detail < 0), pv - 0.14, pv)
+    pv = np.where(pm & (detail > 0), pv + 0.08 * detail, pv)
+    left_edge = pm & ~np.roll(pm, 1, 1)
+    pv = np.where(left_edge | (pm & ~np.roll(pm, 2, 1)), pv + 0.12, pv)
+    fade = np.clip((yy - 30) / 300.0, 0, 1) ** 1.3            # pillars dissolve into the dark above
+    pa = np.where(pm, fade, 0.0)
+    pv = pv + (1 - pv) * shafts * 1.5 * pm                  # beams graze the pillars
+    v, a = over_va(pv, steps(pa, 16), v, a)
+    # the Floor itself: a dead-straight band of carved blocks
+    fl = (yy >= floor_y) & (yy < floor_y + 34)
+    fv = np.full((S, S), 0.62)
+    fv = np.where(yy == floor_y, 0.86, fv)
+    fv = np.where(yy == floor_y + 1, 0.76, fv)
+    seams = ((xx % 64) == 0) & (yy > floor_y + 2)
+    seams |= (yy == floor_y + 17) | (((xx + 32) % 64 == 0) & (yy > floor_y + 17))
+    fv = np.where(seams, 0.44, fv)
+    fv = fv + (fractal(S, S, 4, 8, 2, rng) - 0.5) * 0.04
+    v, a = over_va(np.round(fv * 32) / 32, fl.astype(float), v, a)
+    to_rgba(v, a).save(os.path.join(OUT, name + ".png"))
+    print("wrote", name, f"{(a > 0.99).mean():.0%} solid")
+
+
 # ---------------------------------------------------------------- surface layers
 def shade_flat(mask, base, rim, n=None, tex=0.0):
     """Surface silhouettes: flat value, lit top rim, half-lit left edge."""
@@ -733,6 +816,7 @@ if __name__ == "__main__":
     cave_mid("cave_mid", 512, np.random.default_rng(2025))
     cave_near("cave_near", 512, np.random.default_rng(2026))
     cave_far_deep("cave_far_deep", 512, np.random.default_rng(2030))
+    cave_far_bottom("cave_far_bottom", 512, np.random.default_rng(2031))
     hills_far("hills_far", 1024, 160, np.random.default_rng(2027))
     hills_near("hills_near", 1024, 160, np.random.default_rng(2028))
     dead_forest("forest", 1024, 160, np.random.default_rng(2029))

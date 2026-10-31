@@ -18,14 +18,17 @@ const C := 32                   # chunk size in cells (code uses >>5 / &31)
 const CHUNK_PX := C * CELL
 const WIDTH_PX := W * CELL
 const R_INT := 5                # how far (cells) the "deep inside rock" darkening reaches
-enum M { DIRT, STONE, HARD, BEDROCK, CRYSTAL, MAGMA }
-const HARDNESS := [1.0, 2.6, 5.5, INF, 3.8, 6.5]
-const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924"), Color("7a58b0"), Color("3a2420")]
-const MAT_NAMES := ["dirt", "stone", "hard", "bedrock", "crystal", "magma"]
+enum M { DIRT, STONE, HARD, BEDROCK, CRYSTAL, MAGMA, FLOOR }
+const HARDNESS := [1.0, 2.6, 5.5, INF, 3.8, 6.5, INF]
+const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924"), Color("7a58b0"), Color("3a2420"),
+	Color("1c1f2a")]
+const MAT_NAMES := ["dirt", "stone", "hard", "bedrock", "crystal", "magma", "floor"]
 # Depth layers (m). Their boundaries wander with noise, so every world is different.
 const CRYSTAL_FROM := 150.0     # the crystal caverns
 const CRYSTAL_TO := 300.0
 const MAGMA_FROM := 400.0       # the magma layer
+const CAVERN_FROM := 585.0      # the vast cavern above the bottom
+const BOTTOM := 620.0           # the Floor: carved, glowing, unbreakable. Something lives below.
 const LAYER_WOBBLE := 30.0      # how far (m) a boundary drifts up/down across the world
 # name, value, nugget colour, glow colour, found from depth (m). Metals sell; coal is drill fuel.
 const ORES := [
@@ -83,7 +86,7 @@ func _ready() -> void:
 		var key: String = "bed" if n == "bedrock" else n                                          # shader names
 		tx["t_" + key] = load("res://assets/terrain/%s.png" % f)
 		tx["n_" + key] = load("res://assets/terrain/%s_n.png" % f)
-	for n in ["crystal", "magma"]:
+	for n in ["crystal", "magma", "floor"]:
 		var g := "res://assets/terrain/%s_glow.png" % n
 		glow_tx["g_" + n] = load(g) if ResourceLoader.exists(g) else null
 	gen = WorldGen.new(self)
@@ -123,7 +126,7 @@ func _gen_chunk(key: Vector2i) -> void:
 			var v := gen.cell(key.x * C + i, key.y * C + j)
 			ch.fill[j * C + i] = v.x
 			ch.mat[j * C + i] = int(v.y)
-			if int(v.y) >= M.CRYSTAL:
+			if int(v.y) >= M.CRYSTAL:      # crystal, magma, the Floor: they glow
 				ch.glows = true
 	gen.liquid_pockets(ch)
 	ch.rect = ColorRect.new()
@@ -289,7 +292,7 @@ func dig(a: Vector2, b: Vector2, r: float, amount: float, collect := true) -> Di
 			if f <= 0.0:
 				continue
 			var m := get_mat(gx, gy)
-			if m == M.BEDROCK:
+			if HARDNESS[m] == INF:          # bedrock, the Floor
 				continue
 			var d: float = get_dmg(gx, gy) + amount * (1.0 - 0.6 * dist / r) / HARDNESS[m]
 			if f >= 0.5:

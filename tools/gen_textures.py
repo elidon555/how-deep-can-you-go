@@ -10,7 +10,7 @@ bevels and crack grooves that are painted in.
 """
 import os
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "terrain")
 os.makedirs(OUT, exist_ok=True)
@@ -810,6 +810,121 @@ def magma(name, S, rng):
     save_glow(name, glow)
 
 
+class Fold:
+    """Wrapped vector drawing: draw on a 3x canvas around the tile, then fold it back so
+    anything crossing an edge comes in on the other side."""
+
+    def __init__(self, size):
+        self.S = size
+        self.img = Image.new("L", (size * 3, size * 3), 0)
+        self.dr = ImageDraw.Draw(self.img)
+
+    def line(self, pts, width=1):
+        self.dr.line([(x + self.S, y + self.S) for x, y in pts], fill=255, width=width)
+
+    def arc(self, cx, cy, r, a0=0, a1=360):
+        self.dr.arc([cx - r + self.S, cy - r + self.S, cx + r + self.S, cy + r + self.S], a0, a1, fill=255)
+
+    def point(self, x, y):
+        self.dr.point((x + self.S, y + self.S), fill=255)
+
+    def mask(self):
+        a = np.array(self.img) > 127
+        S = self.S
+        return np.any([a[j * S:(j + 1) * S, i * S:(i + 1) * S] for j in range(3) for i in range(3)], axis=0)
+
+
+def glyph(fd, x, y, rng, scale=4):
+    """An angular glyph: a few strokes on a 3x4 lattice (straight and 45 degree), with a
+    terminal dot or two. (x, y) = top-left."""
+    pts = [(i, j) for i in range(3) for j in range(4)]
+    cur = pts[rng.integers(len(pts))]
+    drawn, want = set(), int(rng.integers(4, 7))
+    while len(drawn) < want:
+        nxt = [(cur[0] + dx, cur[1] + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+               if (dx or dy) and 0 <= cur[0] + dx < 3 and 0 <= cur[1] + dy < 4]
+        n = nxt[rng.integers(len(nxt))]
+        if len(drawn) and rng.random() < 0.2:    # lift the chisel: start a new stroke
+            cur = pts[rng.integers(len(pts))]
+            continue
+        drawn.add(frozenset((cur, n)))
+        fd.line([(x + cur[0] * scale, y + cur[1] * scale), (x + n[0] * scale, y + n[1] * scale)])
+        cur = n
+    fd.point(x + cur[0] * scale, y + cur[1] * scale - 2)
+
+
+def floor(name, S, rng):
+    """The Floor: ancient, impossibly smooth near-black blue-grey stone in huge, precisely cut
+    blocks, engraved with concentric rings and rows of angular glyphs (the glyphs glow)."""
+    pal = palette("#040508", "#07080c", "#0a0c11", "#0e1016", "#12151c", "#171a23", "#1c202b",
+                  "#232835", "#2c3242")
+    yy, xx = np.mgrid[0:S, 0:S]
+    # two courses of huge blocks, dead straight seams
+    rows = [(0, 72, (20, 100)), (72, 128, (60, 124))]
+    label = np.zeros((S, S), int)
+    for r, (y0, y1, cuts) in enumerate(rows):
+        inrow = (yy >= y0) & (yy < y1)
+        b = ((xx - cuts[0]) % S >= (cuts[1] - cuts[0])).astype(int)
+        label = np.where(inrow, r * 10 + b, label)
+    seam = borders(label)
+    d = dist_to(~seam, 6)
+    height = np.clip(d / 2.0, 0, 1)              # crisp 2 px chamfer, then dead flat
+    # polished faces: each block a slow diagonal sheen, almost no grain
+    sheen = np.zeros((S, S))
+    for r, (y0, y1, cuts) in enumerate(rows):
+        for b, (x0, w) in enumerate(((cuts[0], cuts[1] - cuts[0]), (cuts[1], S - (cuts[1] - cuts[0])))):
+            m = label == r * 10 + b
+            u = ((xx - x0) % S) / w
+            v = (yy - y0) / (y1 - y0)
+            sheen = np.where(m, 0.9 * (1 - u) * 0.5 + 0.9 * (1 - v) * 0.5 + rng.uniform(-0.3, 0.3), sheen)
+    grain = fractal(S, 16, 2, rng)
+    rings = Fold(S)
+    glyphs = Fold(S)
+    # block A: a full ring sigil
+    cx, cy = 60, 36
+    for r in (31, 27, 19, 12, 6):
+        rings.arc(cx, cy, r)
+    for k in range(24):                          # radial ticks between the outer rings
+        a = np.radians(k * 15)
+        r0, r1 = (19, 27) if k % 2 == 0 else (21, 25)
+        glyphs.line([(cx + r0 * np.cos(a), cy + r0 * np.sin(a)), (cx + r1 * np.cos(a), cy + r1 * np.sin(a))])
+    for k in range(6):                           # angular marks inside
+        a = np.radians(k * 60 + 30)
+        glyphs.line([(cx + 7 * np.cos(a), cy + 7 * np.sin(a)), (cx + 11 * np.cos(a), cy + 11 * np.sin(a))])
+    glyphs.line([(cx - 3, cy), (cx, cy - 3), (cx + 3, cy), (cx, cy + 3), (cx - 3, cy)])
+    # block A2 (narrow): a column of glyphs between two engraved rules
+    rings.line([(106, 6), (106, 66)])
+    rings.line([(142, 6), (142, 66)])
+    for k in range(4):
+        glyph(glyphs, 120, 7 + k * 16, rng)
+    # block B1: a band of glyphs framed by rules
+    rings.line([(66, 86), (118, 86)])
+    rings.line([(66, 110), (118, 110)])
+    for k in range(4):
+        glyph(glyphs, 70 + k * 12, 91, rng)
+    rings.line([(66, 116), (118, 116)])
+    # block B2 (wraps the seam): half a ring sigil rising from the course below
+    for r in (24, 18, 11):
+        rings.arc(156, 128, r, 180, 360)
+    for k in range(7):
+        a = np.radians(195 + k * 25)
+        glyphs.line([(156 + 12 * np.cos(a), 128 + 12 * np.sin(a)), (156 + 17 * np.cos(a), 128 + 17 * np.sin(a))])
+    rm, gm = rings.mask() & (d > 1.5), glyphs.mask() & (d > 1.5)
+    groove = rm | gm
+    height = np.where(groove, height - 0.45, height)
+    shade = 3.6 + sheen + (grain - 0.5) * 0.2 + baked_light(height, 2.0) * 4.0
+    shade = np.where(seam, 0, shade)
+    lip = ~groove & (np.roll(groove, 1, 0) | np.roll(groove, 1, 1)) & ~seam   # lit far wall of a groove
+    shade = np.where(groove, 1.2, shade)
+    shade = np.where(lip, shade + 1.2, shade)
+    img = pal[np.clip(np.round(shade), 0, len(pal) - 1).astype(int)]
+    gcol = np.array([112.0, 104.0, 168.0])        # faint cold violet-white
+    glow = np.where(gm[..., None], gcol, 0.0)
+    glow = np.where((gm & np.roll(gm, 1, 0) & np.roll(gm, -1, 0))[..., None], gcol * 1.15, glow)
+    save(name, img, height, 2.2)
+    save_glow(name, glow)
+
+
 def mask(name, size, rng):
     """Tileable low-frequency noise used to cut holes in the back wall."""
     m = fractal(size, 4, 4, rng)
@@ -828,6 +943,7 @@ if __name__ == "__main__":
     wall("wall", 256, np.random.default_rng(1341))
     crystal("crystal", S, np.random.default_rng(1342))
     magma("magma", S, np.random.default_rng(1343))
+    floor("floor", S, np.random.default_rng(1344))
     # the wall holes keep their old layout: this is the generator state the first version of
     # this script had reached by the time it made the mask
     rng = np.random.default_rng()

@@ -79,7 +79,21 @@ func cell(gx: int, gy: int) -> Vector2:
 	var t := 0.2 - minf(depth / 800.0, 0.08) + maxf(0.0, 8.0 - depth) * 0.15
 	var fill := clampf(0.5 + (t - noise_cave.get_noise_2d(px, py)) * 5.0, 0.0, 1.0)
 	fill = minf(fill, clampf((py - surf) / World.CELL + 0.5, 0.0, 1.0))
+	if depth >= World.CAVERN_FROM and depth < World.BOTTOM:
+		fill = _cavern(px, depth)
 	return Vector2(fill, material(px, py, depth))
+
+
+## The vast cavern above the Floor: open, but for a few huge pillars (noise picks where) and a
+## ragged ceiling.
+func _cavern(px: float, depth: float) -> float:
+	var ceiling := World.CAVERN_FROM + 4.0 + noise_layer.get_noise_1d(px * 3.0) * 4.0
+	if depth < ceiling:
+		return 1.0
+	var pillar := noise_layer.get_noise_1d(px * 0.9 + 999.0)
+	if pillar > 0.55 and absf(px - World.WIDTH_PX / 2.0) > 160.0:      # never under the drill
+		return 1.0
+	return 0.0
 
 
 ## Depth (m) as the layers see it: real depth nudged by noise, so boundaries wander.
@@ -92,6 +106,8 @@ func layer_depth(px: float, py: float, depth: float) -> float:
 func material(px: float, py: float, depth: float) -> int:
 	var m := noise_mat.get_noise_2d(px, py) * 0.5 + 0.5
 	var d := layer_depth(px, py, depth)
+	if depth >= World.BOTTOM:
+		return World.M.FLOOR
 	if d >= World.MAGMA_FROM:
 		return World.M.HARD if m > 0.78 else World.M.MAGMA
 	if d >= World.CRYSTAL_TO:
@@ -121,7 +137,7 @@ func liquid_pockets(ch: World.Chunk) -> void:
 			var px := gx * World.CELL + 4.0
 			var py := gy * World.CELL + 4.0
 			var depth := py / World.METER
-			if depth < WATER_FROM or noise_liquid.get_noise_2d(px, py) < LIQUID_POCKETS:
+			if depth < WATER_FROM or depth > World.CAVERN_FROM - 5.0 or noise_liquid.get_noise_2d(px, py) < LIQUID_POCKETS:
 				continue
 			ch.liquid[k] = 1.0
 			ch.ltype[k] = Liquids.LAVA if layer_depth(px, py, depth) >= World.MAGMA_FROM - 10.0 else Liquids.WATER

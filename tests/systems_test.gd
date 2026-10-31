@@ -36,6 +36,7 @@ func _ready() -> void:
 	await _liquids()
 	await _gas()
 	await _crawler_fight()
+	await _the_bottom()
 	await _boulder()
 	Progress.money = saved_money
 	Progress.levels = saved_levels
@@ -234,6 +235,9 @@ func _mouse_aim() -> void:
 
 
 func _rope_climb() -> void:
+	for b in get_tree().get_nodes_in_group("hittable"):   # a boulder dropping into the test shaft
+		if b is Boulder:                                   # would wedge above the miner (as it should)
+			b.queue_free()
 	p.global_position = Vector2(200, -40)       # well away from the drill
 	await _frames(60)
 	await _hold(["dig", "down"], 6.0)
@@ -444,6 +448,45 @@ func _flooding() -> void:
 	for k in [c, c2]:
 		for dy in range(-6, 6):
 			w.set_liquid(k.x, k.y + dy, 0.0, Liquids.NONE)
+
+
+## The bottom: the Floor can't be cut; the drill knocking on it wakes the Eye; veins shield it;
+## break them, kill it, and the run ends with the ending.
+func _the_bottom() -> void:
+	var d: Drill = main.drill
+	w.ensure_generated(World.BOTTOM * World.METER + 400.0)
+	await _frames(3)
+	var eye: TheEye = main.eye
+	_check("the Eye is waiting in the Floor", eye != null and eye.state == TheEye.State.ASLEEP)
+	if eye == null:
+		return
+	var floor_y := eye.position.y
+	var probe := Vector2(World.WIDTH_PX / 2.0, floor_y + 12.0)
+	w.dig(probe, probe, 10.0, 999.0)
+	_check("the Floor can't be cut", not w.is_air(probe))
+	d.position = Vector2(World.WIDTH_PX / 2.0, floor_y - 107.0)
+	p.global_position = d.global_position + Vector2(-20, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	d.speed = Drill.Speed.FULL
+	for i in 60 * 4:
+		await get_tree().physics_frame
+		if eye.state != TheEye.State.ASLEEP:
+			break
+	_check("knocking on the Floor wakes it", eye.state != TheEye.State.ASLEEP)
+	d.speed = Drill.Speed.STOP
+	await _frames(60 * 3)
+	var hp := eye.hp
+	eye.hit(10, Vector2.ZERO)
+	_check("the veins shield it", eye.hp == hp and eye.state == TheEye.State.GUARDED)
+	for v in eye.veins:
+		v.hit(99, Vector2.ZERO)
+	await _frames(5)
+	_check("with the veins broken it opens", eye.state == TheEye.State.OPEN)
+	var ended := [false]
+	eye.died.connect(func(_pos): ended[0] = true)
+	for i in 30:
+		eye.hit(3, Vector2.ZERO)
+	await get_tree().create_timer(5.5).timeout
+	_check("killing it ends the run", ended[0] and main.ending)
 
 
 func _crawler_fight() -> void:

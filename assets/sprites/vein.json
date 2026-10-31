@@ -1,0 +1,16 @@
+{
+ "cell_w": 36,
+ "cell_h": 30,
+ "columns": 4,
+ "anims": {
+  "pulse": {
+   "row": 0,
+   "frames": 4
+  },
+  "burst": {
+   "row": 1,
+   "frames": 3
+  }
+ },
+ "anchor": "bottom-centre of the cell = the floor surface line"
+}

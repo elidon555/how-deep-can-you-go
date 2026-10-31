@@ -23,7 +23,10 @@ func _ready() -> void:
 func show_run(stats: Dictionary) -> void:
 	for c in _box.get_children():
 		c.queue_free()
-	_box.add_child(UiStyle.label(stats.reason, 34, Color("e05a4a")))
+	var won: bool = stats.has("ending")
+	_box.add_child(UiStyle.label(stats.reason, 34, Color("e0b23a") if won else Color("e05a4a")))
+	if won:
+		_box.add_child(UiStyle.label(stats.ending, 22, UiStyle.PAPER))
 	_box.add_child(UiStyle.label("Reached %d m" % stats.depth, 30))
 	if stats.new_best:
 		_box.add_child(UiStyle.label("A new best!", 24, Color("e0b23a")))

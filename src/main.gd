@@ -31,6 +31,8 @@ var kills := 0
 var run_over := false
 var drill := Drill.new()
 var liquids := Liquids.new()
+var eye: TheEye = null              # what lives at the bottom (spawned when the world reaches it)
+var ending := false
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 
@@ -72,6 +74,7 @@ func _ready() -> void:
 	drill.wrecked.connect(_on_drill_wrecked)
 	drill.damaged.connect(func(amount): shake = maxf(shake, minf(amount / 10.0, 1.2)))
 	drill.cutter.chewed.connect(_on_drill_chewed)
+	drill.cutter.knocked.connect(func(_pos): if eye: eye.knock())
 	drill.sonar_used.connect(_on_sonar_used)
 	drill.guns.bolt_hit.connect(_on_bolt_hit)
 
@@ -135,6 +138,8 @@ func _process(dt: float) -> void:
 	var depth_m := player.position.y / World.METER
 	var depth := maxi(0, int(floor(depth_m)))
 	world.ensure_generated(player.position.y + 900.0)
+	if eye == null and world.next_row * World.CHUNK_PX > World.BOTTOM * World.METER + 64.0:
+		_spawn_eye()
 	backdrop.follow(cam, depth_m)
 	Sfx.set_depth(depth_m)
 
@@ -194,6 +199,54 @@ func _update_bag() -> void:
 
 
 # ---------------------------------------------------------------- events
+
+# ---------------------------------------------------------------- the bottom
+
+## The Eye sits in the Floor off to one side; three veins feed it, spread across the cavern.
+func _spawn_eye() -> void:
+	var floor_y := ceilf(World.BOTTOM * World.METER / World.CELL) * World.CELL
+	var side := -1.0 if world.gen.rng.randf() < 0.5 else 1.0
+	eye = TheEye.new()
+	eye.world = world
+	eye.drill = drill
+	eye.spawner = spawner
+	eye.glow_parent = glow_layer
+	eye.position = Vector2(World.WIDTH_PX / 2.0 + side * 330.0, floor_y)
+	add_child(eye)
+	var xs := []
+	for x in [70.0, 290.0, World.WIDTH_PX - 290.0, World.WIDTH_PX - 70.0]:
+		if absf(x - eye.position.x) > 140.0:
+			xs.append(x)
+	eye.grow_veins(xs.slice(0, TheEye.VEINS))
+	eye.woke.connect(func():
+		Sfx.music("music_boss")
+		hud.toast("Something below opens its eye.", 3.0)
+		hud.set_boss("THE EYE", 1.0))
+	eye.health_changed.connect(func(f): hud.set_boss("THE EYE", f))
+	eye.died.connect(_on_eye_died)
+
+
+## The eye is dead: the Floor cracks and light pours up. The end of the run.
+func _on_eye_died(pos: Vector2) -> void:
+	ending = true
+	hud.set_boss("", 0.0)
+	shake = 3.0
+	Sfx.music("music_ending")
+	fx.explosion(pos, 70.0)
+	var light := ColorRect.new()                 # the light from below fills the screen
+	light.color = Color(1.0, 0.97, 0.88, 0.0)
+	light.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	light.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(light)
+	create_tween().tween_property(light, "color:a", 1.0, 4.0)
+	Progress.beat_the_game()
+	await get_tree().create_timer(5.0).timeout
+	run_over = true
+	player.frozen = true
+	menus.show_run({"reason": "You reached the bottom.", "depth": maxi(0, int(drill.global_position.y / World.METER)),
+		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
+		"seconds": run_time, "ending": "The Floor is open. Whatever was waiting down there\nhas seen you now."})
+
 
 ## Firedamp leaks out of rock you broke open: a cloud that a spark will set off.
 func _on_gas_released(pos: Vector2) -> void:
