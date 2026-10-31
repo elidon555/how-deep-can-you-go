@@ -53,6 +53,7 @@ class Note extends Station:
 
 	func interact(_p: Player) -> void:
 		Progress.find_note(note_id)
+		get_tree().call_group("run", "note_read")
 		Sfx.play("note_pickup", global_position)
 		get_tree().call_group("note_view", "show_note", note_id)
 		queue_free()

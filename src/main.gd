@@ -33,6 +33,7 @@ var drill := Drill.new()
 var liquids := Liquids.new()
 var eye: TheEye = null              # what lives at the bottom (spawned when the world reaches it)
 var ending := false
+var notes_read := 0
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 
@@ -44,6 +45,7 @@ var new_best := false
 
 
 func _ready() -> void:
+	add_to_group("run")
 	Controls.setup()
 	Lore.reset_run()
 	for a in OS.get_cmdline_user_args():
@@ -200,6 +202,10 @@ func _update_bag() -> void:
 
 # ---------------------------------------------------------------- events
 
+func note_read() -> void:
+	notes_read += 1
+
+
 # ---------------------------------------------------------------- the bottom
 
 ## The Eye sits in the Floor off to one side; three veins feed it, spread across the cavern.
@@ -245,7 +251,7 @@ func _on_eye_died(pos: Vector2) -> void:
 	player.frozen = true
 	menus.show_run({"reason": "You reached the bottom.", "depth": maxi(0, int(drill.global_position.y / World.METER)),
 		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
-		"seconds": run_time, "ending": "The Floor is open. Whatever was waiting down there\nhas seen you now."})
+		"seconds": run_time, "notes": notes_read, "ending": "The Floor is open. Whatever was waiting down there\nhas seen you now."})
 
 
 ## Firedamp leaks out of rock you broke open: a cloud that a spark will set off.
@@ -395,7 +401,7 @@ func _game_over(reason: String) -> void:
 	await get_tree().create_timer(1.5).timeout
 	menus.show_run({"reason": reason, "depth": maxi(0, int(drill.global_position.y / World.METER)),
 		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
-		"seconds": run_time})
+		"seconds": run_time, "notes": notes_read})
 
 
 func _restart(to_title := false) -> void:

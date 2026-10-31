@@ -35,6 +35,8 @@ func show_run(stats: Dictionary) -> void:
 	var mins := int(stats.seconds) / 60
 	_box.add_child(UiStyle.label("Ore sold: $%d   ·   Kills: %d   ·   Time: %d:%02d" % [
 		stats.earned, stats.kills, mins, int(stats.seconds) % 60], 20, UiStyle.DIM))
+	if stats.get("notes", 0) > 0:
+		_box.add_child(UiStyle.label("Notes found this run: %d" % stats.notes, 18, UiStyle.DIM))
 	_box.add_child(UiStyle.button("Dig again", func(): again_pressed.emit()))
 	_box.add_child(UiStyle.button("Title screen", func(): title_pressed.emit()))
 	visible = true

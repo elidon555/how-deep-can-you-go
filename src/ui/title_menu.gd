@@ -32,4 +32,7 @@ func _ready() -> void:
 		var row := CenterContainer.new()
 		row.add_child(b)
 		col.add_child(row)
-	col.add_child(UiStyle.label("Best depth: %d m" % Progress.best, 20, UiStyle.DIM))
+	col.add_child(UiStyle.label("Best depth: %d m   ·   Notes found: %d / %d" % [
+		Progress.best, Progress.found_notes.size(), Lore.NOTES.size()], 20, UiStyle.DIM))
+	if Progress.beaten:
+		col.add_child(UiStyle.label("The Floor has been opened.", 18, Color("e0b8ff")))
