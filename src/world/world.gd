@@ -19,12 +19,15 @@ const R_INT := 5                # how far (cells) the "deep inside rock" darkeni
 enum M { DIRT, STONE, HARD, BEDROCK }
 const HARDNESS := [1.0, 2.6, 5.5, INF]
 const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924")]
-# name, value, nugget colour, glow colour, found from depth (m)
+# name, value, nugget colour, glow colour, found from depth (m). Metals sell; coal is drill fuel.
 const ORES := [
 	["copper", 1, Color("d9824a"), Color("ff9c5a"), 0.0],
 	["silver", 3, Color("c9d3e0"), Color("e8f2ff"), 40.0],
 	["gold", 8, Color("f2c14e"), Color("ffd36a"), 110.0],
+	["coal", 0, Color("26252b"), Color("9aa0ab"), 0.0],
 ]
+const METALS := 3      # ORES[0..2]
+const COAL := 3
 
 class Chunk:
 	var key: Vector2i
@@ -45,6 +48,8 @@ var next_row := -2              # next chunk row to generate (rows < -2 are open
 var dug := {}                   # cells the player carved (not natural caves)
 var ores := {}                  # cell -> [lit Sprite2D, glow Sprite2D, ore kind]
 var decor := {}                 # anchor cell -> Array[Node2D]
+var _collect := true            # set per dig(): does broken ore get handed out?
+static var fixed_seed := -1     # tests set this for the same world every run
 var glow_root := Node2D.new()   # main moves this onto the unlit glow layer
 var noise_cave := FastNoiseLite.new()
 var noise_mat := FastNoiseLite.new()
@@ -67,7 +72,10 @@ func _ready() -> void:
 	for p in PROP_NAMES:
 		var g := "res://assets/props/%s_glow.png" % p
 		props[p] = [load("res://assets/props/%s.png" % p), load(g) if ResourceLoader.exists(g) else null]
-	rng.randomize()
+	if fixed_seed >= 0:
+		rng.seed = fixed_seed
+	else:
+		rng.randomize()
 	noise_cave.seed = rng.randi()
 	noise_cave.frequency = 0.0045
 	noise_cave.fractal_octaves = 4
@@ -165,8 +173,8 @@ func _populate(ch: Chunk) -> void:
 			var depth := gy * CELL / METER
 			var pos := Vector2(gx * CELL + 4, gy * CELL + 4)
 			if f >= 0.5:
-				if depth > 2 and rng.randf() < (0.0025 if m == M.DIRT else 0.004):
-					var kind := _ore_kind(depth)
+				if depth > 2 and rng.randf() < (0.006 if m == M.DIRT else 0.008):
+					var kind := COAL if rng.randf() < 0.55 else _ore_kind(depth)
 					var lit := _sprite(deco_tex.ore[kind], pos, self, 1)
 					var gl := _sprite(deco_tex.ore_glow[kind], pos, glow_root, 0)
 					ores[Vector2i(gx, gy)] = [lit, gl, kind]
@@ -225,7 +233,7 @@ func _place_boulders(ch: Chunk) -> void:
 ## Deepest ore found at this depth, sometimes a cheaper one.
 func _ore_kind(depth: float) -> int:
 	var k := 0
-	for i in ORES.size():
+	for i in METALS:
 		if depth >= ORES[i][4]:
 			k = i
 	while k > 0 and rng.randf() < 0.45:
@@ -386,7 +394,9 @@ func is_diggable(p: Vector2) -> bool:
 ## One pickaxe hit on a capsule (segment a-b, radius r): damages rock, strongest at the
 ## centre, and breaks cells whose damage is enough. Already-open cells get cleaned up too.
 ## Returns {hit: touched rock, mat: its material, broke: cells broken}.
-func dig(a: Vector2, b: Vector2, r: float, amount: float) -> Dictionary:
+## collect = false grinds up any ore it breaks (the drill's head) instead of handing it out.
+func dig(a: Vector2, b: Vector2, r: float, amount: float, collect := true) -> Dictionary:
+	_collect = collect
 	var lo := cell_at(Vector2(minf(a.x, b.x) - r, minf(a.y, b.y) - r))
 	var hi := cell_at(Vector2(maxf(a.x, b.x) + r, maxf(a.y, b.y) + r))
 	var hit := false
@@ -441,7 +451,8 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 			o[0].queue_free()
 			o[1].queue_free()
 			ores.erase(cell)
-			ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
+			if _collect:
+				ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
 		if decor.has(cell):
 			for n in decor[cell]:
 				n.queue_free()

@@ -19,10 +19,24 @@ Rule: build one small piece, play it, then add the next. Nothing here is lost �
 - [x] First creature: cave crawler (chase, lunge, bite); fight with the pickaxe; health + death
 - [ ] Lamp oil / fuel: on hold, the lamp never runs out for now
 
+## Step 3 — "Barotrauma, but a drill" (prototype in)
+Direction chosen 2026-10-31 (with a friend's input): the crew runs a giant drilling machine
+boring toward the core; going outside on foot is the "diving suit" part. Co-op is planned for
+sure, so everything is built per-player and the drill keeps all its state in one place.
+- [x] Drill that descends, carries the crew, cuts a shaft, falls into caves, crashes
+- [x] Stations: helm (speed), furnace (coal → fuel), workbench (sell ore, upgrades, ropes), medkit
+- [x] Hull + breaches (boulders, crawlers, crashes) repaired by holding E
+- [x] Coal ore; ore the drill grinds through is lost
+- [x] Drill sounds (engine loop/idle, start, stall, alarm, hull hits, breach, repair, furnace, lever)
+- [ ] Blender art pass for the drill (now drawn in code)
+- [ ] Heat / pressure / gas as you go deeper; more systems to juggle (power, coolant)
+- [ ] Co-op (Godot multiplayer): next big step once the solo loop is fun
+- [ ] Layers (flooded caves, crystal caverns, magma) and a real bottom with an ending
+
 ## Decisions made (can change later)
 - Engine: Godot 4 (built-in 2D lighting/glow for the Dead Cells-style look, exports to web)
 - Theme: digging toward the Earth's core
-- Co-op: "maybe" → Step 1 is single player, decide online yes/no before enemies get added
+- Co-op: yes, for sure (later). Build every system per-player now.
 
 ## Later list (rough order, pick what sounds most fun after playing)
 1. **Fuel / stamina** — the "go deeper or turn back" tension (on hold)

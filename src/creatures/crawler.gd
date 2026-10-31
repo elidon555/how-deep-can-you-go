@@ -32,6 +32,7 @@ var _t := 0.0
 var _anim_t := 0.0
 var _bit := false
 var _growl_t := 0.0
+var _gnaw_t := 1.0
 var _sprite := Sprite2D.new()
 var _eyes := Sprite2D.new()
 var _anims := {}               # name -> [row, frames]
@@ -74,6 +75,7 @@ func _physics_process(dt: float) -> void:
 			velocity.x = dir * CHASE_SPEED
 			if is_on_floor() and _ledge_ahead() and to_player.y < 10.0:
 				velocity.x = 0.0           # don't run off a cliff unless the target is below
+			_gnaw(dt)
 			if absf(to_player.x) < LUNGE_RANGE and absf(to_player.y) < 24.0:
 				state = State.WINDUP
 				_t = WINDUP
@@ -104,6 +106,18 @@ func _physics_process(dt: float) -> void:
 				queue_free()
 	move_and_slide()
 	_animate(dt)
+
+
+## Pressed against the drill while hunting someone: chews on the hull.
+func _gnaw(dt: float) -> void:
+	for i in get_slide_collision_count():
+		var d = get_slide_collision(i).get_collider()
+		if d is Drill:
+			_gnaw_t -= dt
+			if _gnaw_t <= 0.0:
+				_gnaw_t = 1.4
+				d.damage(4.0, global_position)
+			return
 
 
 func hit(damage: int, from: Vector2) -> void:

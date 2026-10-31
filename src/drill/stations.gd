@@ -1,0 +1,151 @@
+## The drill's stations. Each is small: a prompt, what using it does (via the Drill), and how
+## it looks. Shared look helpers are in DrillArt.
+
+class_name Stations
+
+
+## Speed lever + depth screen.
+class Helm extends Station:
+	func prompt(_p: Player) -> String:
+		var next: String = Drill.SPEED_NAMES[(drill.speed + 1) % 3]
+		if drill.fuel <= 0.0:
+			return "Helm: no fuel! Shovel coal into the furnace"
+		return "E: drill speed → %s" % next
+
+	func interact(_p: Player) -> void:
+		drill.cycle_speed()
+		queue_redraw()
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		DrillArt.box(self, Rect2(-12, -22, 24, 22), Color("3b4048"))
+		draw_rect(Rect2(-9, -19, 18, 9), Color("0c1a1c"))
+		var lit := Color("3fd0c0") if drill.fuel > 0.0 else Color("d04a3f")
+		for i in 3:      # speed bars
+			if i < drill.speed or (i == 0 and drill.speed == 0):
+				draw_rect(Rect2(-7 + i * 5, -13 - i * 2, 4, 2 + i * 2), lit if drill.speed > 0 else Color("d0a03f"))
+		var ang: float = -0.6 + 0.6 * drill.speed       # the lever
+		draw_line(Vector2(8, -2), Vector2(8, -2) + Vector2(sin(ang), -cos(ang)) * 12.0, Color("1a1a1e"), 3.0)
+		draw_circle(Vector2(8, -2) + Vector2(sin(ang), -cos(ang)) * 12.0, 2.5, Color("c8322a"))
+
+
+## Coal goes in here; the mouth glows while the head is turning.
+class Furnace extends Station:
+	func prompt(p: Player) -> String:
+		if p.coal > 0:
+			return "E: shovel in %d coal (+%d fuel)" % [p.coal, int(p.coal * Drill.FUEL_PER_COAL)]
+		return "Furnace: dig up coal to fuel the drill" if drill.fuel < drill.max_fuel * 0.5 else ""
+
+	func interact(p: Player) -> void:
+		var c := p.take_coal()
+		if c > 0:
+			drill.add_fuel(c * Drill.FUEL_PER_COAL)
+			Sfx.play("furnace", global_position)
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		DrillArt.box(self, Rect2(-13, -30, 26, 30), Color("2c2a2c"))
+		draw_rect(Rect2(-4, -48, 8, 18), Color("2c2a2c"))   # chimney into the roof
+		var heat := 0.4 + (0.6 if drill.drilling else 0.0) + 0.1 * sin(Time.get_ticks_msec() * 0.02)
+		draw_rect(Rect2(-8, -16, 16, 10), Color(1.6, 0.6, 0.15) * heat)
+		for x in [-17, -14, -11]:                          # coal pile
+			draw_circle(Vector2(x - 2, -2), 3.0, Color("18171b"))
+
+
+## Sells the metal ore you carry, restocks ropes and opens the upgrades.
+class Workbench extends Station:
+	func prompt(p: Player) -> String:
+		if p.ore_value > 0:
+			return "E: sell %d ore ($%d) and upgrade" % [p.ore_count, p.ore_value]
+		return "E: workbench (upgrades, ropes)"
+
+	func interact(p: Player) -> void:
+		var v := p.take_ore_value()
+		if v > 0:
+			Progress.add_money(v)
+			Sfx.play("coins", global_position)
+		p.refill_ropes()
+		drill.workbench_used.emit(p)
+
+	func _draw() -> void:
+		DrillArt.box(self, Rect2(-15, -14, 30, 4), Color("6b4a2e"))
+		draw_rect(Rect2(-13, -10, 3, 10), Color("4a3320"))
+		draw_rect(Rect2(10, -10, 3, 10), Color("4a3320"))
+		draw_rect(Rect2(-8, -19, 8, 5), Color("7d8591"))    # vice
+		draw_line(Vector2(4, -15), Vector2(11, -20), Color("9aa3b2"), 2.0)   # wrench
+
+
+## Patches you up, then needs a while to recharge.
+class Medkit extends Station:
+	const RECHARGE := 45.0
+	var _ready_at := 0.0
+
+	func prompt(p: Player) -> String:
+		if not p.is_hurt():
+			return ""
+		var wait := _ready_at - Time.get_ticks_msec() / 1000.0
+		return "E: patch yourself up" if wait <= 0.0 else "Medkit recharging (%ds)" % ceili(wait)
+
+	func interact(p: Player) -> void:
+		if Time.get_ticks_msec() / 1000.0 < _ready_at:
+			return
+		p.heal_full()
+		_ready_at = Time.get_ticks_msec() / 1000.0 + RECHARGE
+		Sfx.play("repair", global_position)
+		queue_redraw()
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var ok := Time.get_ticks_msec() / 1000.0 >= _ready_at
+		DrillArt.box(self, Rect2(-7, -6, 14, 12), Color("d8d4cc") if ok else Color("6b6966"))
+		draw_rect(Rect2(-1.5, -4, 3, 8), Color("c8322a"))
+		draw_rect(Rect2(-4, -1.5, 8, 3), Color("c8322a"))
+
+
+## A crack in the hull: sparks and hissing, leaks hull until someone holds E on it.
+class Breach extends Station:
+	const REPAIR_TIME := 1.6
+	var _t := 0.0
+
+	func _ready() -> void:
+		super._ready()
+		var p := CPUParticles2D.new()       # steam
+		p.amount = 16
+		p.lifetime = 0.8
+		p.direction = Vector2(0, -1)
+		p.spread = 40.0
+		p.initial_velocity_min = 15.0
+		p.initial_velocity_max = 35.0
+		p.gravity = Vector2(0, -20)
+		p.scale_amount_min = 1.5
+		p.scale_amount_max = 3.5
+		p.color = Color(0.8, 0.8, 0.82, 0.35)
+		add_child(p)
+
+	func prompt(_p: Player) -> String:
+		return "Hold E: repair the breach"
+
+	func hold_time() -> float:
+		return REPAIR_TIME
+
+	func interact(_p: Player) -> void:
+		drill.repair(self)
+
+	func _process(dt: float) -> void:
+		_t += dt
+		queue_redraw()
+
+	func _draw() -> void:
+		var pts := PackedVector2Array([Vector2(-6, -3), Vector2(-1, -5), Vector2(1, -1), Vector2(6, -4),
+			Vector2(3, 2), Vector2(5, 6), Vector2(-2, 3), Vector2(-5, 5)])
+		draw_colored_polygon(pts, Color("0a0809"))
+		if fmod(_t, 0.4) < 0.12:             # sparks
+			for i in 3:
+				var a := randf() * TAU
+				draw_line(Vector2.ZERO, Vector2(cos(a), sin(a)) * randf_range(3, 8), Color(2.0, 1.6, 0.6), 1.0)

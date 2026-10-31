@@ -25,7 +25,7 @@ func _ready() -> void:
 	box.add_theme_constant_override("separation", 12)
 	add_child(box)
 	var title := Label.new()
-	title.text = "The Merchant"
+	title.text = "Workbench"
 	title.add_theme_font_size_override("font_size", 34)
 	title.add_theme_color_override("font_color", Color("f4e3c1"))
 	box.add_child(title)
@@ -35,7 +35,7 @@ func _ready() -> void:
 	_rows.add_theme_constant_override("separation", 8)
 	box.add_child(_rows)
 	var hint := Label.new()
-	hint.text = "1-5 or click to buy · E to close"
+	hint.text = "Number keys or click to buy · E to close"
 	hint.modulate.a = 0.6
 	box.add_child(hint)
 	Progress.changed.connect(_refresh)

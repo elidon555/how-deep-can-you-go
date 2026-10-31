@@ -22,6 +22,7 @@ var low := false   # arena pocket only a bit taller than the miner
 
 func _ready() -> void:
 	Progress.dry_run = true     # never touch the real save
+	World.fixed_seed = 7        # same world every run
 	main = load("res://src/main.tscn").instantiate()
 	add_child(main)
 	_run()

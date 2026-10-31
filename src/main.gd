@@ -1,14 +1,15 @@
 extends Node2D
-## Puts the game together: world, player, camera, lighting, creatures, camp + shop, HUD.
-## Game rules that span systems live here: carrying ore, selling it at the surface, ropes
-## per trip, dying, milestones.
+## Puts the game together: world, the drill, player, camera, lighting, creatures, HUD.
+## Game rules that span systems live here: who gets the ore, ropes, the drill being wrecked,
+## dying, milestones. The drill (src/drill) is the crew's base: ore is sold at its workbench.
 
 const MILESTONES := {
 	10: "The daylight is gone", 25: "It's very quiet down here", 50: "Something is watching you",
 	100: "100 m. Nobody has dug this deep", 200: "The rock feels... warm", 300: "You hear breathing",
 	500: "Half a kilometer. Turn back?", 1000: "1 km. It knows you're here",
 }
-const CAMP_OFFSET := -110.0     # camp sits left of the spawn point
+const ZOOM_INSIDE := 1.6        # see the whole drill while you're in it
+const ZOOM_OUTSIDE := 2.0
 
 var world: World
 var player: Player
@@ -19,19 +20,15 @@ var backdrop := Backdrop.new()
 var fx := Fx.new()
 var hud := Hud.new()
 var shop := Shop.new()
-var camp := Camp.new()
+var drill := Drill.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 
-var carried := 0          # ore pieces in your bag
-var carried_value := 0
-var ropes := 0
 var shake := 0.0
 var time := 0.0
 var flicker_t := 0.0
 var shown := {}
 var new_best := false
-var at_surface := false
 
 
 func _ready() -> void:
@@ -51,15 +48,24 @@ func _ready() -> void:
 	add_child(glow_layer)
 	glow_layer.add_child(world.glow_root)
 
+	drill.world = world
+	add_child(drill)
+	drill.place(World.WIDTH_PX / 2.0)
+	drill.workbench_used.connect(_on_workbench_used)
+	drill.wrecked.connect(_on_drill_wrecked)
+	drill.damaged.connect(func(amount): shake = maxf(shake, minf(amount / 10.0, 1.2)))
+
 	player = Player.new()
 	player.world = world
-	player.position = Vector2(World.WIDTH_PX / 2.0, -40)
+	player.position = drill.position + Vector2(-34, Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	add_child(player)
 	player.pick.struck.connect(_on_struck)
 	player.pick.hit_thing.connect(_on_hit_thing)
 	player.rope_requested.connect(_on_rope_requested)
 	player.health_changed.connect(hud.set_health)
 	player.died.connect(_on_died)
+	player.bag_changed.connect(_update_bag)
+	player.interactor.prompt_changed.connect(hud.set_prompt)
 	Sfx.listener = player
 
 	fx.lit = self
@@ -75,8 +81,6 @@ func _ready() -> void:
 	_setup_glow()
 	_setup_motes()
 
-	add_child(camp)
-	camp.place(world, World.WIDTH_PX / 2.0 + CAMP_OFFSET, glow_layer)
 	spawner.world = world
 	spawner.player = player
 	spawner.lit_parent = self
@@ -88,7 +92,6 @@ func _ready() -> void:
 	hud.add_child(shop)
 	shop.closed.connect(func(): player.frozen = false)
 	Progress.changed.connect(_on_progress_changed)
-	ropes = Progress.rope_capacity()
 	hud.set_health(player.health, player.max_health)
 	_update_bag()
 	_autotest()
@@ -110,7 +113,10 @@ func _process(dt: float) -> void:
 			shown[m] = true
 			hud.toast(MILESTONES[m])
 	_update_light(depth, dt)
-	_update_camp(depth)
+	hud.set_drill(drill, depth_m)
+	var inside := drill.contains(player.global_position)
+	var z := lerpf(cam.zoom.x, ZOOM_INSIDE if inside else ZOOM_OUTSIDE, 3.0 * dt)
+	cam.zoom = Vector2(z, z)
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
@@ -137,41 +143,17 @@ func _update_light(depth: int, dt: float) -> void:
 		player.light_mul = randf_range(0.05, 0.6)
 
 
-## Back at the surface: sell ore, heal, refill ropes. By the stall: open the shop.
-func _update_camp(depth: int) -> void:
-	var home := depth == 0 and player.is_on_floor() and player.health > 0
-	if home and (not at_surface or carried > 0):
-		if carried > 0:
-			Progress.add_money(carried_value)
-			hud.toast("Sold %d ore for $%d" % [carried, carried_value])
-			Sfx.play("coins")
-			carried = 0
-			carried_value = 0
-		player.heal_full()
-		ropes = maxi(ropes, Progress.rope_capacity())
-		Progress.save()
-		_update_bag()
-	at_surface = home
-	var at_stall := camp.near(player.global_position) and player.health > 0
-	hud.set_prompt("E: trade with the merchant" if at_stall and not shop.visible else "")
-	if at_stall and not shop.visible and Input.is_action_just_pressed("interact"):
-		shop.open()
-		player.frozen = true
-		Sfx.play("ui_click", Vector2.INF)
-
-
-## Upgrades bought at the stall apply right away (more health, more ropes).
+## Upgrades bought at the workbench apply right away.
 func _on_progress_changed() -> void:
-	if at_surface:
-		player.heal_full()
-		ropes = maxi(ropes, Progress.rope_capacity())
+	drill.apply_upgrades()
+	if drill.contains(player.global_position):
+		player.refill_ropes()      # a bigger rope bag fills up right there at the workbench
 	_update_bag()
 
 
 func _update_bag() -> void:
-	hud.set_ore(carried, carried_value)
+	hud.set_bag(player)
 	hud.set_money(Progress.money)
-	hud.set_ropes(ropes)
 
 
 # ---------------------------------------------------------------- events
@@ -186,16 +168,18 @@ func _on_hit_thing(pos: Vector2) -> void:
 	fx.flesh(pos, player.facing)
 
 
+## Ore goes into the bag of whoever is closest (the one who dug it).
 func _on_ore_found(pos: Vector2, kind: int) -> void:
 	var ore: Array = World.ORES[kind]
-	carried += 1
-	carried_value += ore[1]
+	var p := _nearest_player(pos)
+	if p == null:
+		return               # dug while the drill was being set down, before anyone's here
+	p.add_ore(kind)
 	shake = maxf(shake, 0.8)
 	var c: Color = ore[3]
 	fx.burst(pos, Color(c.r * 2.0, c.g * 2.0, c.b * 2.0), 14, 140.0, Vector2.UP, 180.0, 0.6, 2.5, true)
 	Sfx.play("ore", pos)
 	hud.toast("+ %s" % ore[0], 0.6)
-	_update_bag()
 
 
 func _on_boulder_shattered(pos: Vector2) -> void:
@@ -204,27 +188,52 @@ func _on_boulder_shattered(pos: Vector2) -> void:
 
 
 func _on_crawler_killed(pos: Vector2) -> void:
-	carried += 1
-	carried_value += 2          # crawlers carry a shiny bit or two
+	var p := _nearest_player(pos)
+	if p:
+		p.add_value(2)    # crawlers carry a shiny bit or two
 	hud.toast("+ $2", 0.6)
-	_update_bag()
+
+
+func _on_workbench_used(p: Player) -> void:
+	shop.open()
+	p.frozen = true
+	Sfx.play("ui_click", Vector2.INF)
+
+
+func _on_drill_wrecked() -> void:
+	hud.toast("The drill is wrecked at %d m." % int(drill.global_position.y / World.METER), 3.0)
+	Sfx.play("drill_stall", drill.global_position)
+	_game_over()
+
+
+func _nearest_player(pos: Vector2) -> Player:
+	var best: Player = null
+	for p: Player in get_tree().get_nodes_in_group("player"):
+		if best == null or p.global_position.distance_to(pos) < best.global_position.distance_to(pos):
+			best = p
+	return best
 
 
 func _on_rope_requested(feet: Vector2) -> void:
-	if ropes <= 0:
-		hud.toast("No ropes left. More at the surface.", 1.2)
+	var p := _nearest_player(feet)
+	if p.ropes <= 0:
+		hud.toast("No ropes left. More at the drill's workbench.", 1.2)
 		return
-	ropes -= 1
-	var r := Rope.hang(world, feet)
-	world.add_child(r)
+	p.ropes -= 1
+	world.add_child(Rope.hang(world, feet))
 	Sfx.play("rope", feet)
 	_update_bag()
 
 
 func _on_died() -> void:
 	var depth := maxi(0, int(player.position.y / World.METER))
-	player.frozen = true
+	player.lose_bag()
 	hud.toast("You died at %d m. The ore you carried is lost." % depth, 3.0)
+	_game_over()
+
+
+func _game_over() -> void:
+	player.frozen = true
 	Progress.save()
 	await get_tree().create_timer(3.0).timeout
 	get_tree().reload_current_scene()
@@ -278,7 +287,8 @@ func _setup_motes() -> void:
 	player.add_child(motes)
 
 
-## Test mode: `godot -- --autotest=/path/shot.png` digs down by itself (fast) and saves screenshots.
+## Test mode: `godot -- --autotest=/path/shot.png` runs the drill at full speed by itself and
+## saves screenshots; then the miner climbs out and digs sideways for a bit.
 func _autotest() -> void:
 	var out := ""
 	for a in OS.get_cmdline_user_args():
@@ -286,22 +296,22 @@ func _autotest() -> void:
 			out = a.trim_prefix("--autotest=")
 	if out == "":
 		return
-	Progress.levels["pick"] = 3
 	fx.hitstop_enabled = false
+	drill.fuel = drill.max_fuel
 	await get_tree().create_timer(1.0).timeout
 	get_viewport().get_texture().get_image().save_png(out.replace(".png", "_0.png"))
-	Input.action_press("dig")
-	Input.action_press("down")
+	drill.speed = Drill.Speed.FULL
 	for i in 4:
-		await get_tree().create_timer(5.0).timeout
-		if i == 1 or i == 3:
-			Input.action_release("down")
-			Input.action_press("right")
-			await get_tree().create_timer(1.2).timeout
-			Input.action_release("right")
-			await get_tree().create_timer(0.3).timeout
+		await get_tree().create_timer(6.0).timeout
+		if i == 3:                  # out the door and into the rock
+			Input.action_press("left")
+			Input.action_press("dig")
+			await get_tree().create_timer(3.0).timeout
+			Input.action_release("left")
+			Input.action_release("dig")
 		get_viewport().get_texture().get_image().save_png(out.replace(".png", "_%d.png" % (i + 1)))
-		print("autotest depth=", int(player.position.y / World.METER), " ore=", carried,
-			" creatures=", get_tree().get_nodes_in_group("creature").size(), " hp=", player.health)
-		Input.action_press("down")
+		print("autotest drill=%dm player=%dm fuel=%d hull=%d coal=%d ore=%d creatures=%d hp=%d" % [
+			int(drill.global_position.y / World.METER), int(player.position.y / World.METER),
+			int(drill.fuel), int(drill.hull), player.coal, player.ore_count,
+			get_tree().get_nodes_in_group("creature").size(), player.health])
 	get_tree().quit()

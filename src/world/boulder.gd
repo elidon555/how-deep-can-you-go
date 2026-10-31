@@ -62,8 +62,12 @@ func _physics_process(dt: float) -> void:
 				player.hurt(2, global_position)
 				shatter()
 				return
-			if move_and_collide(velocity * dt):
-				if global_position.y - _fall_from > 12.0:
+			var col := move_and_collide(velocity * dt)
+			if col:
+				if col.get_collider() is Drill:
+					col.get_collider().damage(12.0 + velocity.y * 0.02, global_position)
+					shatter()
+				elif global_position.y - _fall_from > 12.0:
 					shatter()
 				else:
 					state = State.REST

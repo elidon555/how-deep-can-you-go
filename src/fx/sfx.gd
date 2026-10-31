@@ -25,14 +25,20 @@ func _ready() -> void:
 		_players.append(p)
 	add_child(_ui)
 	for i in 2:
-		var s := _stream(["amb_cave", "amb_deep"][i])
-		if s is AudioStreamWAV:
-			s.loop_mode = AudioStreamWAV.LOOP_FORWARD
-			s.loop_begin = 0
-			s.loop_end = s.data.size() / 2   # 16-bit mono
-		_amb[i].stream = s
+		_amb[i].stream = looping(["amb_cave", "amb_deep"][i])
 		_amb[i].volume_db = -80.0
 		add_child(_amb[i])
+
+
+## A sound set up to loop seamlessly (for engines, ambience), or null if it doesn't exist.
+func looping(name: String) -> AudioStream:
+	var s := _stream(name)
+	if s is AudioStreamWAV:
+		s = s.duplicate()
+		s.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		s.loop_begin = 0
+		s.loop_end = s.data.size() / 2   # 16-bit mono
+	return s
 
 
 ## Positional sound. pos = Vector2.INF plays it flat (UI / always audible).

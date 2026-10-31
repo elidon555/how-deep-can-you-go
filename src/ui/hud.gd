@@ -1,6 +1,6 @@
 extends CanvasLayer
 class_name Hud
-## On-screen info: depth, best, health, ore carried, money, ropes, messages, prompts, controls.
+## On-screen info: depth, best, health, your bag, money, the drill's state, messages, prompts.
 ## Also owns the vignette + film grain overlay underneath it.
 
 const VIGNETTE := """
@@ -25,6 +25,7 @@ var _toast := Label.new()
 var _prompt := Label.new()
 var _help := Label.new()
 var _hearts := Hearts.new()
+var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
 
@@ -49,6 +50,8 @@ func _ready() -> void:
 	_label(_ore, Vector2(28, 150), 24, GOLD)
 	_label(_money, Vector2(28, 180), 24, Color("9fd88a"))
 	_label(_ropes, Vector2(28, 210), 24, Color("d9b98a"))
+	_drill.position = Vector2(1280 - 300, 20)
+	add_child(_drill)
 	_label(_toast, Vector2(0, 150), 36, Color("d9c9b0"))
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_toast.size = Vector2(1280, 60)
@@ -83,16 +86,20 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.queue_redraw()
 
 
-func set_ore(count: int, value: int) -> void:
-	_ore.text = "Ore: %d  ($%d)" % [count, value] if count > 0 else "Ore: 0"
+func set_bag(p: Player) -> void:
+	_ore.text = ("Ore: %d ($%d)" % [p.ore_count, p.ore_value] if p.ore_count > 0 else "Ore: 0") \
+		+ "   Coal: %d" % p.coal
+	_ropes.text = "Ropes: %d" % p.ropes
+
+
+func set_drill(d: Drill, player_depth: float) -> void:
+	_drill.drill = d
+	_drill.away = d.to_local(Vector2(d.global_position.x, player_depth * World.METER)).y / World.METER
+	_drill.queue_redraw()
 
 
 func set_money(money: int) -> void:
 	_money.text = "$%d" % money
-
-
-func set_ropes(ropes: int) -> void:
-	_ropes.text = "Ropes: %d" % ropes
 
 
 func set_prompt(text: String) -> void:
@@ -111,6 +118,43 @@ func toast(text: String, seconds := 2.0) -> void:
 	_toast_tween = create_tween()
 	_toast_tween.tween_interval(seconds)
 	_toast_tween.tween_property(_toast, "modulate:a", 0.0, 1.2)
+
+
+## Drill status: depth, speed, fuel and hull bars, breach warning, how far you are from it.
+class DrillPanel extends Control:
+	var drill: Drill
+	var away := 0.0     # meters the player is below (+) or above (-) the drill
+
+	func _draw() -> void:
+		if drill == null:
+			return
+		var font := get_theme_default_font()
+		draw_rect(Rect2(0, 0, 280, 128), Color(0.04, 0.035, 0.05, 0.75))
+		draw_rect(Rect2(0, 0, 280, 128), Color("8a6a42"), false, 2.0)
+		var depth := maxi(0, int(drill.global_position.y / World.METER))
+		draw_string(font, Vector2(12, 26), "DRILL  %d m" % depth, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f4e3c1"))
+		var sp: String = Drill.SPEED_NAMES[drill.speed]
+		if drill.fuel <= 0.0:
+			sp = "NO FUEL"
+		draw_string(font, Vector2(150, 26), sp, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
+			Color("d04a3f") if drill.fuel <= 0.0 else Color("3fd0c0"))
+		_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
+		_bar(Vector2(12, 66), "Hull", drill.hull / drill.max_hull, Color("c8c8d0"))
+		var leaks := drill.get_breaches().size()
+		if leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
+			draw_string(font, Vector2(12, 112), "BREACH x%d — hold E on it to repair" % leaks,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff5a4a"))
+		elif absf(away) > 3.0:
+			var where := "above" if away < 0.0 else "below"
+			draw_string(font, Vector2(12, 112), "You are %d m %s the drill" % [absi(int(away)), where],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9c9b0"))
+
+	func _bar(at: Vector2, label: String, frac: float, c: Color) -> void:
+		var font := get_theme_default_font()
+		draw_string(font, at + Vector2(0, 16), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9c9b0"))
+		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206, 14)), Color(0.1, 0.1, 0.12))
+		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206 * clampf(frac, 0.0, 1.0), 14)),
+			c if frac > 0.25 else Color("d04a3f"))
 
 
 ## Pixel hearts, full or empty.

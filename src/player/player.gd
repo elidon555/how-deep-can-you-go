@@ -4,6 +4,7 @@ class_name Player
 ## Digging lives in the Pickaxe child (pickaxe.gd). Group "player".
 
 signal health_changed(health: int, max_health: int)
+signal bag_changed
 signal died
 signal rope_requested(feet: Vector2)   # main decides if there's a rope left to hang
 
@@ -31,6 +32,12 @@ const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall"}
 
 var world: World
 var pick := Pickaxe.new()
+var interactor := Interactor.new()
+# what you carry (each player has their own bag)
+var ore_count := 0
+var ore_value := 0
+var coal := 0
+var ropes := 0
 var health := 3
 var max_health := 3
 var frozen := false            # e.g. while the shop is open
@@ -43,6 +50,7 @@ var anim := "idle"
 
 var _anims := {}               # name -> [row, frames]
 var _rope_x := 0.0             # where the hands hold the rope, px right of the sprite centre
+var _rope_last_y := 0.0
 var _anim_t := 0.0
 var _coyote_t := 0.0
 var _buffer_t := 0.0
@@ -72,6 +80,9 @@ func _ready() -> void:
 	pick.player = self
 	pick.world = world
 	add_child(pick)
+	interactor.player = self
+	add_child(interactor)
+	ropes = Progress.rope_capacity()
 	max_health = Progress.max_health()
 	health = max_health
 
@@ -137,6 +148,7 @@ func _try_grab_rope() -> void:
 	for r: Rope in get_tree().get_nodes_in_group("rope"):
 		if r.covers(global_position):
 			rope = r
+			_rope_last_y = r.global_position.y
 			velocity = Vector2.ZERO
 			_buffer_t = 0.0
 			return
@@ -145,22 +157,69 @@ func _try_grab_rope() -> void:
 func _climb(dt: float, dir: float) -> void:
 	var v := 0.0 if frozen else Input.get_axis("up", "down")
 	velocity = Vector2(0, v * CLIMB_SPEED)
-	var hold_x := rope.position.x - _rope_x * facing     # rope in the hands, not through the body
+	var hold_x := rope.global_position.x - _rope_x * facing     # rope in the hands, not through the body
 	global_position.x = move_toward(global_position.x, hold_x, 200.0 * dt)
+	global_position.y += rope.global_position.y - _rope_last_y   # ride along if it moves (drill ladders)
+	_rope_last_y = rope.global_position.y
 	move_and_slide()
 	# you can climb until your feet are level with the anchor, so you can step off at the top
-	if global_position.y < rope.top - HALF_HEIGHT - 6.0:
-		global_position.y = rope.top - HALF_HEIGHT - 6.0
+	if global_position.y < rope.top_y() - HALF_HEIGHT - 6.0:
+		global_position.y = rope.top_y() - HALF_HEIGHT - 6.0
 	var jump_off := Input.is_action_just_pressed("jump") and not Input.is_action_pressed("up")
-	var off_bottom := global_position.y > rope.bottom and v > 0
+	var off_bottom := global_position.y > rope.bottom_y() and v > 0
 	var step_off := dir != 0 and v == 0
-	var at_top := global_position.y < rope.top - HALF_HEIGHT + 4.0
+	var at_top := global_position.y < rope.top_y() - HALF_HEIGHT + 4.0
 	if jump_off or off_bottom or step_off or not is_instance_valid(rope):
 		rope = null
 		if jump_off:
 			velocity = Vector2(facing * 120.0, JUMP_V * 0.6)
 		elif step_off and at_top:
 			velocity = Vector2(dir * SPEED, JUMP_V * 0.55)   # little hop onto the ledge
+
+
+# ---------------------------------------------------------------- bag
+
+func add_ore(kind: int) -> void:
+	if kind == World.COAL:
+		coal += 1
+	else:
+		ore_count += 1
+		ore_value += World.ORES[kind][1]
+	bag_changed.emit()
+
+
+func add_value(value: int) -> void:
+	ore_count += 1
+	ore_value += value
+	bag_changed.emit()
+
+
+## Hands over the metal ore's value and empties that part of the bag.
+func take_ore_value() -> int:
+	var v := ore_value
+	ore_count = 0
+	ore_value = 0
+	bag_changed.emit()
+	return v
+
+
+func take_coal() -> int:
+	var c := coal
+	coal = 0
+	bag_changed.emit()
+	return c
+
+
+func refill_ropes() -> void:
+	ropes = maxi(ropes, Progress.rope_capacity())
+	bag_changed.emit()
+
+
+func lose_bag() -> void:
+	ore_count = 0
+	ore_value = 0
+	coal = 0
+	bag_changed.emit()
 
 
 # ---------------------------------------------------------------- health
@@ -178,6 +237,10 @@ func hurt(damage: int, from: Vector2) -> void:
 	health_changed.emit(health, max_health)
 	if health == 0:
 		died.emit()
+
+
+func is_hurt() -> bool:
+	return health < Progress.max_health()
 
 
 func heal_full() -> void:

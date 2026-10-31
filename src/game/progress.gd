@@ -1,12 +1,15 @@
 extends Node
 ## Autoload "Progress": what carries over between runs (money, upgrades, best depth).
-## Saved to user://progress.json. Ore you carry is only banked when you reach the surface.
+## Saved to user://progress.json. Ore you carry only counts once it's sold at the drill.
 
 signal changed
 
 const SAVE_PATH := "user://progress.json"
 const OLD_BEST_PATH := "user://best.txt"
 const UPGRADES := {
+	"head": {"name": "Drill head", "desc": "Drill bores faster", "costs": [20, 60, 150, 350]},
+	"plating": {"name": "Hull plating", "desc": "+25 drill hull", "costs": [25, 70, 180]},
+	"tank": {"name": "Fuel tank", "desc": "+40 fuel capacity", "costs": [15, 45, 120]},
 	"pick": {"name": "Sharper pickaxe", "desc": "Breaks rock faster", "costs": [15, 40, 90, 200, 450]},
 	"arms": {"name": "Strong arms", "desc": "Swing faster", "costs": [25, 70, 160]},
 	"lamp": {"name": "Brighter lamp", "desc": "See further in the dark", "costs": [10, 30, 80]},
@@ -57,6 +60,18 @@ func record_depth(depth: int) -> bool:
 
 
 # ---------------------------------------------------------------- what upgrades do
+
+func drill_power() -> float:
+	return 5.0 * pow(1.3, level("head"))
+
+
+func drill_hull() -> float:
+	return 100.0 + 25.0 * level("plating")
+
+
+func drill_fuel() -> float:
+	return 100.0 + 40.0 * level("tank")
+
 
 func pick_power() -> float:
 	return 3.0 * pow(1.35, level("pick"))

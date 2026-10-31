@@ -1,14 +1,16 @@
 extends Node2D
 class_name Rope
-## A rope hammered into the rock above where it was thrown; climb it with W / S.
-## Group "rope" so the player can find one to grab.
+## Something you can climb with W / S: a rope hammered into the rock, or a ladder fixed to
+## the drill's hull (as a child of it, so it moves along). Group "rope".
+## top / bottom are local y, so a rope keeps working when its parent moves.
 
 const MAX_LEN := 15.0 * World.METER
 const TEX := "res://assets/props/rope.png"
 const ANCHOR_TEX := "res://assets/props/rope_anchor.png"
 
-var top := 0.0       # global y of the anchor
-var bottom := 0.0    # global y of the rope's end
+var top := 0.0       # local y of the anchor
+var bottom := 0.0    # local y of the end
+var ladder := false  # drawn as a ladder instead of a rope
 var _tex: Texture2D
 var _anchor: Texture2D
 
@@ -16,13 +18,13 @@ var _anchor: Texture2D
 ## Hangs a rope above `feet` (the thrower's feet): up to the first rock overhead, or as far as
 ## a throw reaches (hammered into the shaft wall), but never above the surface.
 static func hang(world: World, feet: Vector2) -> Rope:
-	var r := Rope.new()
-	r.position = Vector2(feet.x, 0)
-	r.bottom = feet.y + 4.0
 	var y := feet.y - 40.0
 	while y > feet.y - MAX_LEN and y > -4.0 and world.is_air(Vector2(feet.x, y - 4.0)):
 		y -= 4.0
+	var r := Rope.new()
+	r.position = Vector2(feet.x, 0)
 	r.top = maxf(y, -4.0)
+	r.bottom = feet.y + 4.0
 	return r
 
 
@@ -34,12 +36,28 @@ func _ready() -> void:
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 
 
-## Can someone centred at p grab this rope?
+func top_y() -> float:
+	return global_position.y + top
+
+
+func bottom_y() -> float:
+	return global_position.y + bottom
+
+
+## Can someone centred at p (global) grab it?
 func covers(p: Vector2) -> bool:
-	return absf(p.x - position.x) < 10.0 and p.y > top - 26.0 and p.y < bottom + 10.0
+	return absf(p.x - global_position.x) < 10.0 and p.y > top_y() - 26.0 and p.y < bottom_y() + 10.0
 
 
 func _draw() -> void:
+	if ladder:
+		for x in [-5.0, 5.0]:
+			draw_line(Vector2(x, top), Vector2(x, bottom), Color("2a2d33"), 2.0)
+		var y := top + 3.0
+		while y < bottom:
+			draw_line(Vector2(-5, y), Vector2(5, y), Color("6d7480"), 2.0)
+			y += 7.0
+		return
 	# the anchor's top edge sits on the rock; the rope starts at its bottom edge
 	var start: float = top + (_anchor.get_height() if _anchor else 2.0)
 	if _tex:

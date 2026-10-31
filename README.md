@@ -1,6 +1,9 @@
 # How Deep Can You Go?
 
-A 2D side-view digging game: dig down toward the Earth's core. Depth is your score.
+A 2D side-view game about a crew boring toward the Earth's core in a giant drilling machine,
+"Barotrauma, but a drill": keep the machine running, go outside to dig for coal and ore,
+repair the hull, and don't get left behind. Single player for now; co-op is planned and the
+code is built for it (no system assumes there's only one player).
 
 Built with **Godot 4.7**.
 
@@ -21,20 +24,25 @@ Or open `project.godot` in the Godot editor and press F5.
 | Dig (click = one swing, hold = keep swinging) | Left click or J | X |
 | Aim the pick | W up · S down · S + A/D diagonal · otherwise the way you face | Stick / D-pad |
 | Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
-| Trade at the merchant's stall | E | B |
+| Use a station (helm, furnace, workbench, medkit) / hold to repair a breach | E | B |
 | Restart | R | Back |
 
 Bindings live in `src/game/controls.gd`.
 
 ## How it plays
 
-- Dig down for depth. Swings need room: in a cramped spot the pick knocks the rock first.
-- Ore (copper, deeper silver, deep gold) is carried in your bag and only banked when you
-  get back to the surface; die and it's lost. Ropes get you back up (refilled at the surface).
-- Spend money at the merchant's stall: sharper pickaxe, stronger arms, brighter lamp, thicker
-  coat (+health), rope bag. Upgrades and best depth are saved (`user://progress.json`).
-- Loose boulders drop when you dig out what holds them up. Crawlers hunt in the caves below
-  25 m; fight them with the pickaxe.
+- You start inside the drill at the surface. The **helm** sets its speed (stopped / slow /
+  full); it bores down on its own, carrying you, and drops through caves it breaks into.
+- It burns **fuel**. Go out the side doors, drop into the gap beside the hull and dig into
+  the rock for **coal** (shovel it into the **furnace**) and metal ore (copper, silver deeper,
+  gold deep), which the **workbench** sells for upgrades (drill head, hull plating, fuel tank,
+  pickaxe, arms, lamp, coat, rope bag) and where ropes are restocked. Ladders on the hull get
+  you back in. The drill keeps going without you, so don't get left behind.
+- Falling boulders, crawlers chewing the hull and hard crashes tear **breaches** that leak
+  hull until someone holds E on them. Hull at 0 = the drill is wrecked. Ore the drill grinds
+  through itself is lost; only what you dig out by hand counts.
+- Swings need room; loose boulders drop when undermined; crawlers hunt below 25 m.
+- Upgrades and best depth are saved (`user://progress.json`).
 
 See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
 
@@ -44,23 +52,26 @@ All game code is in `src/`:
 
 | File | What it does |
 |---|---|
-| `main.gd` / `main.tscn` | Puts the game together; rules across systems (selling, ropes, death, milestones) |
+| `main.gd` / `main.tscn` | Puts the game together; rules across systems (who gets ore, ropes, death, wreck, milestones) |
+| `drill/drill.gd` | The drilling machine: descent, cutting, fuel, hull, breaches, engine sound |
+| `drill/drill_art.gd` | How the drill looks (cutaway hull, head, lights), drawn in code for now |
+| `drill/station.gd` / `stations.gd` | Usable things on the drill: helm, furnace, workbench, medkit, breach |
 | `game/controls.gd` | Input bindings (keyboard, mouse, controller) |
 | `game/progress.gd` | Autoload `Progress`: money, upgrades, best depth, save file |
 | `world/world.gd` | Endless diggable ground: generation, fill/damage grid, collision, ore, props |
 | `world/boulder.gd` | Loose boulders that fall when undermined |
 | `world/rope.gd` | Climbable ropes |
-| `world/camp.gd` | Surface camp with the merchant's stall |
 | `world/backdrop.gd` | Back wall and parallax sky / cave layers |
 | `world/terrain.gdshader` / `backwall.gdshader` | Smooth rock with outlines and cracks / cave back wall |
-| `player/player.gd` | Movement, rope climbing, health, animation, helmet lamp |
+| `player/player.gd` | Movement, rope/ladder climbing, health, bag, animation, helmet lamp |
+| `player/interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
 | `player/pickaxe.gd` | Swings: aim, room check, impact timing, hitting creatures, swoosh trail |
 | `creatures/crawler.gd` | Cave crawler: patrol, chase, lunge, take hits |
 | `creatures/watcher.gd` | Glowing eyes in the dark |
 | `creatures/spawner.gd` | Spawns / despawns creatures around the player |
 | `fx/fx.gd` | Particle bursts, impacts, hit-stop |
 | `fx/sfx.gd` | Autoload `Sfx`: sound effects, cave ambience, drips |
-| `ui/hud.gd` / `ui/shop.gd` | On-screen info / the merchant's shop |
+| `ui/hud.gd` / `ui/shop.gd` | On-screen info + drill panel / the workbench's upgrades |
 
 ## Tests
 
@@ -72,8 +83,9 @@ godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 ```
 
 `feel_test` checks digging never gets stuck and how fast each direction is per material;
-`systems_test` plays through rope climbing + selling, the shop, a crawler fight and a falling
-boulder and prints PASS/FAIL.
+`systems_test` plays through the drill (riding it, furnace, workbench + shop, a breach and its
+repair), rope climbing, a crawler fight and a falling boulder and prints PASS/FAIL. Tests use a
+fixed world seed and never write the real save.
 
 ## Art pipeline
 
