@@ -27,7 +27,7 @@ var _help := Label.new()
 var _hearts := Hearts.new()
 var _breath := Breath.new()
 var _boss := BossBar.new()
-var _p2 := _p2_label()
+var _crew := _crew_label()
 var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
@@ -94,14 +94,17 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.queue_redraw()
 
 
-## Player two's status (top right, under the drill panel).
-func set_p2(p: Player) -> void:
-	_p2.visible = true
-	_p2.text = "P2  %s   Ore %d ($%d)  Coal %d" % ["♥".repeat(maxi(p.health, 0)) if p.health > 0 else "down",
-		p.ore_count, p.ore_value, p.coal]
+## The rest of the crew (top right, under the drill panel): one line per other miner.
+func set_crew(others: Array) -> void:
+	var lines := []
+	for p: Player in others:
+		lines.append("P%d  %s   Ore %d ($%d)  Coal %d" % [p.number,
+			"♥".repeat(maxi(p.health, 0)) if p.health > 0 else "down", p.ore_count, p.ore_value, p.coal])
+	_crew.text = "\n".join(lines)
+	_crew.visible = not lines.is_empty()
 
 
-func _p2_label() -> Label:
+func _crew_label() -> Label:
 	var l := Label.new()
 	l.visible = false
 	l.position = Vector2(1280 - 300, 176)
@@ -115,6 +118,7 @@ func _p2_label() -> Label:
 
 ## A boss health bar at the bottom of the screen; name "" hides it.
 func set_boss(name: String, frac: float) -> void:
+	Net.echo(&"hud", &"set_boss", [name, frac])
 	_boss.boss = name
 	_boss.frac = frac
 	_boss.queue_redraw()
@@ -150,7 +154,14 @@ func set_vignette(strength: float) -> void:
 	_vignette.material.set_shader_parameter("strength", strength)
 
 
+## A message for the crew (online, the host's show on every screen).
 func toast(text: String, seconds := 2.0) -> void:
+	Net.echo(&"hud", &"toast", [text, seconds])
+	note(text, seconds)
+
+
+## A message on this screen only.
+func note(text: String, seconds := 2.0) -> void:
 	_toast.text = text
 	_toast.modulate.a = 1.0
 	if _toast_tween:

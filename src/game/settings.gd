@@ -1,6 +1,6 @@
 extends Node
-## Autoload "Settings": volumes (master / music / effects) and fullscreen, saved to
-## user://settings.cfg. Sets up the "Music" and "SFX" audio buses.
+## Autoload "Settings": volumes (master / music / effects), fullscreen and the last address
+## joined online, saved to user://settings.cfg. Sets up the "Music" and "SFX" audio buses.
 
 const PATH := "user://settings.cfg"
 
@@ -8,6 +8,7 @@ var master := 0.8
 var music := 0.6
 var effects := 0.9
 var fullscreen := false
+var last_address := ""
 
 
 func _ready() -> void:
@@ -22,6 +23,7 @@ func _ready() -> void:
 		music = cfg.get_value("audio", "music", music)
 		effects = cfg.get_value("audio", "effects", effects)
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
+		last_address = cfg.get_value("online", "last_address", last_address)
 	apply()
 
 
@@ -39,6 +41,7 @@ func save() -> void:
 	cfg.set_value("audio", "music", music)
 	cfg.set_value("audio", "effects", effects)
 	cfg.set_value("video", "fullscreen", fullscreen)
+	cfg.set_value("online", "last_address", last_address)
 	cfg.save(PATH)
 
 

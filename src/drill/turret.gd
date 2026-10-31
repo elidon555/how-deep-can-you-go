@@ -66,6 +66,21 @@ func fire() -> void:
 	Sfx.play("turret_fire", global_position)
 
 
+## Online: where it's turning to and its kick (host), shown on a client (which turns it itself).
+func target_aim() -> float:
+	return _want
+
+
+func recoil() -> float:
+	return _recoil
+
+
+func show_aim(want: float, kick: float) -> void:
+	_want = want
+	if kick > _recoil:
+		_recoil = kick
+
+
 func _dir() -> Vector2:
 	return Vector2(cos(aim) * side, sin(aim))
 
@@ -106,9 +121,22 @@ class Bolt extends Node2D:
 	var turret: Turret
 	var world: World
 	var velocity := Vector2.ZERO
+	var puppet := false        # online client: the host's bolt, just drawn
 	var _life := BOLT_LIFE
 
+	func _ready() -> void:
+		add_to_group("net")
+
+	func net_state() -> Array:
+		return [velocity]
+
+	func net_apply(s: Array) -> void:
+		velocity = s[0]
+
 	func _physics_process(dt: float) -> void:
+		if puppet:
+			queue_redraw()
+			return
 		_life -= dt
 		if _life <= 0.0:
 			queue_free()

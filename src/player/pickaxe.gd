@@ -63,6 +63,8 @@ func anim() -> String:
 
 
 func _input(event: InputEvent) -> void:
+	if not player.input.is_local():
+		return                # someone else's (online): their machine says how they aim
 	if not player.input.uses_mouse:
 		mouse_aim = false
 	elif event is InputEventMouseMotion or event is InputEventMouseButton:
@@ -221,6 +223,22 @@ func _dig_side(c: Vector2, dir: float, amount: float) -> Dictionary:
 static func _merge(a: Dictionary, b: Dictionary) -> Dictionary:
 	return {"hit": a.hit or b.hit, "mat": a.mat if a.hit else b.mat, "broke": a.broke + b.broke,
 		"points": a.points + b.points}
+
+
+## Online: how far along the swoosh is (host), and showing the host's swing (client puppet).
+func trail_age() -> float:
+	return _trail_t
+
+
+func show_swing(swing: String, trail_age: float) -> void:
+	kind = swing
+	if trail_age < _trail_t:
+		_trail_t = trail_age
+
+
+func show_trail(dt: float) -> void:
+	_trail_t += dt
+	queue_redraw()
 
 
 ## Swoosh behind the pick head for the strike + impact frames.

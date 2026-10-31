@@ -6,6 +6,7 @@ class_name TheEye
 ## any vein lives nothing can hurt the eye. Break the veins and it opens fully: then it can be
 ## killed. Dying, it cracks the Floor open (the ending).
 ## Drawn from its rendered sheet (assets/sprites/eye.png, eye.json) when present, shapes until.
+## Online: the host runs it (and its veins and orbs); clients show puppets (net_state / net_apply).
 
 signal woke
 signal health_changed(frac: float)
@@ -39,10 +40,12 @@ var _sprite := Sprite2D.new()
 var _glow := Sprite2D.new()
 var _anims := {}
 var _pulse := AudioStreamPlayer2D.new()
+var puppet := false
 
 
 func _ready() -> void:
 	add_to_group("boss")
+	add_to_group("net")
 	if ResourceLoader.exists(SHEET_INFO):
 		var info = JSON.parse_string(FileAccess.get_file_as_string(SHEET_INFO))
 		for name in info.anims:
@@ -88,6 +91,11 @@ func knock() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_hurt_t -= dt
+		_animate(dt)
+		queue_redraw()
+		return
 	_t -= dt
 	_hurt_t -= dt
 	match state:
@@ -130,6 +138,27 @@ func _attack(dt: float) -> void:
 	if _worm_t <= 0.0 and get_tree().get_nodes_in_group("worm").size() < 2:
 		_worm_t = WORM_EVERY
 		spawner.spawn_worm()
+
+
+func net_state() -> Array:
+	return [state, hp, _hurt_t]
+
+
+func net_apply(s: Array) -> void:
+	if s[0] != state:
+		_anim_t = 0.0
+		var awake: bool = s[0] != State.ASLEEP and s[0] < State.DYING
+		if awake and not _pulse.playing and _pulse.stream:
+			_pulse.play()
+		elif not awake:
+			_pulse.stop()
+	state = s[0]
+	hp = s[1]
+	_hurt_t = maxf(_hurt_t, s[2])
+
+
+func is_awake() -> bool:
+	return state != State.ASLEEP
 
 
 ## Turret bolts / the pickaxe: only lands while the eye is open.
@@ -207,9 +236,11 @@ class Vein extends Node2D:
 	var _glow := Sprite2D.new()
 	var _anims := {}
 	var _t := 0.0
+	var puppet := false
 
 	func _ready() -> void:
 		add_to_group("hittable")
+		add_to_group("net")
 		var info_path := "res://assets/sprites/vein.json"
 		if ResourceLoader.exists(info_path):
 			var info = JSON.parse_string(FileAccess.get_file_as_string(info_path))
@@ -227,6 +258,15 @@ class Vein extends Node2D:
 				_glow.texture = load("res://assets/sprites/vein_glow.png")
 				eye.glow_parent.add_child(_glow)
 				tree_exiting.connect(_glow.queue_free)
+
+	func net_state() -> Array:
+		return [alive, modulate]
+
+	func net_apply(s: Array) -> void:
+		if alive and not s[0]:
+			_t = 0.0
+		alive = s[0]
+		modulate = s[1]
 
 	func is_hit_by(p: Vector2) -> bool:
 		return alive and p.distance_to(global_position + Vector2(0, -14)) < 18.0
@@ -267,14 +307,26 @@ class Orb extends Node2D:
 	var velocity := Vector2.ZERO
 	var drill: Drill
 	var world: World
+	var puppet := false
 	var _life := 6.0
 
+	func net_state() -> Array:
+		return [velocity, _life]
+
+	func net_apply(s: Array) -> void:
+		velocity = s[0]
+		_life = s[1]
+
 	func _ready() -> void:
+		add_to_group("net")
 		var m := CanvasItemMaterial.new()
 		m.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED     # it glows
 		material = m
 
 	func _physics_process(dt: float) -> void:
+		if puppet:
+			queue_redraw()
+			return
 		_life -= dt
 		position += velocity * dt
 		var hit := _life <= 0.0 or not world.is_air(global_position)

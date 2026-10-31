@@ -39,11 +39,14 @@ var _seg_rects := []           # [Rect2 per size], biggest first
 var _seg_sizes := []
 var _head_tex: Texture2D
 var _head_info := {}
+var puppet := false            # online client: the host's worm, shown (net_state / net_apply)
+var _net_body := PackedVector2Array()   # client: where the host has the segments (slid toward)
 
 
 func _ready() -> void:
 	add_to_group("hittable")
 	add_to_group("worm")
+	add_to_group("net")
 	top_level = true
 	for i in SEGMENTS:
 		body.append(global_position - heading * SPACING * i)
@@ -65,6 +68,13 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_flash = maxf(_flash - dt * 6.0, 0.0)
+		var k := 1.0 - exp(-NetEntities.SMOOTH * dt)
+		for i in mini(_net_body.size(), body.size()):
+			body[i] = body[i].lerp(_net_body[i], k)
+		queue_redraw()
+		return
 	_t -= dt
 	_flash = maxf(_flash - dt * 6.0, 0.0)
 	_bite_t -= dt
@@ -105,6 +115,21 @@ func _physics_process(dt: float) -> void:
 	global_position = body[0]
 	_bite_players()
 	queue_redraw()
+
+
+func net_state() -> Array:
+	return [state, PackedVector2Array(body), heading, _flash, modulate.a]
+
+
+func net_apply(s: Array) -> void:
+	state = s[0]
+	if _net_body.is_empty():          # just shown: start where the host has it
+		for i in mini(s[1].size(), body.size()):
+			body[i] = s[1][i]
+	_net_body = s[1]
+	heading = s[2]
+	_flash = maxf(_flash, s[3])
+	modulate.a = s[4]
 
 
 func _steer(target: Vector2, dt: float) -> void:

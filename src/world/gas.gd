@@ -20,6 +20,7 @@ var _age := 0.0
 var _haze := CPUParticles2D.new()
 var _hiss := AudioStreamPlayer2D.new()
 var _gone := false
+var puppet := false            # online client: the host's cloud, shown (net_state / net_apply)
 
 
 ## A gas cell was dug open at `pos`: join a cloud nearby or start one. Returns the cloud.
@@ -52,6 +53,7 @@ func radius() -> float:
 
 func _ready() -> void:
 	add_to_group("gas")
+	add_to_group("net")
 	_haze.amount = 40
 	_haze.lifetime = 3.0
 	_haze.emission_shape = CPUParticles2D.EMISSION_SHAPE_SPHERE
@@ -82,10 +84,12 @@ func _ready() -> void:
 func _process(dt: float) -> void:
 	if _gone:
 		return
-	_age += dt
-	position += DRIFT * dt
 	_haze.emission_sphere_radius = radius() * 0.8
 	_haze.amount = clampi(20 + volume * 2, 20, 90)
+	if puppet:
+		return
+	_age += dt
+	position += DRIFT * dt
 	# lava inside the cloud lights it
 	if fmod(_age, 0.5) < dt:
 		for i in 4:
@@ -95,6 +99,19 @@ func _process(dt: float) -> void:
 				return
 	if _age >= LIFE:
 		queue_free()
+
+
+func net_state() -> Array:
+	return [volume, _age, _gone]
+
+
+func net_apply(s: Array) -> void:
+	volume = s[0]
+	_age = s[1]
+	if s[2] and not _gone:
+		_gone = true
+		_hiss.stop()
+		_haze.emitting = false
 
 
 func explode() -> void:

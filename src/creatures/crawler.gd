@@ -38,11 +38,13 @@ var _hop_t := 0.0
 var _sprite := Sprite2D.new()
 var _eyes := Sprite2D.new()
 var _anims := {}               # name -> [row, frames]
+var puppet := false            # online client: the host's crawler, shown (net_state / net_apply)
 
 
 func _ready() -> void:
 	add_to_group("hittable")
 	add_to_group("creature")
+	add_to_group("net")
 	collision_layer = 4
 	collision_mask = 1
 	floor_snap_length = 6.0
@@ -58,8 +60,12 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_animate(dt)
+		return
 	_t -= dt
 	_growl_t -= dt
+	player = _nearest_player()   # (co-op: whoever is closest)
 	if state != State.DEAD and world.liquid_at(global_position).y == Liquids.LAVA:
 		hit(HP, global_position + Vector2(0, 10))          # lava kills it
 		Sfx.play("sizzle", global_position)
@@ -201,6 +207,26 @@ func _setup_sprite() -> void:
 		_eyes.texture = load(SHEET_GLOW)
 		glow_parent.add_child(_eyes)
 		tree_exiting.connect(_eyes.queue_free)
+
+
+func _nearest_player() -> Player:
+	var best := player
+	for p: Player in get_tree().get_nodes_in_group("player"):
+		if p.health > 0 and (best == null or best.health <= 0 or p.global_position.distance_squared_to(global_position)
+				< best.global_position.distance_squared_to(global_position)):
+			best = p
+	return best
+
+
+func net_state() -> Array:
+	return [state, dir, modulate.a, velocity]
+
+
+func net_apply(s: Array) -> void:
+	state = s[0]
+	dir = s[1]
+	modulate.a = s[2]
+	velocity = s[3]
 
 
 func _animate(dt: float) -> void:

@@ -253,7 +253,7 @@ func _place_boulders(ch: World.Chunk) -> void:
 			b.world = world
 			b.position = centre
 			b.shattered.connect(world.boulder_shattered.emit)
-			world.add_child(b)
+			world.add_entity(b)
 
 
 ## Deepest ore found at this depth, sometimes a cheaper one.

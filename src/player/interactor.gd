@@ -16,6 +16,8 @@ var _was_frozen := false
 
 
 func _physics_process(dt: float) -> void:
+	if player.puppet:
+		return                 # online client: the host decides, and sends the prompt
 	# a key that just closed a menu must not also re-open something
 	var blocked := player.frozen or _was_frozen or player.health <= 0
 	_was_frozen = player.frozen
@@ -51,6 +53,15 @@ func _nearest() -> Node2D:
 			best = n
 			best_score = score
 	return best
+
+
+func prompt_text() -> String:
+	return _prompt
+
+
+## Online client: the prompt the host shows for this miner.
+func show_prompt(text: String) -> void:
+	_set_prompt(text)
 
 
 func _set_prompt(text: String) -> void:

@@ -7,6 +7,19 @@ class LootCrate extends Station:
 	signal searched(pos: Vector2, text: String)
 	var seed_value := 0
 	var opened := false
+	var puppet := false        # online client: the host's crate
+
+	func _ready() -> void:
+		super._ready()
+		add_to_group("net")
+
+	func net_state() -> Array:
+		return [opened]
+
+	func net_apply(s: Array) -> void:
+		if opened != s[0]:
+			opened = s[0]
+			queue_redraw()
 	var _closed: Texture2D = Art.lit("res://assets/props/crate.png")
 	var _open: Texture2D = Art.lit("res://assets/props/crate_open.png")
 
@@ -45,17 +58,27 @@ class LootCrate extends Station:
 ## A note left by someone who came down before: read it (E). Adds it to what you've found.
 class Note extends Station:
 	var note_id := 0
+	var puppet := false        # online client: the host's note
+
+	func _ready() -> void:
+		super._ready()
+		add_to_group("net")
+
+	func net_state() -> Array:
+		return [note_id]
+
+	func net_apply(s: Array) -> void:
+		note_id = s[0]
 	var _tex: Texture2D = Art.lit("res://assets/props/journal.png")
 	var _bob := randf() * TAU
 
 	func prompt(_p: Player) -> String:
 		return "E: read the note"
 
-	func interact(_p: Player) -> void:
+	func interact(p: Player) -> void:
 		Progress.find_note(note_id)
-		get_tree().call_group("run", "note_read")
+		get_tree().call_group("run", "note_read", p, note_id)    # (shows it to whoever read it)
 		Sfx.play("note_pickup", global_position)
-		get_tree().call_group("note_view", "show_note", note_id)
 		queue_free()
 
 	func _process(dt: float) -> void:

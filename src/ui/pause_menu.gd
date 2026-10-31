@@ -1,6 +1,8 @@
 extends Control
 class_name PauseMenu
 ## Esc in play: freezes the game. Resume, settings, restart the run, back to the title.
+## Online the game goes on behind it (the crew is still playing); a client can only leave
+## (the host restarts runs for everyone).
 
 signal settings_pressed
 signal restart_pressed
@@ -19,8 +21,11 @@ func _ready() -> void:
 	box.add_child(UiStyle.label("Paused", 40))
 	box.add_child(UiStyle.button("Resume", close))
 	box.add_child(UiStyle.button("Settings", func(): settings_pressed.emit()))
-	box.add_child(UiStyle.button("Restart run", func(): restart_pressed.emit()))
-	box.add_child(UiStyle.button("Quit to title", func(): title_pressed.emit()))
+	var restart := UiStyle.button("Restart run", func(): restart_pressed.emit())
+	restart.visible = not Net.is_client()
+	box.add_child(restart)
+	box.add_child(UiStyle.button("Leave the game" if Net.is_client() else "Quit to title",
+		func(): title_pressed.emit()))
 	box.add_child(seed_text)
 
 
@@ -35,7 +40,7 @@ var seed_text := UiStyle.label("", 16, UiStyle.DIM)
 
 func open() -> void:
 	visible = true
-	get_tree().paused = true
+	get_tree().paused = not Net.is_online()
 	Sfx.play("ui_open", Vector2.INF, -4.0, 0.0)
 
 

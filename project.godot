@@ -11,6 +11,7 @@ config/features=PackedStringArray("4.7")
 Settings="*res://src/game/settings.gd"
 Progress="*res://src/game/progress.gd"
 Sfx="*res://src/fx/sfx.gd"
+Net="*res://src/net/net.gd"
 
 [display]
 

@@ -79,6 +79,12 @@ var glow_tx := {}
 var terrain_glow_shader: Shader = preload("res://src/world/terrain_glow.gdshader")
 var liquids: Liquids             # set by main; told when a chunk's liquid changes
 var gen: WorldGen               # makes the chunks (world_gen.gd)
+# online co-op (NetWorld): the host records what changes; a client shows the host's ground
+var record := false             # host: note every changed cell in `changes` / `touched`
+var changes := {}               # cells changed since NetWorld last sent them
+var touched := {}               # chunk keys changed since the run began (for late joiners)
+var puppet := false             # client: generated the same, but only the host changes it
+                                # (no ore, gas or caving in here; entities come from the host)
 
 
 func _ready() -> void:
@@ -164,6 +170,17 @@ func _gen_chunk(key: Vector2i) -> void:
 	chunks[key] = ch
 
 
+## Something generated into the world that the host owns online (boulders, crates, notes).
+## On a client it's made (the generator's dice roll the same) but dropped: the host's copy is
+## shown instead (NetEntities).
+func add_entity(n: Node2D) -> bool:
+	if puppet:
+		n.free()
+		return false
+	add_child(n)
+	return true
+
+
 func add_decor(cell: Vector2i, n: Node2D) -> void:
 	if not decor.has(cell):
 		decor[cell] = []
@@ -196,6 +213,8 @@ func set_liquid(gx: int, gy: int, amount: float, kind: int) -> void:
 		ch.has_liquid = true
 	if liquids:
 		liquids.cell_changed(gx, gy)
+	if record:
+		_note_change(gx, gy)
 
 
 ## Liquid at a world point: Vector2(amount, kind).
@@ -215,6 +234,13 @@ func place_rock(gx: int, gy: int, mat: int) -> void:
 	ch.dmg[k] = 0.0
 	ch.liquid[k] = 0.0
 	ch.ltype[k] = Liquids.NONE
+	_closed(gx, gy)
+	if record:
+		_note_change(gx, gy)
+
+
+## A cell turned solid: redraw (depth darkening) and rebuild collision around it.
+func _closed(gx: int, gy: int) -> void:
 	for kx in _keys_covering(gx, R_INT + 1):
 		for ky in _keys_covering(gy, R_INT + 1):
 			var o: Chunk = chunks.get(Vector2i(kx, ky))
@@ -316,11 +342,15 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 	ch.fill[(gy & 31) * C + (gx & 31)] = nf
 	ch.dmg[(gy & 31) * C + (gx & 31)] = 0.0
 	_set_pixel(gx, gy, nf, 0.0)
+	if record:
+		_note_change(gx, gy)
 	if old >= 0.5 and nf < 0.5:
-		opened.emit(gx, gy)
+		if not puppet:
+			opened.emit(gx, gy)
 		if gas.has(Vector2i(gx, gy)):
 			gas.erase(Vector2i(gx, gy))
-			gas_released.emit(Vector2(gx * CELL + 4, gy * CELL + 4))
+			if not puppet:
+				gas_released.emit(Vector2(gx * CELL + 4, gy * CELL + 4))
 		var cell := Vector2i(gx, gy)
 		dug[cell] = true
 		for kx in _keys_covering(gx, R_INT + 1):
@@ -337,11 +367,12 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 			o[0].queue_free()
 			o[1].queue_free()
 			ores.erase(cell)
-			if _collect:
+			if _collect and not puppet:
 				ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
 		if decor.has(cell):
 			for n in decor[cell]:
-				n.queue_free()
+				if is_instance_valid(n):      # (a note may already have been picked up)
+					n.queue_free()
 			decor.erase(cell)
 
 
@@ -351,6 +382,34 @@ func _set_dmg(gx: int, gy: int, d: float) -> void:
 		return
 	ch.dmg[(gy & 31) * C + (gx & 31)] = d
 	_set_pixel(gx, gy, ch.fill[(gy & 31) * C + (gx & 31)], d)
+	if record:
+		_note_change(gx, gy)
+
+
+func _note_change(gx: int, gy: int) -> void:
+	changes[Vector2i(gx, gy)] = true
+	touched[Vector2i(gx >> 5, gy >> 5)] = true
+
+
+## Client: a cell as the host has it now (NetWorld). Ore and props in a cell that opens go,
+## like when it's dug here.
+func net_set_cell(gx: int, gy: int, fill: float, dmg: float, mat: int, liquid: float, ltype: int) -> void:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null or gx < 0 or gx >= W:
+		return
+	var k := (gy & 31) * C + (gx & 31)
+	var old := ch.fill[k]
+	if ch.mat[k] != mat:
+		ch.mat[k] = mat
+		_closed(gx, gy)           # (a material change redraws the same way)
+	if absf(old - fill) > 0.0001 or absf(ch.dmg[k] - dmg) > 0.003:
+		_set_fill(gx, gy, fill, old)
+		if fill >= 0.5 and old < 0.5:
+			_closed(gx, gy)
+		if dmg > 0.0:
+			_set_dmg(gx, gy, dmg)
+	if absf(ch.liquid[k] - liquid) > 0.003 or ch.ltype[k] != ltype:
+		set_liquid(gx, gy, liquid, ltype)
 
 
 ## Updates the fill (R) and crack (B) pixel in every chunk image whose 1-cell margin covers it.

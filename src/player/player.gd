@@ -2,6 +2,8 @@ extends CharacterBody2D
 class_name Player
 ## The little digger: tight platformer controls, rope climbing, health, animation, helmet lamp.
 ## Digging lives in the Pickaxe child (pickaxe.gd). Group "player".
+## Online, the host simulates every miner; on clients they're puppets showing the host's state
+## (net_state / net_apply, see src/net/net_entities.gd).
 
 signal health_changed(health: int, max_health: int)
 signal bag_changed
@@ -45,6 +47,8 @@ var pick := Pickaxe.new()
 var interactor := Interactor.new()
 var input := PlayerInput.new()   # whose controls drive this player (set before adding)
 var number := 1                  # player 1, 2 ...
+var peer := 1                    # online: the machine whose controls drive this miner (1 = host)
+var puppet := false              # online client: shows the host's miner, doesn't simulate it
 # what you carry (each player has their own bag)
 var ore_count := 0
 var ore_value := 0
@@ -81,10 +85,12 @@ var _drown_t := 0.0
 var _last_step_frame := -1
 var _cone := PointLight2D.new()
 var _glow := PointLight2D.new()
+var _lamp_dir := 0               # where the helmet lamp points: 0 ahead, 1 down, -1 up
 
 
 func _ready() -> void:
 	add_to_group("player")
+	add_to_group("net")
 	collision_layer = 2            # creatures and boulders check us themselves
 	collision_mask = 1
 	floor_max_angle = deg_to_rad(50)
@@ -108,6 +114,11 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_update_lamp(dt)
+		pick.show_trail(dt)
+		return
+	input.update(self)
 	var dir := 0.0 if frozen else input.axis("left", "right")
 	if dir != 0:
 		facing = int(sign(dir))
@@ -415,11 +426,11 @@ func _setup_lamp() -> void:
 
 
 func _update_lamp(dt: float) -> void:
+	if not puppet:
+		_lamp_dir = 1 if input.pressed("down") else (-1 if input.pressed("up") else 0)
 	var aim := 0.0 if facing > 0 else PI
-	if input.pressed("down"):
-		aim = PI / 2
-	elif input.pressed("up"):
-		aim = -PI / 2
+	if _lamp_dir != 0:
+		aim = PI / 2 * _lamp_dir
 	var reach := Progress.lamp_scale()
 	_cone.rotation = lerp_angle(_cone.rotation, aim, 10.0 * dt)
 	_cone.position = Vector2(4 * facing, -20)
@@ -492,3 +503,40 @@ static func _cone_texture() -> ImageTexture:
 			var a := (1.0 - smoothstep(0.32, 0.56, ang)) * pow(1.0 - dist, 0.9)
 			img.set_pixel(x, y, Color(a, a, a, a))
 	return ImageTexture.create_from_image(img)
+
+
+# ---------------------------------------------------------------- online co-op
+
+func net_state() -> Array:
+	return [peer, number, sprite.frame, facing, sprite.visible, visible, health, max_health, breath,
+		ore_count, ore_value, coal, ropes, sold_value, _lamp_dir, pick.kind, pick.trail_age(),
+		interactor.prompt_text(), frozen]
+
+
+func net_apply(s: Array) -> void:
+	peer = s[0]
+	number = s[1]
+	sprite.frame = s[2]
+	facing = s[3]
+	sprite.flip_h = facing < 0
+	sprite.visible = s[4]
+	visible = s[5]
+	if health != s[6] or max_health != s[7]:
+		health = s[6]
+		max_health = s[7]
+		health_changed.emit(health, max_health)
+	if breath != s[8]:
+		breath = s[8]
+		breath_changed.emit(breath / BREATH)
+	var bag := [ore_count, ore_value, coal, ropes, sold_value]
+	if bag != s.slice(9, 14):
+		ore_count = s[9]
+		ore_value = s[10]
+		coal = s[11]
+		ropes = s[12]
+		sold_value = s[13]
+		bag_changed.emit()
+	_lamp_dir = s[14]
+	pick.show_swing(s[15], s[16])
+	interactor.show_prompt(s[17])
+	frozen = s[18]

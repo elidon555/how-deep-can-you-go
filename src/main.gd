@@ -2,6 +2,9 @@ extends Node2D
 ## Puts the game together: world, the drill, player, camera, lighting, creatures, HUD.
 ## Game rules that span systems live here: who gets the ore, ropes, the drill being wrecked,
 ## dying, milestones. The drill (src/drill) is the crew's base: ore is sold at its workbench.
+## Co-op: a second player on a controller (Start), or online (src/net, up to Net.MAX_PLAYERS):
+## the host runs this whole game for the crew, a client runs it as a puppet show of the host's
+## (its world, drill, liquids and spawner are puppets, see NetSession).
 
 static var skip_title := false  # set when restarting a run, so it goes straight back in
 static var daily_run := false   # this run is today's Daily Dig
@@ -41,6 +44,8 @@ var notes_read := 0
 var tips := Tips.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
+var session: NetSession = null       # online: this machine's side of the shared run
+var _self_bound := false             # client: our own miner has been matched to the host's
 
 var shake := 0.0
 var time := 0.0
@@ -58,6 +63,7 @@ func _ready() -> void:
 			Progress.dry_run = true   # the test's changes stay in memory, never in the save
 	add_child(backdrop)
 	world = World.new()
+	world.puppet = Net.is_client()
 	add_child(world)
 	world.ore_found.connect(_on_ore_found)
 	world.boulder_shattered.connect(_on_boulder_shattered)
@@ -70,22 +76,25 @@ func _ready() -> void:
 	glow_layer.add_child(world.glow_root)
 
 	drill.world = world
+	drill.puppet = Net.is_client()
 	add_child(drill)
 	liquids.world = world
 	liquids.drill = drill
+	liquids.puppet = Net.is_client()
 	world.liquids = liquids
 	add_child(liquids)
 	liquids.reacted.connect(_on_liquid_reacted)
 	drill.place(World.WIDTH_PX / 2.0)
 	drill.workbench_used.connect(_on_workbench_used)
 	drill.wrecked.connect(_on_drill_wrecked)
-	drill.damaged.connect(func(amount): shake = maxf(shake, minf(amount / 10.0, 1.2)))
+	drill.damaged.connect(func(amount): add_shake(minf(amount / 10.0, 1.2), drill.global_position))
 	drill.cutter.chewed.connect(_on_drill_chewed)
 	drill.cutter.knocked.connect(func(_pos): if eye: eye.knock())
 	drill.sonar_used.connect(_on_sonar_used)
 	drill.guns.bolt_hit.connect(_on_bolt_hit)
 
 	player = _add_player(PlayerInput.new())
+	player.puppet = Net.is_client()
 	player.health_changed.connect(hud.set_health)
 	player.bag_changed.connect(_update_bag)
 	player.breath_changed.connect(hud.set_breath)
@@ -107,6 +116,7 @@ func _ready() -> void:
 
 	spawner.world = world
 	spawner.player = player
+	spawner.puppet = Net.is_client()
 	spawner.drill = drill
 	spawner.worm_coming.connect(_on_worm_coming)
 	spawner.worm_killed.connect(_on_worm_killed)
@@ -123,8 +133,8 @@ func _ready() -> void:
 	hud.add_child(sonar)
 	sonar.drill = drill
 	sonar.world = world
-	sonar.closed.connect(func(): if _menu_user: _menu_user.frozen = false)
-	shop.closed.connect(func(): if _menu_user: _menu_user.frozen = false)
+	sonar.closed.connect(_on_menu_closed)
+	shop.closed.connect(_on_menu_closed)
 	Progress.changed.connect(_on_progress_changed)
 	hud.set_health(player.health, player.max_health)
 	_update_bag()
@@ -132,6 +142,8 @@ func _ready() -> void:
 	tips.main = self
 	if not Progress.dry_run:
 		add_child(tips)
+	if Net.is_online():
+		go_online()
 	_autotest()
 
 
@@ -140,8 +152,11 @@ func _process(dt: float) -> void:
 	_frame_camera(dt)
 	var depth_m := player.position.y / World.METER
 	var depth := maxi(0, int(floor(depth_m)))
-	world.ensure_generated(player.position.y + 900.0)
-	if eye == null and world.next_row * World.CHUNK_PX > World.BOTTOM * World.METER + 64.0:
+	var deepest := player.position.y
+	for p in players:
+		deepest = maxf(deepest, p.position.y)
+	world.ensure_generated(deepest + 900.0)
+	if eye == null and not Net.is_client() and world.next_row * World.CHUNK_PX > World.BOTTOM * World.METER + 64.0:
 		_spawn_eye()
 	backdrop.follow(cam, depth_m)
 	Sfx.set_depth(depth_m)
@@ -153,7 +168,9 @@ func _process(dt: float) -> void:
 	hud.set_depth(depth, Progress.best, new_best)
 	if not menus.on_title():
 		run_time += dt
-		Sfx.music("music_deep" if depth_m > 300.0 else "")
+		Sfx.music(_music(depth_m))
+	hud.set_crew(players.filter(func(p): return p != player))
+	PlayerInput.menu_open = menus.pause.visible or menus.settings.visible   # (online it doesn't pause)
 	for m in MILESTONES:
 		if depth >= m and not shown.has(m):
 			shown[m] = true
@@ -163,8 +180,25 @@ func _process(dt: float) -> void:
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
-	if Input.is_action_just_pressed("restart") and not menus.on_title():
+	if Input.is_action_just_pressed("restart") and not menus.on_title() and not Net.is_client():
 		_restart()
+
+
+## What's playing: the boss's theme once it's awake, the ending, the deep theme past 300 m.
+func _music(depth_m: float) -> String:
+	if ending:
+		return "music_ending"
+	if eye and eye.is_awake() and eye.state < TheEye.State.DYING:
+		return "music_boss"
+	return "music_deep" if depth_m > 300.0 else ""
+
+
+## A jolt of camera shake. Online it's sent to every screen; each shakes only if its own miner
+## is near `at` (anywhere when at is INF).
+func add_shake(amount: float, at := Vector2.INF) -> void:
+	Net.echo(&"main", &"add_shake", [amount, at])
+	if at == Vector2.INF or player.global_position.distance_to(at) < 500.0:
+		shake = maxf(shake, amount)
 
 
 ## Gloomy sky -> pitch black within ~30 m; the lamp takes over, flickering now and then.
@@ -174,16 +208,19 @@ func _update_light(depth: int, dt: float) -> void:
 	dark.color = Color(1, 1, 1).lerp(Color(0.13, 0.15, 0.22), 1.0 - light)
 	if "--bright" in OS.get_cmdline_user_args():
 		dark.color = Color.WHITE
-	player.lamp_on = light < 1.0
-	player.sprite.modulate = Color(1, 1, 1).lerp(Color(0.72, 0.74, 0.82), 1.0 - light)
+	for p in players:
+		p.lamp_on = light < 1.0
+		p.sprite.modulate = Color(1, 1, 1).lerp(Color(0.72, 0.74, 0.82), 1.0 - light)
 	motes.emitting = depth > 3
 	hud.set_vignette(lerpf(0.25, 0.85, clampf(depth / 60.0, 0.0, 1.0)))
-	player.light_mul = 0.94 + 0.06 * sin(time * 13.0) * sin(time * 7.3)
+	var mul := 0.94 + 0.06 * sin(time * 13.0) * sin(time * 7.3)
 	flicker_t -= dt
 	if depth > 30 and flicker_t < -2.0 and randf() < dt * 0.12:
 		flicker_t = randf_range(0.2, 0.5)
 	if flicker_t > 0.0:
-		player.light_mul = randf_range(0.05, 0.6)
+		mul = randf_range(0.05, 0.6)
+	for p in players:
+		p.light_mul = mul
 
 
 ## Upgrades bought at the workbench apply right away.
@@ -201,11 +238,13 @@ func _update_bag() -> void:
 
 # ---------------------------------------------------------------- events
 
-func note_read() -> void:
+## Someone read a note (CampItems.Note): it shows on their screen.
+func note_read(p: Player, id: int) -> void:
 	notes_read += 1
+	_show_to(p, "note:%d" % id)
 
 
-# ---------------------------------------------------------------- players (local co-op)
+# ---------------------------------------------------------------- players (co-op)
 
 ## A player with every game hook wired up, standing in the drill.
 func _add_player(input: PlayerInput) -> Player:
@@ -213,42 +252,72 @@ func _add_player(input: PlayerInput) -> Player:
 	p.world = world
 	p.input = input
 	p.number = players.size() + 1
+	p.peer = (input as NetInput).peer if input is NetInput else Net.my_id()
 	p.position = drill.position + Vector2(-34 + 24 * players.size(), Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	add_child(p)
 	if not input.uses_mouse:
 		p.pick.mouse_aim = false
-	p.pick.struck.connect(_on_struck)
-	p.pick.hit_thing.connect(_on_hit_thing)
-	p.rope_requested.connect(_on_rope_requested)
+	p.pick.struck.connect(_on_struck.bind(p))
+	p.pick.hit_thing.connect(_on_hit_thing.bind(p))
+	p.rope_requested.connect(_on_rope_requested.bind(p))
 	p.died.connect(_on_player_died.bind(p))
 	p.kicked_dust.connect(fx.dust)
 	players.append(p)
 	return p
 
 
-## Start on a controller adds player two (on that controller).
+## Host: a miner for someone who joined online (their controls arrive over the network).
+func add_remote_player(input: NetInput) -> Player:
+	return _add_player(input)
+
+
+## Client: the miner the host has for `peer` (ours is the one made at the start).
+func puppet_player(peer: int) -> Player:
+	if peer == Net.my_id() and not _self_bound:
+		_self_bound = true
+		return player
+	var p := _add_player(NetInput.new(peer))
+	p.puppet = true
+	return p
+
+
+func remove_player(p: Player) -> void:
+	if p == player:
+		return
+	players.erase(p)
+	if drill.guns.gunner == p:
+		drill.guns.gunner = null
+	p.queue_free()
+
+
+## Is this miner played on this machine (keyboard or a controller here)?
+func _is_here(p: Player) -> bool:
+	return p.input.is_local()
+
+
+## Start on a controller adds player two (on that controller). Not on an online client.
 func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START \
-			and players.size() < 2 and not menus.on_title() and not run_over:
+			and not players.any(func(p): return p.input.prefix == "p2_") and players.size() < Net.MAX_PLAYERS \
+			and not menus.on_title() and not run_over and not Net.is_client():
 		Controls.add_pad_player("p2_", event.device)
 		var p2 := _add_player(PlayerInput.new("p2_", false))
-		p2.health_changed.connect(func(h, m): hud.set_p2(p2))
-		p2.bag_changed.connect(func(): hud.set_p2(p2))
-		hud.set_p2(p2)
-		hud.toast("Player 2 joined!", 1.5)
+		hud.toast("Player %d joined!" % p2.number, 1.5)
 		get_viewport().set_input_as_handled()
 
 
-## One player: the camera rides along. Several: it frames them all, zooming out as they spread.
+## One player here: the camera rides along. Several on this machine: it frames them all,
+## zooming out as they spread. (Online, each machine follows its own miner.)
 func _frame_camera(dt: float) -> void:
 	var inside := drill.contains(player.global_position)
-	var want := ZOOM_GUNNER if drill.guns.gunner != null else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
-	if players.size() > 1:
+	var want := ZOOM_GUNNER if drill.guns.gunner == player else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
+	var here := players.filter(_is_here) if not Net.is_client() else [player]
+	if here.size() > 1:
 		if cam.get_parent() != self:
 			cam.reparent(self)
-		var lo := players[0].global_position
+		var lo: Vector2 = here[0].global_position
 		var hi := lo
-		for p in players:
+		for p: Player in here:
 			lo = lo.min(p.global_position)
 			hi = hi.max(p.global_position)
 		cam.global_position = (lo + hi) / 2.0
@@ -308,24 +377,26 @@ func _spawn_eye() -> void:
 
 ## The eye is dead: the Floor cracks and light pours up. The end of the run.
 func _on_eye_died(pos: Vector2) -> void:
-	ending = true
 	hud.set_boss("", 0.0)
-	shake = 3.0
-	Sfx.music("music_ending")
 	fx.explosion(pos, 70.0)
-	var light := ColorRect.new()                 # the light from below fills the screen
+	show_ending_light()
+	Progress.beat_the_game()
+	await get_tree().create_timer(5.0).timeout
+	_end_run({"reason": "You reached the bottom.",
+		"ending": "The Floor is open. Whatever was waiting down there\nhas seen you now."})
+
+
+## The light from below fills the screen (on every screen, online).
+func show_ending_light() -> void:
+	Net.echo(&"main", &"show_ending_light", [])
+	ending = true
+	shake = 3.0
+	var light := ColorRect.new()
 	light.color = Color(1.0, 0.97, 0.88, 0.0)
 	light.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	light.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(light)
 	create_tween().tween_property(light, "color:a", 1.0, 4.0)
-	Progress.beat_the_game()
-	await get_tree().create_timer(5.0).timeout
-	run_over = true
-	player.frozen = true
-	menus.show_run({"reason": "You reached the bottom.", "depth": maxi(0, int(drill.global_position.y / World.METER)),
-		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
-		"seconds": run_time, "notes": notes_read, "ending": "The Floor is open. Whatever was waiting down there\nhas seen you now."})
 
 
 ## Firedamp leaks out of rock you broke open: a cloud that a spark will set off.
@@ -338,8 +409,7 @@ func _on_gas_released(pos: Vector2) -> void:
 
 func _on_gas_exploded(pos: Vector2, size: float) -> void:
 	fx.explosion(pos, size)
-	if player.global_position.distance_to(pos) < 500.0:
-		shake = maxf(shake, 2.0)
+	add_shake(2.0, pos)
 
 
 ## Steel on stone throws sparks: any gas around them goes up.
@@ -348,15 +418,23 @@ func _sparks_at(pos: Vector2, mat: int) -> void:
 		GasCloud.spark(get_tree(), pos)
 
 
-func _on_struck(pos: Vector2, mat: int, broke: int, kind: String) -> void:
+func _on_struck(pos: Vector2, mat: int, broke: int, kind: String, p: Player) -> void:
 	_sparks_at(pos, mat)
-	shake = maxf(shake, 0.25 if kind == "bonk" else (0.6 if broke > 0 else 0.35))
-	fx.impact(pos, mat, broke, kind, player.facing)
+	_shake_for(p, 0.25 if kind == "bonk" else (0.6 if broke > 0 else 0.35))
+	fx.impact(pos, mat, broke, kind, p.facing)
 
 
-func _on_hit_thing(pos: Vector2) -> void:
-	shake = maxf(shake, 0.5)
-	fx.flesh(pos, player.facing)
+func _on_hit_thing(pos: Vector2, p: Player) -> void:
+	_shake_for(p, 0.5)
+	fx.flesh(pos, p.facing)
+
+
+## Shake only the screen of the miner it happened to (their own swing).
+func _shake_for(p: Player, amount: float) -> void:
+	if p == player or _is_here(p):
+		shake = maxf(shake, amount)
+	elif session:
+		session.tell(p, "shake", amount)
 
 
 ## Ore goes into the bag of whoever is closest (the one who dug it).
@@ -366,7 +444,7 @@ func _on_ore_found(pos: Vector2, kind: int) -> void:
 	if p == null:
 		return               # dug while the drill was being set down, before anyone's here
 	p.add_ore(kind)
-	shake = maxf(shake, 0.8)
+	_shake_for(p, 0.8)
 	var c: Color = ore[3]
 	fx.burst(pos, Color(c.r * 2.0, c.g * 2.0, c.b * 2.0), 14, 140.0, Vector2.UP, 180.0, 0.6, 2.5, true)
 	Sfx.play("ore", pos)
@@ -374,16 +452,15 @@ func _on_ore_found(pos: Vector2, kind: int) -> void:
 
 
 func _on_boulder_shattered(pos: Vector2) -> void:
-	shake = maxf(shake, 0.9)
-	fx.impact(pos, World.M.STONE, 3, "dig_down", player.facing)
+	add_shake(0.9, pos)
+	fx.impact(pos, World.M.STONE, 3, "dig_down", 1)
 
 
 ## The cutters broke rock: debris, and a little rumble if you're near the drill.
 func _on_drill_chewed(points: Array, mat: int) -> void:
 	_sparks_at(points[0], mat)
 	fx.chunks(points, mat, drill.global_position.x)
-	if player.global_position.distance_to(drill.global_position) < 260.0:
-		shake = maxf(shake, 0.18)
+	add_shake(0.18, drill.global_position)
 
 
 ## Water hit lava: hiss, steam, new rock.
@@ -393,9 +470,8 @@ func _on_liquid_reacted(pos: Vector2) -> void:
 
 
 func _on_sonar_used(p: Player) -> void:
-	_menu_user = p
-	sonar.open()
 	p.frozen = true
+	_show_to(p, "sonar")
 
 
 func _on_bolt_hit(pos: Vector2, on_rock: bool) -> void:
@@ -408,14 +484,14 @@ func _on_bolt_hit(pos: Vector2, on_rock: bool) -> void:
 
 func _on_worm_coming(_w: Worm) -> void:
 	Sfx.play("rumble", Vector2.INF, -2.0, 0.0)
-	shake = maxf(shake, 0.6)
+	add_shake(0.6)
 	hud.toast("Something big is burrowing toward the drill...", 3.0)
 
 
 func _on_worm_killed(pos: Vector2) -> void:
 	kills += 1
 	fx.gore(pos)
-	shake = maxf(shake, 1.2)
+	add_shake(1.2, pos)
 	var p := _nearest_player(pos)
 	if p:
 		p.add_value(WORM_BOUNTY)
@@ -432,10 +508,35 @@ func _on_crawler_killed(pos: Vector2) -> void:
 
 
 func _on_workbench_used(p: Player) -> void:
-	_menu_user = p
-	shop.open()
 	p.frozen = true
-	Sfx.play("ui_click", Vector2.INF)
+	_show_to(p, "shop")
+
+
+## Opens a menu (shop, sonar, "note:<id>") on the screen of the miner who asked for it: here,
+## or on their machine online (it tells the host when it closes, see _on_menu_closed).
+func _show_to(p: Player, menu: String) -> void:
+	if _is_here(p) or p == player:
+		open_menu(menu, p)
+	elif session:
+		session.tell(p, "menu", menu)
+
+
+func open_menu(menu: String, p: Player = null) -> void:
+	_menu_user = p if p else player
+	if menu == "shop":
+		shop.open()
+		Sfx.play("ui_click", Vector2.INF)
+	elif menu == "sonar":
+		sonar.open()
+	elif menu.begins_with("note:"):
+		menus.note_view.show_note(int(menu.trim_prefix("note:")))
+
+
+func _on_menu_closed() -> void:
+	if Net.is_client():
+		session.menu_closed()
+	elif _menu_user:
+		_menu_user.frozen = false
 
 
 func _on_drill_wrecked() -> void:
@@ -451,10 +552,9 @@ func _nearest_player(pos: Vector2) -> Player:
 	return best
 
 
-func _on_rope_requested(feet: Vector2) -> void:
-	var p := _nearest_player(feet)
+func _on_rope_requested(feet: Vector2, p: Player) -> void:
 	if p.ropes <= 0:
-		hud.toast("No ropes left. More at the drill's workbench.", 1.2)
+		_tell(p, "No ropes left. More at the drill's workbench.", 1.2)
 		return
 	if not GameConfig.infinite_resources():
 		p.ropes -= 1
@@ -463,24 +563,56 @@ func _on_rope_requested(feet: Vector2) -> void:
 	_update_bag()
 
 
+## A message for one miner only (on their screen, online).
+func _tell(p: Player, text: String, seconds := 2.0) -> void:
+	if _is_here(p) or p == player:
+		hud.note(text, seconds)
+	elif session:
+		session.tell(p, "note", [text, seconds])
+
+
 func _game_over(reason: String) -> void:
 	if run_over:
 		return
-	run_over = true
-	player.frozen = true
 	Progress.save()
 	await get_tree().create_timer(1.5).timeout
-	menus.show_run({"reason": reason, "depth": maxi(0, int(drill.global_position.y / World.METER)),
-		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
-		"seconds": run_time, "notes": notes_read})
+	_end_run({"reason": reason})
+
+
+## The run is over for the whole crew: everyone stops and sees the summary.
+func _end_run(stats: Dictionary) -> void:
+	run_over = true
+	for p in players:
+		p.frozen = true
+	var earned := 0
+	for p in players:
+		earned += p.sold_value
+	stats.merge({"depth": maxi(0, int(drill.global_position.y / World.METER)), "earned": earned,
+		"kills": kills, "seconds": run_time, "notes": notes_read})
+	show_run(stats)
+
+
+## The run summary (online, on every screen; best depth is each machine's own).
+func show_run(stats: Dictionary) -> void:
+	Net.echo(&"main", &"show_run", [stats])
+	run_over = true
+	stats.merge({"best": Progress.best, "new_best": new_best}, true)
+	menus.show_run(stats)
 
 
 func _restart(to_title := false) -> void:
+	if Net.is_client() and not to_title:
+		return                       # online the host starts the next run (everyone comes along)
 	Progress.save()
 	if to_title:
 		daily_run = false
+		Net.leave()                  # (a host ending the session sends everyone home)
 	if not daily_run and not Progress.dry_run:
 		World.fixed_seed = -1        # a fresh random world
+	if Net.is_host():
+		if World.fixed_seed < 0:
+			World.fixed_seed = randi() & 0x7fffffff   # picked here so the crew gets the same one
+		Net.new_run({"seed": World.fixed_seed, "daily": daily_run})
 	skip_title = not to_title
 	get_tree().paused = false
 	get_tree().reload_current_scene()
@@ -496,13 +628,17 @@ func _setup_menus() -> void:
 		daily_run = true
 		World.fixed_seed = Progress.daily_seed()
 		_restart())
+	menus.host.connect(_host_game)
+	if Net.is_client():
+		daily_run = bool(Net.run.get("daily", false))
 	menus.pause.seed_text.text = ("Daily Dig %s · " % Progress.today() if daily_run else "") + "Seed %d" % world.seed
 	menus.can_pause = func(): return not run_over and drill.guns.gunner != player
-	# tests and autotests go straight in; so does "dig again"
-	if skip_title or Progress.dry_run:
+	# tests and autotests go straight in; so do "dig again" and joining someone's game
+	if skip_title or Progress.dry_run or Net.is_online():
 		skip_title = false
 	else:
-		menus.show_title()
+		menus.show_title(Net.notice)
+		Net.notice = ""
 		hud.visible = false
 		player.frozen = true
 
@@ -510,6 +646,30 @@ func _setup_menus() -> void:
 func _start_run() -> void:
 	hud.visible = true
 	player.frozen = false
+
+
+## Title screen "Host a game": open this run to others and start digging.
+func _host_game(port: int) -> void:
+	if Net.host(port) != OK:
+		return                       # (the title shows why)
+	go_online()
+	menus.online.visible = false
+	menus.title.visible = false
+	Sfx.music("")
+	_start_run()
+	var ips := Array(IP.get_local_addresses()).filter(func(a: String):
+		return a.count(".") == 3 and not a.begins_with("127.") and not a.begins_with("169.254."))
+	hud.toast("Hosting on port %d. Friends join with: %s" % [port, ", ".join(ips) if ips else "your IP"], 8.0)
+
+
+## This run is online now (hosting, or joined someone's): start syncing it.
+func go_online() -> void:
+	if session:
+		return
+	session = NetSession.new()
+	session.main = self
+	add_child(session)
+	menus.pause.seed_text.text = ("Hosting" if Net.is_host() else "Online") + " · " + menus.pause.seed_text.text
 
 
 func _notification(what: int) -> void:

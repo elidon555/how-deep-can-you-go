@@ -57,8 +57,9 @@ static func _build(world: World, spot: Vector3i) -> void:
 				var c := CampItems.LootCrate.new()
 				c.position = Vector2(x + 8.0, floor_y)
 				c.seed_value = rng.randi()
-				world.add_child(c)
-				world.add_decor(Vector2i(int(c.position.x) / World.CELL, spot.y), c)
+				var at := Vector2i(int(c.position.x) / World.CELL, spot.y)
+				if world.add_entity(c):
+					world.add_decor(at, c)
 				w = 18.0
 			"table":
 				world.gen.place_prop("table", Vector2(x + 11.0, floor_y), false, cell)
@@ -81,6 +82,6 @@ static func _note(world: World, at: Vector2, gy: int, rng: RandomNumberGenerator
 	var n := CampItems.Note.new()
 	n.note_id = id
 	n.position = at
-	world.add_child(n)
-	world.add_decor(Vector2i(int(at.x) / World.CELL, gy), n)
+	if world.add_entity(n):
+		world.add_decor(Vector2i(int(at.x) / World.CELL, gy), n)
 	return true

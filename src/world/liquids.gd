@@ -27,6 +27,8 @@ var _woken := {}                  # chunk keys already woken once
 var _t := 0.0
 var _tick := 0
 var step_usec := 0                # how long the last simulation tick took (for profiling)
+var puppet := false               # online client: the host's liquid arrives cell by cell (NetWorld);
+                                  # here it's only drawn
 
 
 func _ready() -> void:
@@ -55,6 +57,11 @@ func wake(gx: int, gy: int) -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_wake_chunks_near(_centres())     # (draws the pockets generated here as they come near)
+		_active.clear()
+		_redraw()
+		return
 	_t += dt
 	while _t >= TICK:
 		_t -= TICK

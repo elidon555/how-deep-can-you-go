@@ -4,7 +4,10 @@ class_name TitleMenu
 
 signal start_pressed
 signal daily_pressed
+signal online_pressed
 signal settings_pressed
+
+var _notice := UiStyle.label("", 20, Color("e05a4a"))    # e.g. "The host ended the game."
 
 
 func _ready() -> void:
@@ -24,12 +27,15 @@ func _ready() -> void:
 	col.add_child(UiStyle.label("HOW DEEP", 84))
 	col.add_child(UiStyle.label("CAN YOU GO?", 54, Color("e0b23a")))
 	col.add_child(UiStyle.label("Something is waiting at the bottom.", 22, UiStyle.DIM))
+	_notice.visible = false
+	col.add_child(_notice)
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 150)        # the drill shows through here
 	col.add_child(gap)
 	for b in [UiStyle.button("Start digging", func(): start_pressed.emit()),
 			UiStyle.button("Daily Dig (best today: %d m)" % Progress.daily.get(Progress.today(), 0),
 				func(): daily_pressed.emit()),
+			UiStyle.button("Play online", func(): online_pressed.emit()),
 			UiStyle.button("Settings", func(): settings_pressed.emit()),
 			UiStyle.button("Quit", func(): get_tree().quit())]:
 		var row := CenterContainer.new()
@@ -39,3 +45,9 @@ func _ready() -> void:
 		Progress.best, Progress.found_notes.size(), Lore.NOTES.size()], 20, UiStyle.DIM))
 	if Progress.beaten:
 		col.add_child(UiStyle.label("The Floor has been opened.", 18, Color("e0b8ff")))
+
+
+## A line under the title for why you're back here ("" for none).
+func set_notice(text: String) -> void:
+	_notice.text = text
+	_notice.visible = text != ""

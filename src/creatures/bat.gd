@@ -4,6 +4,7 @@ class_name Bat
 ## an erratic swoop, nipping (1 damage) and peeling away. It looks ahead and steers around rock
 ## and the drill's hull (it only gets into the cabin through an open hatch). One hit kills it.
 ## Drawn from its rendered sheet (assets/sprites/bat.png): fly / dive / hang / die frames.
+## Online: simulated on the host, a puppet on clients (net_state / net_apply).
 
 signal killed(pos: Vector2)
 
@@ -27,12 +28,14 @@ var _sprite := Sprite2D.new()
 var _eyes := Sprite2D.new()
 var _anims := {}
 var _target: Player
+var puppet := false
 
 
 func _ready() -> void:
 	add_to_group("hittable")
 	add_to_group("creature")
 	add_to_group("bat")
+	add_to_group("net")
 	var info = JSON.parse_string(FileAccess.get_file_as_string(SHEET_INFO))
 	for name in info.anims:
 		_anims[name] = [int(info.anims[name].row), int(info.anims[name].frames)]
@@ -49,6 +52,9 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_animate(dt)
+		return
 	_t -= dt
 	match state:
 		State.HANG:
@@ -138,6 +144,17 @@ func hit(_damage: int, _from: Vector2) -> void:
 	remove_from_group("hittable")
 	Sfx.play("bat_screech", global_position, -2.0, 0.3)
 	killed.emit(global_position)
+
+
+func net_state() -> Array:
+	return [state, velocity, modulate.a]
+
+
+func net_apply(s: Array) -> void:
+	state = s[0]
+	velocity = s[1]
+	modulate.a = s[2]
+	_sprite.position = Vector2(0, 10) if state == State.HANG else Vector2.ZERO
 
 
 func _animate(dt: float) -> void:

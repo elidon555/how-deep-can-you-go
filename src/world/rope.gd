@@ -25,6 +25,7 @@ static func hang(world: World, feet: Vector2) -> Rope:
 	r.position = Vector2(feet.x, 0)
 	r.top = maxf(y, -4.0)
 	r.bottom = feet.y + 4.0
+	r.add_to_group("net")          # the crew's ropes are shared online (not the drill's ladders)
 	return r
 
 
@@ -34,6 +35,20 @@ func _ready() -> void:
 	_tex = Art.lit(TEX) if ResourceLoader.exists(TEX) else null
 	_anchor = load(ANCHOR_TEX) if ResourceLoader.exists(ANCHOR_TEX) else null
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+
+
+var puppet := false   # online client: a rope the host's crew hung
+
+
+func net_state() -> Array:
+	return [top, bottom]
+
+
+func net_apply(s: Array) -> void:
+	if top != s[0] or bottom != s[1]:
+		top = s[0]
+		bottom = s[1]
+		queue_redraw()
 
 
 func top_y() -> float:

@@ -20,10 +20,12 @@ var _t := 0.0
 var _fall_from := 0.0
 var _sprite := Sprite2D.new()
 var world: World
+var puppet := false        # online client: the host's boulder, shown (net_state / net_apply)
 
 
 func _ready() -> void:
 	add_to_group("hittable")
+	add_to_group("net")
 	collision_layer = 1
 	collision_mask = 1
 	var cs := CollisionShape2D.new()
@@ -37,7 +39,9 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
-	var player := get_tree().get_first_node_in_group("player") as Player
+	if puppet:
+		return
+	var player := _nearest_player()
 	if player == null or global_position.distance_to(player.global_position) > AWAKE_DIST:
 		return
 	_t -= dt
@@ -71,6 +75,24 @@ func _physics_process(dt: float) -> void:
 				else:
 					state = State.REST
 					velocity = Vector2.ZERO
+
+
+func _nearest_player() -> Player:
+	var best: Player = null
+	for p: Player in get_tree().get_nodes_in_group("player"):
+		if best == null or p.global_position.distance_squared_to(global_position) \
+				< best.global_position.distance_squared_to(global_position):
+			best = p
+	return best
+
+
+func net_state() -> Array:
+	return [_sprite.position.x, _sprite.flip_h]
+
+
+func net_apply(s: Array) -> void:
+	_sprite.position.x = s[0]
+	_sprite.flip_h = s[1]
 
 
 func hit(_damage: int, _from: Vector2) -> void:

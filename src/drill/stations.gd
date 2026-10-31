@@ -140,6 +140,13 @@ class Medkit extends Station:
 	func _process(_dt: float) -> void:
 		queue_redraw()
 
+	## Online: seconds left recharging (host), shown on a client.
+	func wait() -> float:
+		return maxf(_ready_at - Time.get_ticks_msec() / 1000.0, 0.0)
+
+	func show_wait(w: float) -> void:
+		_ready_at = Time.get_ticks_msec() / 1000.0 + w
+
 	func _draw() -> void:
 		var ok := Time.get_ticks_msec() / 1000.0 >= _ready_at
 		draw_texture(_tex, -_tex.get_size() / 2.0, Color.WHITE if ok else Color(0.45, 0.45, 0.45))

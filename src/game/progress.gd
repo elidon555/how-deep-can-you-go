@@ -25,6 +25,7 @@ var beaten := false           # the Floor has been opened at least once
 var daily := {}               # date ("2026-10-31") -> best depth on that day's Daily Dig
 var tips_seen: Array = []     # first-run hints already shown (Tips)
 var dry_run := false   # tests: keep everything in memory
+var mirroring := false # online client: money and upgrades are the host's (the crew's), not saved
 
 
 func _ready() -> void:
@@ -134,10 +135,43 @@ func rope_capacity() -> int:
 	return 5 + 3 * level("bag")
 
 
+# ---------------------------------------------------------------- online co-op
+
+## Host: the crew's money and upgrades, for clients to mirror.
+func mirror_state() -> Dictionary:
+	return {"money": money, "levels": levels}
+
+
+## Client: show the host's money and upgrades (until end_mirror; never saved here).
+func mirror(state: Variant) -> void:
+	if not (state is Dictionary):
+		return
+	mirroring = true
+	money = int(state.get("money", 0))
+	levels.clear()
+	for k in state.get("levels", {}):
+		levels[k] = int(state.levels[k])
+	changed.emit()
+
+
+## Left the host's game: back to this machine's own save.
+func end_mirror() -> void:
+	if not mirroring:
+		return
+	mirroring = false
+	money = 0
+	levels.clear()
+	found_notes.clear()
+	tips_seen.clear()
+	daily.clear()
+	_load()
+	changed.emit()
+
+
 # ---------------------------------------------------------------- saving
 
 func save() -> void:
-	if dry_run or GameConfig.infinite_resources():   # free stuff doesn't stick to the real save
+	if dry_run or mirroring or GameConfig.infinite_resources():   # free stuff doesn't stick to the real save
 		changed.emit()
 		return
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)

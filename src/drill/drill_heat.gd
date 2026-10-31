@@ -47,6 +47,15 @@ func update(dt: float) -> void:
 		Sfx.play("heat_alarm", drill.global_position, -6.0, 0.0)
 
 
+## Online: seconds until the coolant can flush again (host), shown on a client.
+func vent_wait() -> float:
+	return maxf(vent_ready_at - Time.get_ticks_msec() / 1000.0, 0.0)
+
+
+func show_vent_wait(wait: float) -> void:
+	vent_ready_at = Time.get_ticks_msec() / 1000.0 + wait
+
+
 func cool(amount: float) -> void:
 	heat = maxf(heat - amount, 0.0)
 

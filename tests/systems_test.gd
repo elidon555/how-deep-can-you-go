@@ -519,7 +519,10 @@ func _coop() -> void:
 func _the_bottom() -> void:
 	var d: Drill = main.drill
 	w.ensure_generated(World.BOTTOM * World.METER + 400.0)
-	await _frames(3)
+	for i in 30:
+		await _frames(1)
+		if main.eye:
+			break
 	var eye: TheEye = main.eye
 	_check("the Eye is waiting in the Floor", eye != null and eye.state == TheEye.State.ASLEEP)
 	if eye == null:

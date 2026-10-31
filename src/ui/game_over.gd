@@ -37,6 +37,10 @@ func show_run(stats: Dictionary) -> void:
 		stats.earned, stats.kills, mins, int(stats.seconds) % 60], 20, UiStyle.DIM))
 	if stats.get("notes", 0) > 0:
 		_box.add_child(UiStyle.label("Notes found this run: %d" % stats.notes, 18, UiStyle.DIM))
-	_box.add_child(UiStyle.button("Dig again", func(): again_pressed.emit()))
-	_box.add_child(UiStyle.button("Title screen", func(): title_pressed.emit()))
+	if Net.is_client():        # the host starts the next run, and everyone comes along
+		_box.add_child(UiStyle.label("Waiting for the host to dig again...", 20, UiStyle.DIM))
+		_box.add_child(UiStyle.button("Leave the game", func(): title_pressed.emit()))
+	else:
+		_box.add_child(UiStyle.button("Dig again", func(): again_pressed.emit()))
+		_box.add_child(UiStyle.button("Title screen", func(): title_pressed.emit()))
 	visible = true

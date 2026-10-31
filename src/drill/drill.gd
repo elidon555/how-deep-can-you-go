@@ -12,7 +12,8 @@ class_name Drill
 ## creatures (and water) only get in while one is open. Damage (boulders,
 ## crawlers, worms, crashes) opens hull breaches that leak hull until repaired. All of the
 ## machine's state lives here and in its components, and stations only call their methods, so
-## co-op can sync it from one place later.
+## online co-op syncs it from one place (net_state / net_apply): on clients the drill is a
+## puppet that shows the host's.
 
 signal changed                 # fuel / hull / speed / breaches changed (HUD)
 signal wrecked
@@ -63,6 +64,9 @@ var thermal := DrillHeat.new()
 var flooding := DrillFlood.new()
 var guns := DrillGuns.new()
 var art := DrillArt.new()
+var puppet := false            # online client: shows the host's drill, doesn't run it
+var running := false           # the head is turning (engine on, not stalled)
+var _medkit: Stations.Medkit
 var _engine := AudioStreamPlayer2D.new()
 var _sounds := {}           # engine loop name -> stream
 
@@ -97,7 +101,7 @@ func _ready() -> void:
 	add_child(art)
 	_add_station(Stations.Furnace.new(), Vector2(-66, FLOOR))
 	_add_station(Stations.Workbench.new(), Vector2(-36, FLOOR))
-	_add_station(Stations.Medkit.new(), Vector2(-36, -16))
+	_medkit = _add_station(Stations.Medkit.new(), Vector2(-36, -16)) as Stations.Medkit
 	_add_station(Stations.Sonar.new(), Vector2(-6, FLOOR))
 	_add_station(Stations.GunnerSeat.new(), Vector2(18, FLOOR))
 	_add_station(Stations.Coolant.new(), Vector2(42, FLOOR))
@@ -135,11 +139,15 @@ func apply_upgrades() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	if puppet:
+		_engine_sound(running and not is_wrecked)
+		flooding.update_sounds()
+		return
 	if is_wrecked:
 		return
 	thermal.update(dt)
 	flooding.update(dt)
-	var running := speed != Speed.STOP and fuel > 0.0 and not thermal.overheated and not flooding.drowned()
+	running = speed != Speed.STOP and fuel > 0.0 and not thermal.overheated and not flooding.drowned()
 	if running and not infinite_fuel():
 		fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
 		if fuel == 0.0:
@@ -301,7 +309,72 @@ func _add_box(r: Rect2) -> CollisionShape2D:
 	return cs
 
 
-func _add_station(s: Station, at: Vector2) -> void:
+func _add_station(s: Station, at: Vector2) -> Station:
 	s.drill = self
 	s.position = at
 	add_child(s)
+	return s
+
+
+# ---------------------------------------------------------------- online co-op
+
+func net_state() -> Array:
+	var breaches := PackedVector2Array()
+	for b in get_breaches():
+		breaches.append(b.position)
+	var aims := []
+	for t in guns.turrets:
+		aims.append_array([t.target_aim(), t.recoil()])
+	var gunner_id: int = guns.gunner.get_meta("net_id", 0) if guns.gunner else 0
+	return [speed, fuel, max_fuel, hull, max_hull, is_wrecked, grip, ladders_out, hatches[0], hatches[1],
+		running, cutter.drilling, cutter.moving, cutter.chew_mat, cutter.judder, thermal.heat,
+		thermal.overheated, thermal.vent_wait(), flooding.level, flooding.leaking, gunner_id, aims,
+		breaches, _medkit.wait()]
+
+
+func net_apply(s: Array) -> void:
+	var before := [speed, fuel, hull, is_wrecked, thermal.overheated, flooding.level >= DrillFlood.STALL]
+	speed = s[0] as Speed
+	fuel = s[1]
+	max_fuel = s[2]
+	hull = s[3]
+	max_hull = s[4]
+	is_wrecked = s[5]
+	grip = s[6]
+	ladders_out = s[7]
+	for l in _ladders:
+		l.extend = ladders_out
+	hatches = [s[8], s[9]]
+	running = s[10]
+	cutter.drilling = s[11]
+	cutter.moving = s[12]
+	cutter.chew_mat = s[13]
+	cutter.judder = s[14]
+	thermal.heat = s[15]
+	thermal.overheated = s[16]
+	thermal.show_vent_wait(s[17])
+	flooding.level = s[18]
+	flooding.leaking = s[19]
+	var g: Node = Net.session.entities.node(s[20]) if s[20] != 0 and Net.session else null
+	guns.gunner = g as Player
+	var aims: Array = s[21]
+	for i in mini(guns.turrets.size(), aims.size() / 2):
+		guns.turrets[i].show_aim(aims[i * 2], aims[i * 2 + 1])
+	_show_breaches(s[22])
+	_medkit.show_wait(s[23])
+	if before != [speed, fuel, hull, is_wrecked, thermal.overheated, flooding.level >= DrillFlood.STALL]:
+		changed.emit()
+
+
+## Client: the host's breaches (a crack appears or gets patched here too).
+func _show_breaches(at: PackedVector2Array) -> void:
+	var have := get_breaches()
+	for b in have:
+		if not at.has(b.position):
+			b.queue_free()
+	for p in at:
+		if not have.any(func(b): return b.position == p):
+			var b := Stations.Breach.new()
+			b.drill = self
+			b.position = p
+			add_child(b)

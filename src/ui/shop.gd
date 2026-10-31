@@ -73,6 +73,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _buy(id: String) -> void:
+	if Net.is_client():                # online the crew's money is on the host: it buys
+		Net.session.buy(id)
+		Sfx.play("ui_click", Vector2.INF, -2.0, 0.0)
+		return
 	if Progress.buy(id):
 		Sfx.play("coins")
 	else:

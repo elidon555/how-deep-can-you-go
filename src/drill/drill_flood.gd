@@ -45,10 +45,15 @@ func update(dt: float) -> void:
 		level = maxf(level - PUMP * dt, 0.0)
 	if level > 0.0:
 		drill.thermal.cool(10.0 * level * dt)
-	_loop(_leak_sound, leaking > 0)
-	_loop(_pump_sound, leaking == 0 and level > 0.0)
+	update_sounds()
 	if (before < STALL) != (level < STALL):
 		drill.changed.emit()
+
+
+## Leak hiss while water comes in, the pump while it drains (also on online clients).
+func update_sounds() -> void:
+	_loop(_leak_sound, leaking > 0)
+	_loop(_pump_sound, leaking == 0 and level > 0.0)
 
 
 func drowned() -> bool:

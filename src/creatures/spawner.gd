@@ -18,7 +18,8 @@ const WORMS_FROM := 40.0       # meters (drill depth)
 const WORM_EVERY := Vector2(70.0, 130.0)   # seconds between worms
 
 var world: World
-var player: Player
+var player: Player             # this machine's miner: the watching eyes are for them
+var puppet := false            # online client: creatures come from the host; only eyes made here
 var drill: Drill
 var lit_parent: Node           # creatures go here (lit by the lamp)
 var glow_parent: Node          # glowing eyes go here (bloom)
@@ -29,25 +30,28 @@ var _bat_t := 3.0
 
 
 func _process(dt: float) -> void:
-	var depth := player.global_position.y / World.METER
 	_watch_t -= dt
-	if depth > WATCHERS_FROM and _watch_t <= 0.0:
+	if player.global_position.y / World.METER > WATCHERS_FROM and _watch_t <= 0.0:
 		_watch_t = randf_range(3.0, 8.0)
 		if get_tree().get_nodes_in_group("watcher").size() < 3:
 			_spawn_watcher()
+	if puppet:
+		return
+	var around := _anyone()           # co-op: things turn up around every miner in turn
+	var depth := around.global_position.y / World.METER
 	_crawl_t -= dt
 	if depth > CRAWLERS_FROM and _crawl_t <= 0.0:
 		_crawl_t = randf_range(2.0, 5.0)
 		var cap := 2 + int(depth / 100.0)
 		if get_tree().get_nodes_in_group("creature").size() - get_tree().get_nodes_in_group("bat").size() < cap:
-			_spawn_crawler()
+			_spawn_crawler(around)
 	_bat_t -= dt
 	if depth > BATS_FROM and _bat_t <= 0.0:
 		_bat_t = randf_range(4.0, 9.0)
 		if get_tree().get_nodes_in_group("bat").size() < MAX_BATS:
-			_spawn_roost()
+			_spawn_roost(around)
 	for c: Node2D in get_tree().get_nodes_in_group("creature"):
-		if c.global_position.distance_to(player.global_position) > DESPAWN_DIST:
+		if _distance_to_crew(c.global_position) > DESPAWN_DIST:
 			c.queue_free()
 	if drill.global_position.y / World.METER > WORMS_FROM and get_tree().get_nodes_in_group("worm").is_empty():
 		_worm_t -= dt
@@ -56,11 +60,24 @@ func _process(dt: float) -> void:
 			spawn_worm()
 
 
+## A miner picked at random (living ones first).
+func _anyone() -> Player:
+	var crew := get_tree().get_nodes_in_group("player").filter(func(p): return p.health > 0)
+	return crew.pick_random() if not crew.is_empty() else player
+
+
+func _distance_to_crew(p: Vector2) -> float:
+	var d := INF
+	for q: Player in get_tree().get_nodes_in_group("player"):
+		d = minf(d, q.global_position.distance_to(p))
+	return d
+
+
 ## A roost of 3-5 bats hanging from a natural cave ceiling, off screen.
-func _spawn_roost() -> void:
+func _spawn_roost(around: Player) -> void:
 	for i in 40:
-		var pos := player.global_position + Vector2(randf_range(-420, 420), randf_range(-260, 200))
-		var d := pos.distance_to(player.global_position)
+		var pos := around.global_position + Vector2(randf_range(-420, 420), randf_range(-260, 200))
+		var d := pos.distance_to(around.global_position)
 		if d < 230.0 or not _open_cave(pos, 10.0):
 			continue
 		var ceil_y := pos.y
@@ -111,10 +128,10 @@ func _spawn_watcher() -> void:
 
 
 ## A floor spot in a natural cave, 260-460 px away (off screen at the default zoom).
-func _spawn_crawler() -> void:
+func _spawn_crawler(around: Player) -> void:
 	for i in 40:
-		var pos := player.global_position + Vector2(randf_range(-460, 460), randf_range(-200, 260))
-		var d := pos.distance_to(player.global_position)
+		var pos := around.global_position + Vector2(randf_range(-460, 460), randf_range(-200, 260))
+		var d := pos.distance_to(around.global_position)
 		if d < 260.0 or d > 460.0 or not _open_cave(pos, 14.0):
 			continue
 		var floor_y := pos.y
@@ -124,7 +141,7 @@ func _spawn_crawler() -> void:
 			continue
 		var c := Crawler.new()
 		c.world = world
-		c.player = player
+		c.player = around
 		c.glow_parent = glow_parent
 		c.position = Vector2(pos.x, floor_y - 9.0)
 		c.killed.connect(crawler_killed.emit)
