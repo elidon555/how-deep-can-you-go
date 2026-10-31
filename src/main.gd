@@ -52,6 +52,7 @@ func _ready() -> void:
 	add_child(world)
 	world.ore_found.connect(_on_ore_found)
 	world.boulder_shattered.connect(_on_boulder_shattered)
+	world.gas_released.connect(_on_gas_released)
 
 	# glowing things live on their own layer: not darkened, they bloom
 	glow_layer.layer = 1
@@ -194,7 +195,28 @@ func _update_bag() -> void:
 
 # ---------------------------------------------------------------- events
 
+## Firedamp leaks out of rock you broke open: a cloud that a spark will set off.
+func _on_gas_released(pos: Vector2) -> void:
+	var cloud := GasCloud.release(get_tree(), self, world, pos)
+	if not cloud.exploded.is_connected(_on_gas_exploded):
+		cloud.exploded.connect(_on_gas_exploded)
+		hud.toast("Firedamp! Keep sparks away from the gas.", 2.0)
+
+
+func _on_gas_exploded(pos: Vector2, size: float) -> void:
+	fx.explosion(pos, size)
+	if player.global_position.distance_to(pos) < 500.0:
+		shake = maxf(shake, 2.0)
+
+
+## Steel on stone throws sparks: any gas around them goes up.
+func _sparks_at(pos: Vector2, mat: int) -> void:
+	if mat == World.M.STONE or mat == World.M.HARD or mat == World.M.MAGMA:
+		GasCloud.spark(get_tree(), pos)
+
+
 func _on_struck(pos: Vector2, mat: int, broke: int, kind: String) -> void:
+	_sparks_at(pos, mat)
 	shake = maxf(shake, 0.25 if kind == "bonk" else (0.6 if broke > 0 else 0.35))
 	fx.impact(pos, mat, broke, kind, player.facing)
 
@@ -225,6 +247,7 @@ func _on_boulder_shattered(pos: Vector2) -> void:
 
 ## The cutters broke rock: debris, and a little rumble if you're near the drill.
 func _on_drill_chewed(points: Array, mat: int) -> void:
+	_sparks_at(points[0], mat)
 	fx.chunks(points, mat, drill.global_position.x)
 	if player.global_position.distance_to(drill.global_position) < 260.0:
 		shake = maxf(shake, 0.18)
@@ -243,6 +266,7 @@ func _on_sonar_used(p: Player) -> void:
 
 func _on_bolt_hit(pos: Vector2, on_rock: bool) -> void:
 	if on_rock:
+		GasCloud.spark(get_tree(), pos)
 		fx.impact(pos, world.mat_at(pos) if world.is_diggable(pos) else World.M.STONE, 1, "dig_side", 1)
 	else:
 		fx.flesh(pos, 1)

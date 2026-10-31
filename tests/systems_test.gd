@@ -27,12 +27,14 @@ func _ready() -> void:
 	await _furnace_and_workbench()
 	await _breach()
 	await _heat()
+	await _flooding()
 	_layers()
 	await _sonar_and_worm()
 	await _mouse_aim()
 	await _rope_climb()
 	await _camps()
 	await _liquids()
+	await _gas()
 	await _crawler_fight()
 	await _boulder()
 	Progress.money = saved_money
@@ -257,8 +259,12 @@ func _rope_climb() -> void:
 	for r in get_tree().get_nodes_in_group("rope"):
 		if not r is DrillLadder:
 			top = r.top_y()
-	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, floor %s ceil %s" % [
-		p.global_position.y, top, why, p.is_on_floor(), p.is_on_ceiling()])
+	var above := ""
+	for dy in [-24, -32, -40]:
+		var c := w.cell_at(p.global_position + Vector2(0, dy))
+		above += "%.1f/%d " % [w.get_fill(c.x, c.y), w.get_mat(c.x, c.y)]
+	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, ceil %s, above %s" % [
+		p.global_position.y, top, why, p.is_on_ceiling(), above])
 	await _hold(["right"], 0.5)
 	await _frames(30)
 	_check("stepped off onto the surface", p.rope == null and p.is_on_floor(), "y=%.0f" % p.global_position.y)
@@ -379,6 +385,65 @@ func _liquids() -> void:
 			if w.get_liquid(gx, gy) > 0.0:
 				w.set_liquid(gx, gy, 0.0, Liquids.NONE)
 	p.heal_full()
+
+
+## Firedamp: pockets are generated; dug open they leak a cloud; a spark sets it off.
+func _gas() -> void:
+	_check("firedamp pockets are generated", w.gas.size() > 0, "%d cells" % w.gas.size())
+	_arena(450)
+	p.heal_full()
+	p.global_position = Vector2(50 * World.CELL, 450 * World.CELL - 19)
+	await _frames(70)
+	for old in get_tree().get_nodes_in_group("gas"):     # clouds from earlier digging
+		old.remove_from_group("gas")
+		old.queue_free()
+	var at := Vector2(70 * World.CELL + 4, 446 * World.CELL + 4)     # the cell's centre
+	w.place_rock(70, 446, World.M.STONE)
+	w.gas[Vector2i(70, 446)] = true
+	w._flush()
+	w.dig(at, at, 3.0, 50.0)                      # dig it open: the gas leaks out
+	await _frames(5)
+	var clouds := get_tree().get_nodes_in_group("gas")
+	_check("digging into a pocket releases gas", clouds.size() == 1)
+	p.global_position = at + Vector2(-20, 4)
+	await _frames(10)
+	var hp := p.health
+	GasCloud.spark(get_tree(), at + Vector2(5, 0))
+	await _frames(5)
+	_check("a spark sets it off", get_tree().get_nodes_in_group("gas").is_empty() and p.health < hp,
+		"hp %d -> %d" % [hp, p.health])
+	_check("the blast digs a crater", w.is_air(at + Vector2(0, 16)))
+	p.heal_full()
+
+
+## A breached drill sitting in water floods; patched, the pump drains it.
+func _flooding() -> void:
+	var d: Drill = main.drill
+	for b in d.get_breaches():
+		d.repair(b)
+	await _frames(2)
+	d.damage(5.0, d.global_position + Vector2(-40, 0))
+	# water against the hull on both sides at breach height
+	var c := w.cell_at(d.global_position + Vector2(-Drill.HW - 14.0, 10))
+	var c2 := w.cell_at(d.global_position + Vector2(Drill.HW + 14.0, 10))
+	for k in [c, c2]:
+		for dy in range(-6, 6):
+			w.set_liquid(k.x, k.y + dy, 1.0, Liquids.WATER)
+	await _frames(60 * 4)
+	_check("a breach under water floods the cabin", d.flooding.level > 0.05 and d.flooding.leaking > 0,
+		"level %.2f" % d.flooding.level)
+	d.flooding.level = 0.8
+	await _frames(2)
+	_check("the crew swims in a flooded cabin", p.in_water)
+	for b in d.get_breaches():
+		d.repair(b)
+	var lv := d.flooding.level
+	await _frames(60 * 2)
+	_check("patched, the pump drains it", d.flooding.level < lv, "%.2f -> %.2f" % [lv, d.flooding.level])
+	d.flooding.level = 0.0
+	for k in [c, c2]:
+		for dy in range(-6, 6):
+			w.set_liquid(k.x, k.y + dy, 0.0, Liquids.NONE)
 
 
 func _crawler_fight() -> void:

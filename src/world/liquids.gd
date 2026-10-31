@@ -253,15 +253,14 @@ func _redraw() -> void:
 				var k := (j * n + i) * 4
 				data[k + (0 if world.get_ltype(gx, gy) == WATER else 1)] = int(clampf(a, 0.0, 1.0) * 255.0)
 				data[k + 3] = 255
-		if not any and ch.get_meta("liq_rects", null) == null:
+		if not any and ch.liq_tex == null:
 			continue
 		var img := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, data)
-		if ch.get_meta("liq_rects", null) == null:
-			var tex := ImageTexture.create_from_image(img)
-			ch.set_meta("liq_tex", tex)
-			ch.set_meta("liq_rects", [_rect(ch, tex, 0), _rect(ch, tex, 1)])
+		if ch.liq_tex == null:
+			ch.liq_tex = ImageTexture.create_from_image(img)
+			ch.liq_rects = [_rect(ch, ch.liq_tex, 0), _rect(ch, ch.liq_tex, 1)]
 		else:
-			(ch.get_meta("liq_tex") as ImageTexture).update(img)
+			ch.liq_tex.update(img)
 	_dirty_chunks = later
 
 

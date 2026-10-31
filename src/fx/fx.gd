@@ -69,6 +69,15 @@ func gore(pos: Vector2) -> void:
 	dust(pos, 1.2)
 
 
+## A firedamp blast: a huge flash, a fireball, burning debris, smoke.
+func explosion(pos: Vector2, size: float) -> void:
+	flash(pos, Color(3.0, 2.2, 1.2), size * 0.9)
+	burst(pos, Color(3.0, 1.4, 0.4), 40, size * 6.0, Vector2.UP, 180.0, 0.6, 5.0, true, 200.0)
+	burst(pos, Color(2.2, 0.7, 0.15), 24, size * 4.0, Vector2.UP, 180.0, 1.0, 3.0, true, 500.0, true)
+	burst(pos, Color(0.18, 0.16, 0.15, 0.7), 26, size * 1.5, Vector2.UP, 180.0, 2.2, 9.0, false, -30.0)
+	hitstop(0.12)
+
+
 ## Soft dust puff (footsteps, landings, breaking rock). strength ~0.3 (step) .. 1.5 (big landing).
 func dust(pos: Vector2, strength: float) -> void:
 	var n := int(3 + strength * 6)

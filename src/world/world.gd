@@ -9,6 +9,7 @@ class_name World
 signal ore_found(pos: Vector2, kind: int)   # kind: index into ORES
 signal boulder_shattered(pos: Vector2)
 signal opened(gx: int, gy: int)          # a cell just became open (dug out): liquids may flow in
+signal gas_released(pos: Vector2)        # a firedamp cell was dug open
 
 const CELL := 8
 const METER := 24.0
@@ -51,6 +52,8 @@ class Chunk:
 	var liquid := PackedFloat32Array()   # 0..1 per cell (see Liquids)
 	var ltype := PackedByteArray()       # Liquids.NONE / WATER / LAVA
 	var has_liquid := false
+	var liq_tex: ImageTexture          # liquid map for the liquid shaders (Liquids draws it)
+	var liq_rects: Array = []
 	var rect: ColorRect
 	var shape: ConcavePolygonShape2D
 	var vis_dirty := false    # only fill values changed -> re-upload texture
@@ -62,6 +65,7 @@ var next_row := -2              # next chunk row to generate (rows < -2 are open
 var dug := {}                   # cells the player carved (not natural caves)
 var ores := {}                  # cell -> [lit Sprite2D, glow Sprite2D, ore kind]
 var decor := {}                 # anchor cell -> Array[Node2D]
+var gas := {}                   # cells of rock with firedamp trapped in them
 var _collect := true            # set per dig(): does broken ore get handed out?
 static var fixed_seed := -1     # tests set this for the same world every run
 var glow_root := Node2D.new()   # main moves this onto the unlit glow layer
@@ -310,6 +314,9 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 	_set_pixel(gx, gy, nf, 0.0)
 	if old >= 0.5 and nf < 0.5:
 		opened.emit(gx, gy)
+		if gas.has(Vector2i(gx, gy)):
+			gas.erase(Vector2i(gx, gy))
+			gas_released.emit(Vector2(gx * CELL + 4, gy * CELL + 4))
 		var cell := Vector2i(gx, gy)
 		dug[cell] = true
 		for kx in _keys_covering(gx, R_INT + 1):

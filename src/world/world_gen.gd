@@ -10,6 +10,10 @@ const PROP_NAMES := ["lantern", "beam", "crystal_p", "crystal_t", "skeleton", "r
 # liquid pockets: water from WATER_FROM m down to the magma layer, lava inside it
 const WATER_FROM := 8.0
 const LIQUID_POCKETS := 0.32     # noise threshold: higher = fewer, smaller pockets
+# firedamp pockets trapped in the rock, in the coal-bearing depths
+const GAS_FROM := 25.0
+const GAS_TO := 330.0
+const GAS_POCKETS := 0.6         # noise threshold
 
 var world: World
 var rng := RandomNumberGenerator.new()
@@ -18,6 +22,7 @@ var noise_mat := FastNoiseLite.new()
 var noise_surf := FastNoiseLite.new()
 var noise_layer := FastNoiseLite.new()
 var noise_liquid := FastNoiseLite.new()
+var noise_gas := FastNoiseLite.new()
 var deco_tex := {}
 var props := {}                  # name -> [texture, glow texture or null]
 var flicker := []                # lantern lights
@@ -45,6 +50,8 @@ func _init(w: World) -> void:
 	noise_layer.frequency = 0.004
 	noise_liquid.seed = rng.randi()
 	noise_liquid.frequency = 0.012
+	noise_gas.seed = rng.randi()
+	noise_gas.frequency = 0.02
 
 
 ## Lantern lights flicker.
@@ -145,8 +152,24 @@ func liquid_pockets(ch: World.Chunk) -> void:
 				y -= 1
 
 
+## Firedamp trapped in solid rock (World.gas): dug open, it leaks out as a GasCloud.
+func _gas_pockets(ch: World.Chunk) -> void:
+	for j in World.C:
+		for i in World.C:
+			if ch.fill[j * World.C + i] < 0.9:
+				continue
+			var gx := ch.key.x * World.C + i
+			var gy := ch.key.y * World.C + j
+			var px := gx * World.CELL + 4.0
+			var py := gy * World.CELL + 4.0
+			var depth := py / World.METER
+			if depth >= GAS_FROM and depth <= GAS_TO and noise_gas.get_noise_2d(px, py) > GAS_POCKETS:
+				world.gas[Vector2i(gx, gy)] = true
+
+
 ## Ore, bones, glowing mushrooms and worms.
 func populate(ch: World.Chunk) -> void:
+	_gas_pockets(ch)
 	for j in World.C:
 		for i in World.C:
 			var gx := ch.key.x * World.C + i

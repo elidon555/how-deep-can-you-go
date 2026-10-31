@@ -91,6 +91,10 @@ func _ping() -> void:
 		if p.distance_to(_center) < reach:
 			var ore: Array = World.ORES[world.ores[cell][2]]
 			_blips.append([p, (ore[3] as Color) if ore[0] != "coal" else Color("8a8f99"), 3.0])
+	for cell in world.gas:              # firedamp shows as a faint sickly haze on the screen
+		var p := Vector2(cell.x * World.CELL + 4, cell.y * World.CELL + 4)
+		if p.distance_to(_center) < reach:
+			_blips.append([p, Color(0.75, 0.9, 0.3, 0.6), 1.5])
 	for c: Node2D in get_tree().get_nodes_in_group("creature"):
 		if c.global_position.distance_to(_center) < reach:
 			_blips.append([c.global_position, Color(1.6, 0.25, 0.2), 4.0])
