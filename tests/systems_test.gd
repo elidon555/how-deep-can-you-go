@@ -144,13 +144,13 @@ func _breach() -> void:
 func _heat() -> void:
 	var d: Drill = main.drill
 	d.speed = Drill.Speed.SLOW
-	d.heat = Drill.HEAT_MAX + 5.0
+	d.thermal.heat = DrillHeat.MAX + 5.0
 	await _frames(5)
-	_check("overheated drill stalls", d.overheated and not d.drilling)
+	_check("overheated drill stalls", d.thermal.overheated and not d.cutter.drilling)
 	_station(Stations.Coolant).interact(p)
 	await _frames(5)
-	_check("venting coolant cools it and it restarts", d.heat < Drill.HEAT_RESUME and not d.overheated,
-		"heat %.0f" % d.heat)
+	_check("venting coolant cools it and it restarts", d.thermal.heat < DrillHeat.RESUME and not d.thermal.overheated,
+		"heat %.0f" % d.thermal.heat)
 	d.speed = Drill.Speed.STOP
 
 
@@ -161,7 +161,7 @@ func _layers() -> void:
 		var c := {}
 		for i in 400:
 			var px := randf_range(40.0, World.WIDTH_PX - 40.0)
-			var mat := w._gen_mat(px, band * World.METER + randf_range(-60, 60), band)
+			var mat := w.gen.material(px, band * World.METER + randf_range(-60, 60), band)
 			c[mat] = c.get(mat, 0) + 1
 		counts[band] = c
 	_check("crystal caverns around 200 m", counts[200.0].get(World.M.CRYSTAL, 0) > 200, str(counts[200.0]))
@@ -189,7 +189,7 @@ func _sonar_and_worm() -> void:
 	_check("the worm burrows over and rams the drill", d.hull < h - 5.0, "hull %.0f -> %.0f" % [h, d.hull])
 	_station(Stations.GunnerSeat).interact(p)
 	await _frames(20)
-	_check("gunner seat takes the turrets", d.gunner == p and p.frozen)
+	_check("gunner seat takes the turrets", d.guns.gunner == p and p.frozen)
 	Input.action_press("dig")
 	for i in 60 * 25:
 		if not is_instance_valid(w) or w.state == Worm.State.DEAD:
@@ -199,12 +199,12 @@ func _sonar_and_worm() -> void:
 	Input.action_release("dig")
 	p.aim_override = Vector2.INF
 	_check("turret bolts kill the worm", not is_instance_valid(w) or w.state == Worm.State.DEAD,
-		"hull %.0f, breaches %d, heat %.0f" % [d.hull, d.get_breaches().size(), d.heat])
+		"hull %.0f, breaches %d, heat %.0f" % [d.hull, d.get_breaches().size(), d.thermal.heat])
 	Input.action_press("interact")
 	await _frames(2)
 	Input.action_release("interact")
 	await _frames(5)
-	_check("getting up from the turrets", d.gunner == null and not p.frozen)
+	_check("getting up from the turrets", d.guns.gunner == null and not p.frozen)
 	for b in d.get_breaches():
 		d.repair(b)
 	d.hull = d.max_hull
@@ -301,8 +301,8 @@ func _camps() -> void:
 	var nid: int = notes[0].note_id
 	notes[0].interact(p)
 	await _frames(2)
-	_check("reading a note remembers it", Progress.found_notes.has(nid) and main.note_view.visible)
-	main.note_view.visible = false
+	_check("reading a note remembers it", Progress.found_notes.has(nid) and main.menus.note_view.visible)
+	main.menus.note_view.visible = false
 	get_tree().paused = false
 	# bats
 	_arena(340)

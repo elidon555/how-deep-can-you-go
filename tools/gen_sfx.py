@@ -4,7 +4,7 @@
 Pure numpy (scipy.signal.lfilter is used only to speed up filtering if installed).
 Fixed seeds, so every run writes identical files. One-shots get a short fade in/out
 and are peak-normalized to -3 dBFS. Loops (amb_*, drill_loop, drill_idle, turret_turn,
-worm_burrow, bat_flap, lava_bubble, music_*) are built periodic: every sine, LFO and
+worm_burrow, bat_flap, lava_bubble, music_*, gas_hiss, water_leak, pump) are built periodic: every sine, LFO and
 noise spectrum has a whole number of cycles per loop, events near the end wrap round
 to the start, and reverb runs in steady state, so they loop seamlessly. Each loop is
 normalized to its own quieter peak (see the finish_loop() call in its function).
@@ -1164,6 +1164,115 @@ def music_deep(v=0):
     return finish_loop(sub + 0.3 * unit(swells) + 0.05 * breath, -16.0)
 
 
+# ----------------------------------------------------------------------------- gas / water
+
+def explosion(v=0):
+    rng = np.random.default_rng(7000 + v)
+    n = secs(2.0)
+    t = times(n)
+    crack = burst(n, rng, 0.0003, 0.008, "hp", 1500) + 0.7 * burst(n, rng, 0.0005, 0.02, "bp", 3000, 0.7)
+    boom = osc(glide(70 * (1 + 0.1 * v), 25, n, 0.4)) * env(n, 0.003, 0.35)
+    boom += 0.8 * burst(n, rng, 0.005, 0.4, "lp", 150)
+    blast = burst(n, rng, 0.002, 0.12, "lp", 1200)
+    debris = unit(grains(n, rng, 150, 0.15, 1.8, 400, 5000, decay=0.6, skew=1.3))
+    chunks = sum(rng.uniform(0.3, 1.0) * (burst(n, rng, 0.002, 0.04, "lp", 300, delay=tc)
+                                          + place(n, tc, osc(glide(110, 50, n - secs(tc), 0.05)) * env(n - secs(tc), 0.002, 0.05)))
+                 for tc in np.sort(rng.uniform(0.3, 1.2, 6)))
+    tail = unit(biquad(biquad(noise(n, rng), "lp", 80), "lp", 80)) * env(n, 0.05, 1.0) * (0.6 + 0.4 * rough(n, rng, 4))
+    x = np.tanh(2.0 * (0.6 * unit(crack) + boom + 0.5 * blast)) + 0.35 * debris + 0.25 * unit(chunks) + 1.0 * tail
+    return finish(reverb(x, size=2.0, fb=0.75, mix=0.3, damp=2000), fade_out=0.3)
+
+
+def gas_hiss(v=0):
+    rng = np.random.default_rng(7100 + v)
+    T = 2.0
+    t = times(secs(T))
+    n = len(t)
+    hiss = loop_noise(n, rng, band(5000, 1.2)) + 0.4 * loop_noise(n, rng, band(2500, 0.8))
+    hiss *= 0.85 + 0.15 * loop_rough(n, rng, 8)
+    blub = fold(bubbles(2 * n, rng, 14, 0.0, T, 300, 900), n)          # faint bubbling
+    return finish_loop(unit(hiss) + 0.15 * unit(blub), -16.0)
+
+
+def gas_release(v=0):
+    rng = np.random.default_rng(7200 + v)
+    n = secs(1.0)
+    t = times(n)
+    amp = np.clip(t / 0.005, 0, 1) * np.exp(-t / 0.25) * (1 + 0.15 * wobble(n, rng, 25))
+    src = noise(n, rng)
+    hiss = biquad(src, "hp", 1200) + 0.7 * biquad(src, "bp", 4000, 0.6)
+    jet = svf(noise(n, rng), glide(6000, 2500, n, 0.8), q=1.5)          # pressure dropping
+    crack = burst(n, rng, 0.0005, 0.01, "bp", 2500, 0.8)
+    debris = unit(grains(n, rng, 15, 0.0, 0.2, 800, 5000, decay=0.08))
+    whump = burst(n, rng, 0.002, 0.08, "lp", 200)
+    x = (unit(hiss) + 0.4 * unit(jet)) * amp + 0.5 * crack + 0.25 * debris + 0.4 * whump
+    return finish(x, fade_out=0.15)
+
+
+def water_leak(v=0):
+    rng = np.random.default_rng(7300 + v)
+    T = 2.0
+    t = times(secs(T))
+    n = len(t)
+    spray = (loop_noise(n, rng, band(3000, 1.2)) + 0.6 * loop_noise(n, rng, band(800, 0.8))) * (0.6 + 0.4 * loop_rough(n, rng, 40))
+    gush = loop_noise(n, rng, band(300, 0.6)) * loop_rough(n, rng, 6)
+    buf, m = np.zeros(2 * n), secs(0.012)
+    for _ in range(120):                                               # droplets spattering
+        f = rng.uniform(1000, 4000)
+        buf += rng.uniform(0.2, 1.0) * place(2 * n, rng.uniform(0, T), osc(glide(f, 1.5 * f, m, 0.008)) * env(m, 0.0005, 0.003))
+    x = unit(spray) + 0.4 * unit(gush) + 0.2 * unit(fold(buf, n))
+    ring = lambda f: 1 + 1.5 * band(420, 0.05)(f) + 1.0 * band(1150, 0.05)(f)  # steel plate resonances
+    return finish_loop(spectral(x, ring), -14.0)
+
+
+def pump(v=0):
+    rng = np.random.default_rng(7400 + v)
+    T = 1.5
+    t = times(secs(T))
+    n = len(t)
+    buf = np.zeros(2 * n)
+    m = secs(0.45)
+    tm = times(m)
+    for i, t0 in enumerate([0.05, 0.55, 1.05]):                        # three strokes per loop
+        a = [1.0, 0.85, 0.92][i]
+        thump = osc(glide(90, 50, m, 0.04)) * env(m, 0.002, 0.06)
+        clack = modes(m, [700, 1300], [0.03, 0.02], [1.0, 0.5], delay=0.01)
+        slosh_amp = np.clip((tm - 0.04) / 0.08, 0, 1) * np.exp(-np.maximum(tm - 0.12, 0) / 0.1)
+        slosh = svf(noise(m, rng) * slosh_amp, np.interp(tm, [0, 0.15, 0.4], [300, 900, 400]), q=2.0)
+        buf += a * place(2 * n, t0, thump + 0.4 * clack + 0.6 * unit(slosh))
+    motor = np.sin(TAU * per(100, T) * t) + 0.3 * np.sin(TAU * per(200, T) * t)
+    return finish_loop(fold(buf, n) + 0.06 * motor, -16.0)
+
+
+def splash(v=0):
+    rng = np.random.default_rng(7500 + v)
+    n = secs(0.5)
+    whump = burst(n, rng, 0.002, 0.06, "lp", 400) + 0.6 * osc(glide(180, 70, n, 0.06)) * env(n, 0.002, 0.05)
+    slap = burst(n, rng, 0.001, 0.03, "bp", 1000 * (1 + 0.15 * v), 0.5)
+    crash = unit(biquad(noise(n, rng) * env(n, 0.005, 0.12) * rough(n, rng, 50), "bp", 2500, 0.7))
+    drops, m = np.zeros(n), secs(0.015)
+    for _ in range(40):
+        tc = 0.05 + 0.4 * rng.random() ** 1.5
+        f = rng.uniform(1000, 5000)
+        drops += rng.uniform(0.2, 1.0) * np.exp(-tc / 0.2) * place(n, tc, osc(glide(f, 1.6 * f, m, 0.01)) * env(m, 0.0005, 0.004))
+    blub = unit(bubbles(n, rng, 8, 0.05, 0.3, 200, 600))
+    x = 0.8 * whump + 0.6 * slap + 0.7 * crash + 0.3 * unit(drops) + 0.3 * blub
+    return finish(x, fade_out=0.08)
+
+
+def air_bubbles(v=0):
+    rng = np.random.default_rng(7600 + v)
+    n = secs(0.8)
+    m = secs(0.2)
+    glug = osc(glide(120, 220, n, 0.08)) * env(n, 0.01, 0.05)
+    x = np.zeros(n)
+    for _ in range(20):                                                # bubbles rising, thinning out
+        tc = 0.68 * rng.random() ** 1.2
+        f, L = rng.uniform(250, 800), rng.uniform(0.02, 0.04)
+        x += rng.uniform(0.4, 1.0) * place(n, tc, osc(glide(f, 1.6 * f, m, L)) * env(m, 0.002, 0.4 * L))
+    return finish(biquad(unit(x) + 0.5 * glug, "lp", 2500), fade_out=0.1)    # muffled: underwater
+
+
 # ----------------------------------------------------------------------------- table / main
 
 def variants(name, fn, count):
@@ -1227,6 +1336,13 @@ SOUNDS = {
     "ui_close": ui_close,
     "music_title": music_title,
     "music_deep": music_deep,
+    **variants("explosion", explosion, 2),
+    "gas_hiss": gas_hiss,
+    "gas_release": gas_release,
+    "water_leak": water_leak,
+    "pump": pump,
+    **variants("splash", splash, 2),
+    "bubbles": air_bubbles,
 }
 
 

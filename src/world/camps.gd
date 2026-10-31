@@ -14,11 +14,11 @@ const PIECES := ["tent_ruin", "bunk", "table", "barrel", "barrel", "crate"]
 
 static func try_place(world: World, ch: World.Chunk) -> void:
 	var depth := ch.key.y * World.CHUNK_PX / World.METER
-	if depth < FROM or depth > TO or world.rng.randf() > CHANCE:
+	if depth < FROM or depth > TO or world.gen.rng.randf() > CHANCE:
 		return
 	# a spot fully inside this chunk (the chunk's neighbours may not exist yet)
-	var i0 := world.rng.randi_range(2, World.C - ROOM.x - 2)
-	var j0 := world.rng.randi_range(ROOM.y + 2, World.C - 3)          # floor row
+	var i0 := world.gen.rng.randi_range(2, World.C - ROOM.x - 2)
+	var j0 := world.gen.rng.randi_range(ROOM.y + 2, World.C - 3)          # floor row
 	var gx0 := ch.key.x * World.C + i0
 	if gx0 < 6 or gx0 + ROOM.x > World.W - 6:
 		return
@@ -38,15 +38,15 @@ static func _carve(ch: World.Chunk, i0: int, j0: int) -> void:
 
 
 static func _build(world: World, spot: Vector3i) -> void:
-	var rng := world.rng
+	var rng := world.gen.rng
 	var floor_y := spot.y * World.CELL
 	var x := spot.x * World.CELL + 10.0
 	var end := (spot.x + spot.z) * World.CELL - 10.0
 	var cell := Vector2i(spot.x + spot.z / 2, spot.y)
 	# timber supports at both ends, a lamp post lighting the camp
-	world.place_prop("beam", Vector2(spot.x * World.CELL + 3.0, floor_y + 3.0), false, cell)
-	world.place_prop("beam", Vector2((spot.x + spot.z) * World.CELL - 3.0, floor_y + 3.0), false, cell)
-	world.place_prop("lamp_post", Vector2(x, floor_y), false, cell, Color("ffb347"))
+	world.gen.place_prop("beam", Vector2(spot.x * World.CELL + 3.0, floor_y + 3.0), false, cell)
+	world.gen.place_prop("beam", Vector2((spot.x + spot.z) * World.CELL - 3.0, floor_y + 3.0), false, cell)
+	world.gen.place_prop("lamp_post", Vector2(x, floor_y), false, cell, Color("ffb347"))
 	x += 14.0
 	var note_placed := false
 	while x < end - 16.0:
@@ -61,14 +61,14 @@ static func _build(world: World, spot: Vector3i) -> void:
 				world.add_decor(Vector2i(int(c.position.x) / World.CELL, spot.y), c)
 				w = 18.0
 			"table":
-				world.place_prop("table", Vector2(x + 11.0, floor_y), false, cell)
+				world.gen.place_prop("table", Vector2(x + 11.0, floor_y), false, cell)
 				if not note_placed:
 					note_placed = _note(world, Vector2(x + 11.0, floor_y - 14.0), spot.y, rng)
 				w = 26.0
 			_:
-				var tex: Texture2D = world.props[piece][0] if world.props.has(piece) else null
+				var tex: Texture2D = world.gen.props[piece][0] if world.gen.props.has(piece) else null
 				w = (tex.get_width() if tex else 16) + 6.0
-				world.place_prop(piece, Vector2(x + w / 2.0, floor_y), false, cell)
+				world.gen.place_prop(piece, Vector2(x + w / 2.0, floor_y), false, cell)
 		x += w + rng.randf_range(2.0, 14.0)
 	if not note_placed:
 		_note(world, Vector2(end - 6.0, floor_y), spot.y, rng)

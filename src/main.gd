@@ -25,12 +25,7 @@ var fx := Fx.new()
 var hud := Hud.new()
 var shop := Shop.new()
 var sonar := SonarView.new()
-var menus := CanvasLayer.new()
-var title := TitleMenu.new()
-var pause := PauseMenu.new()
-var settings_menu := SettingsMenu.new()
-var game_over := GameOver.new()
-var note_view := NoteView.new()
+var menus := Menus.new()
 var run_time := 0.0
 var kills := 0
 var run_over := false
@@ -75,9 +70,9 @@ func _ready() -> void:
 	drill.workbench_used.connect(_on_workbench_used)
 	drill.wrecked.connect(_on_drill_wrecked)
 	drill.damaged.connect(func(amount): shake = maxf(shake, minf(amount / 10.0, 1.2)))
-	drill.chewed.connect(_on_drill_chewed)
+	drill.cutter.chewed.connect(_on_drill_chewed)
 	drill.sonar_used.connect(_on_sonar_used)
-	drill.bolt_hit.connect(_on_bolt_hit)
+	drill.guns.bolt_hit.connect(_on_bolt_hit)
 
 	player = Player.new()
 	player.world = world
@@ -145,7 +140,7 @@ func _process(dt: float) -> void:
 	if Progress.record_depth(depth):
 		new_best = true
 	hud.set_depth(depth, Progress.best, new_best)
-	if not title.visible:
+	if not menus.on_title():
 		run_time += dt
 		Sfx.music("music_deep" if depth_m > 300.0 else "")
 	for m in MILESTONES:
@@ -155,13 +150,13 @@ func _process(dt: float) -> void:
 	_update_light(depth, dt)
 	hud.set_drill(drill, depth_m)
 	var inside := drill.contains(player.global_position)
-	var want_zoom := ZOOM_GUNNER if drill.gunner == player else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
+	var want_zoom := ZOOM_GUNNER if drill.guns.gunner == player else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
 	var z := lerpf(cam.zoom.x, want_zoom, 3.0 * dt)
 	cam.zoom = Vector2(z, z)
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
-	if Input.is_action_just_pressed("restart") and not title.visible:
+	if Input.is_action_just_pressed("restart") and not menus.on_title():
 		_restart()
 
 
@@ -321,7 +316,7 @@ func _game_over(reason: String) -> void:
 	player.frozen = true
 	Progress.save()
 	await get_tree().create_timer(1.5).timeout
-	game_over.show_run({"reason": reason, "depth": maxi(0, int(drill.global_position.y / World.METER)),
+	menus.show_run({"reason": reason, "depth": maxi(0, int(drill.global_position.y / World.METER)),
 		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
 		"seconds": run_time})
 
@@ -336,41 +331,22 @@ func _restart(to_title := false) -> void:
 # ---------------------------------------------------------------- menus
 
 func _setup_menus() -> void:
-	menus.layer = 20
 	add_child(menus)
-	for m in [title, pause, settings_menu, game_over, note_view]:
-		menus.add_child(m)
-	title.start_pressed.connect(_start_run)
-	title.settings_pressed.connect(func(): settings_menu.open())
-	pause.settings_pressed.connect(func(): settings_menu.open())
-	pause.restart_pressed.connect(_restart)
-	pause.title_pressed.connect(func(): _restart(true))
-	game_over.again_pressed.connect(_restart)
-	game_over.title_pressed.connect(func(): _restart(true))
+	menus.start_run.connect(_start_run)
+	menus.restart.connect(_restart)
+	menus.can_pause = func(): return not run_over and drill.guns.gunner != player
 	# tests and autotests go straight in; so does "dig again"
 	if skip_title or Progress.dry_run:
-		title.visible = false
 		skip_title = false
 	else:
-		title.visible = true
+		menus.show_title()
 		hud.visible = false
 		player.frozen = true
-		Sfx.music("music_title")
 
 
 func _start_run() -> void:
-	title.visible = false
 	hud.visible = true
 	player.frozen = false
-	Sfx.music("")
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	# Esc pauses, unless something else used it (shop, sonar, the turret seat take it first)
-	if event.is_action_pressed("ui_cancel") and not title.visible and not run_over \
-			and not pause.visible and not note_view.visible and drill.gunner != player:
-		pause.open()
-		get_viewport().set_input_as_handled()
 
 
 func _notification(what: int) -> void:

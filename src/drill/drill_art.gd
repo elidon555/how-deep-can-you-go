@@ -27,6 +27,7 @@ var _smoke := CPUParticles2D.new()
 var _sparks := CPUParticles2D.new()   # off the cutters while biting rock
 var _grit := CPUParticles2D.new()     # rock dust blown up the gap beside the hull
 var _steam := CPUParticles2D.new()    # coolant flush
+var _flood := Node2D.new()            # water inside the cabin, over the crew
 
 
 func _ready() -> void:
@@ -118,22 +119,27 @@ func _ready() -> void:
 	_steam.initial_velocity_max = 110.0
 	_steam.gravity = Vector2(0, -20)
 	drill.vented.connect(func(): _steam.restart())
+	_flood.z_index = 2
+	_flood.z_as_relative = false
+	_flood.draw.connect(_draw_flood)
+	add_child(_flood)
 
 
 func _process(dt: float) -> void:
-	if drill.drilling:
+	if drill.cutter.drilling:
 		_spin += dt * 18.0
 	elif drill.speed != Drill.Speed.STOP and drill.fuel > 0.0:
 		_spin += dt * 6.0
 	var alarm := drill.get_breaches().size() > 0 or drill.hull < drill.max_hull * 0.25
 	_beacon.enabled = alarm and fmod(Time.get_ticks_msec() / 1000.0, 0.6) < 0.3
 	_smoke.emitting = drill.speed != Drill.Speed.STOP and drill.fuel > 0.0
-	_sparks.emitting = drill.drilling and (drill.chew_mat == World.M.STONE or drill.chew_mat == World.M.HARD)
-	position = drill.judder
+	_sparks.emitting = drill.cutter.drilling and (drill.cutter.chew_mat == World.M.STONE or drill.cutter.chew_mat == World.M.HARD)
+	position = drill.cutter.judder
+	_flood.queue_redraw()
 	# running hot: the hull glows red (a colour change, the art itself doesn't move)
-	var hot := clampf((drill.heat - 55.0) / 45.0, 0.0, 1.0)
+	var hot := clampf((drill.thermal.heat - 55.0) / 45.0, 0.0, 1.0)
 	_frame.modulate = Color(1.0 + hot * 0.6, 1.0 - hot * 0.25, 1.0 - hot * 0.35)
-	_grit.emitting = drill.drilling
+	_grit.emitting = drill.cutter.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames
 	if _brace_frames > 0:              # 0 = pulled in .. last = gripping the wall
@@ -144,8 +150,24 @@ func _process(dt: float) -> void:
 
 func _draw() -> void:
 	draw_texture(_back, BACK_AT)
-	for r: Vector2 in Drill.REAMERS:
+	for r: Vector2 in DrillCutter.REAMERS:
 		_draw_reamer(r)
+
+
+## The water flooding the cabin: translucent, with a rippling surface line.
+func _draw_flood() -> void:
+	if drill.flooding.level <= 0.005:
+		return
+	var y := drill.flooding.surface_y()
+	var x0 := -Drill.HW + Drill.WALL
+	var w := (Drill.HW - Drill.WALL) * 2.0
+	_flood.draw_rect(Rect2(x0, y, w, Drill.FLOOR - y), Color(0.1, 0.28, 0.45, 0.55))
+	var t := Time.get_ticks_msec() * 0.004
+	var x := x0
+	while x < x0 + w:
+		var dy := sin(t + x * 0.3) * 1.0
+		_flood.draw_rect(Rect2(x, y + dy - 1.0, 4.0, 1.0), Color(0.62, 0.8, 0.95, 0.85))
+		x += 4.0
 
 
 ## A side reamer: a toothed disc spinning at the hull's bottom corner.

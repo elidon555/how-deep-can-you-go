@@ -146,18 +146,23 @@ class DrillPanel extends Control:
 		var sp: String = Drill.SPEED_NAMES[drill.speed]
 		if drill.fuel <= 0.0:
 			sp = "NO FUEL"
-		elif drill.overheated:
+		elif drill.thermal.overheated:
 			sp = "OVERHEATED"
+		elif drill.flooding.level >= DrillFlood.STALL:
+			sp = "FLOODED"
 		draw_string(font, Vector2(150, 26), sp, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
-			Color("d04a3f") if drill.fuel <= 0.0 or drill.overheated else Color("3fd0c0"))
+			Color("d04a3f") if drill.fuel <= 0.0 or drill.thermal.overheated or drill.flooding.level >= DrillFlood.STALL else Color("3fd0c0"))
 		if Drill.infinite_fuel():
 			draw_string(font, Vector2(12, 56), "Fuel   unlimited", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e0a23a"))
 		else:
 			_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
 		_bar(Vector2(12, 66), "Hull", drill.hull / drill.max_hull, Color("c8c8d0"))
-		_bar(Vector2(12, 88), "Heat", drill.heat / Drill.HEAT_MAX, Color("e05a3a"), true)
+		_bar(Vector2(12, 88), "Heat", drill.thermal.heat / DrillHeat.MAX, Color("e05a3a"), true)
 		var leaks := drill.get_breaches().size()
-		if leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
+		if drill.flooding.leaking > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
+			draw_string(font, Vector2(12, 132), "FLOODING %d%% — patch the breaches!" % int(drill.flooding.level * 100.0),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("5ab0ff"))
+		elif leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
 			draw_string(font, Vector2(12, 132), "BREACH x%d — hold E on it to repair" % leaks,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff5a4a"))
 		elif absf(away) > 3.0:

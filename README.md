@@ -35,47 +35,60 @@ Set it to `false` for the real economy.
 
 ## How it plays
 
-- You start inside the drill at the surface. The **helm** sets its speed (stopped / slow /
-  full); it bores down on its own, carrying you, and drops through caves it breaks into.
-- It burns **fuel**. Go out the side doors, drop into the gap beside the hull and dig into
-  the rock for **coal** (shovel it into the **furnace**) and metal ore (copper, silver deeper,
-  gold deep), which the **workbench** sells for upgrades (drill head, hull plating, fuel tank,
-  pickaxe, arms, lamp, coat, rope bag) and where ropes are restocked. Ladders on the hull get
-  you back in. The drill keeps going without you, so don't get left behind.
-- Falling boulders, crawlers chewing the hull and hard crashes tear **breaches** that leak
-  hull until someone holds E on them. Hull at 0 = the drill is wrecked. Ore the drill grinds
-  through itself is lost; only what you dig out by hand counts.
-- Swings need room; loose boulders drop when undermined; crawlers hunt below 25 m.
-- Upgrades and best depth are saved (`user://progress.json`).
-
-See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
+- **The drill** is the crew's base. The **helm** sets its speed; it bores down in bites,
+  chewing only the rock in front of its cutters, and drops through caves it breaks into.
+  Inside: **sonar** (see caves, ore and creatures), **gunner's seat** (two hull turrets),
+  **coolant** (vent heat), **workbench** (sell ore, upgrades, ropes), **furnace** (coal ->
+  fuel; fuel is unlimited for now), **medkit**. Braces grip the walls when it stops; the
+  telescoping ladders come down whenever someone is outside.
+- **Danger to the drill:** heat (rises with depth, cutting magma, lava), hull breaches
+  (boulders, crawlers, the burrowing worm, crashes) that leak hull until you hold E on them,
+  and flooding (breached in water: the cabin fills, the engine drowns, the pump drains it).
+- **Going outside:** dig (mouse aims the swing, it hits the first rock that way), ropes,
+  dodge roll, swim (watch your breath), stay out of lava. Carry ore back to sell.
+- **The world is procedurally generated** from a seed every run: topsoil, the **crystal
+  caverns** (~150-300 m), deep basalt, the **magma layer** (400 m+), with wandering layer
+  boundaries; caves; ore (copper, silver, gold, amethyst) and coal; **water and lava** that
+  really flow (water on lava -> rock); loose boulders; **ruined camps** of the crews who dug
+  here before, with crates and **miners' notes** telling their story.
+- **Creatures:** watching eyes, crawlers, bat roosts, and below 40 m the worm, which tunnels
+  through rock to ram the drill.
+- Upgrades, best depth and found notes are saved (`user://progress.json`); settings in
+  `user://settings.cfg`.
 
 ## Code layout
 
-All game code is in `src/`:
+All game code is in `src/` (one system per file):
 
 | File | What it does |
 |---|---|
-| `main.gd` / `main.tscn` | Puts the game together; rules across systems (who gets ore, ropes, death, wreck, milestones) |
-| `drill/drill.gd` | The drilling machine: descent, cutting, fuel, hull, breaches, engine sound |
-| `drill/drill_art.gd` | How the drill looks (cutaway hull, head, lights), drawn in code for now |
-| `drill/station.gd` / `stations.gd` | Usable things on the drill: helm, furnace, workbench, medkit, breach |
-| `game/controls.gd` | Input bindings (keyboard, mouse, controller) |
-| `game/progress.gd` | Autoload `Progress`: money, upgrades, best depth, save file |
-| `world/world.gd` | Endless diggable ground: generation, fill/damage grid, collision, ore, props |
-| `world/boulder.gd` | Loose boulders that fall when undermined |
-| `world/rope.gd` | Climbable ropes |
-| `world/backdrop.gd` | Back wall and parallax sky / cave layers |
-| `world/terrain.gdshader` / `backwall.gdshader` | Smooth rock with outlines and cracks / cave back wall |
-| `player/player.gd` | Movement, rope/ladder climbing, health, bag, animation, helmet lamp |
-| `player/interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
-| `player/pickaxe.gd` | Swings: aim, room check, impact timing, hitting creatures, swoosh trail |
-| `creatures/crawler.gd` | Cave crawler: patrol, chase, lunge, take hits |
-| `creatures/watcher.gd` | Glowing eyes in the dark |
-| `creatures/spawner.gd` | Spawns / despawns creatures around the player |
-| `fx/fx.gd` | Particle bursts, impacts, hit-stop |
-| `fx/sfx.gd` | Autoload `Sfx`: sound effects, cave ambience, drips |
-| `ui/hud.gd` / `ui/shop.gd` | On-screen info + drill panel / the workbench's upgrades |
+| `main.gd` / `main.tscn` | Puts the game together; rules across systems (who gets ore, ropes, death, wreck, milestones, run stats) |
+| **game/** | |
+| `controls.gd` | Input bindings (keyboard, mouse, controller) |
+| `progress.gd` | Autoload `Progress`: money, upgrades, best depth, found notes, save file |
+| `settings.gd` | Autoload `Settings`: volumes, fullscreen, audio buses |
+| `game_config.gd` | Playtest switches from `project.godot` `[game]` |
+| `lore.gd` | The miners' notes and dealing them out per run |
+| **world/** | |
+| `world.gd` | The dig grid: chunks, fill/damage/material/liquid per cell, digging, chunk images + collision |
+| `world_gen.gd` | Making the world from the seed: noise, layers, caves, ore, liquid pockets, boulders, props |
+| `camps.gd` / `camp_items.gd` | Ruined camps (generated) / their crates and notes |
+| `liquids.gd` | Water + lava flow simulation, drawn by `liquid_*.gdshader` |
+| `terrain*.gdshader` / `terrain_common.gdshaderinc` | Smooth rock with outlines, cracks, materials; crystal/magma glow |
+| `boulder.gd`, `rope.gd`, `backdrop.gd`, `backwall.gdshader` | Falling boulders, ropes, parallax backgrounds, cave back wall |
+| **drill/** | |
+| `drill.gd` | The machine: hull, fuel, speed, damage, breaches, stations, braces, ladders |
+| `drill_cutter.gd` | Boring down in bites, reamers, falling into caves, crashes |
+| `drill_heat.gd` / `drill_flood.gd` / `drill_guns.gd` | Heat + coolant / flooding + pump / turrets + gunner's seat |
+| `stations.gd`, `station.gd` | Helm, furnace, workbench, medkit, sonar, gunner seat, coolant, breaches |
+| `drill_art.gd`, `drill_ladder.gd`, `turret.gd` | How it looks (sprites + lights + effects), telescoping ladders, turrets |
+| **player/** | |
+| `player.gd` | Movement, roll, ropes/ladders, swimming + breath, health, bag, animation, lamp |
+| `pickaxe.gd` | Swings: aim (mouse direction or keys), room check, impact, hitting creatures |
+| `interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
+| **creatures/** | `crawler.gd`, `bat.gd`, `worm.gd`, `watcher.gd`, `spawner.gd` (who spawns where) |
+| **fx/** | `fx.gd` (particles, impacts, hit-stop), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
+| **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / run summary / notes), `ui_style.gd` |
 
 ## Tests
 
@@ -87,9 +100,10 @@ godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 ```
 
 `feel_test` checks digging never gets stuck and how fast each direction is per material;
-`systems_test` plays through the drill (riding it, furnace, workbench + shop, a breach and its
-repair), rope climbing, a crawler fight and a falling boulder and prints PASS/FAIL. Tests use a
-fixed world seed and never write the real save.
+`systems_test` plays through the drill (riding it, braces, ladders, furnace, workbench + shop,
+breaches, heat + coolant, sonar, the worm vs the turrets), layers, camps + notes, bats, water
+and lava, mouse aiming, ropes, a crawler fight, the dodge roll and a falling boulder, and prints
+PASS/FAIL. Tests use a fixed world seed and never write the real save.
 
 ## Art pipeline
 

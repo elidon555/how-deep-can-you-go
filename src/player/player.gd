@@ -174,11 +174,14 @@ func _liquids(dt: float) -> void:
 	var head := world.liquid_at(global_position + Vector2(0, -14))
 	var feet := world.liquid_at(global_position + Vector2(0, HALF_HEIGHT - 2))
 	var was := in_water
-	in_water = body.y == Liquids.WATER and body.x > 0.4
+	var drill := get_tree().get_first_node_in_group("drill") as Drill
+	var cabin_body := drill != null and drill.flooding.flooded_at(global_position)
+	var cabin_head := drill != null and drill.flooding.flooded_at(global_position + Vector2(0, -14))
+	in_water = (body.y == Liquids.WATER and body.x > 0.4) or cabin_body
 	if in_water and not was and velocity.y > 120.0:
-		Sfx.play("land", global_position, -10.0)          # splash
+		Sfx.play("splash", global_position, -6.0)
 		kicked_dust.emit(global_position, 0.8)
-	var under := head.y == Liquids.WATER and head.x > 0.5
+	var under := (head.y == Liquids.WATER and head.x > 0.5) or cabin_head
 	if under:
 		breath = maxf(breath - dt, 0.0)
 		if breath == 0.0:
