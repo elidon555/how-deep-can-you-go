@@ -12,11 +12,11 @@
   },
   "jump": {
    "row": 2,
-   "frames": 1
+   "frames": 2
   },
   "fall": {
    "row": 3,
-   "frames": 1
+   "frames": 2
   },
   "dig_side": {
    "row": 4,
@@ -29,7 +29,20 @@
   "dig_up": {
    "row": 6,
    "frames": 8
+  },
+  "land": {
+   "row": 7,
+   "frames": 2
+  },
+  "climb": {
+   "row": 8,
+   "frames": 4
+  },
+  "hurt": {
+   "row": 9,
+   "frames": 2
   }
  },
- "feet_below_center": 26.5
+ "feet_below_center": 26.5,
+ "climb_rope_x": 6.6
 }

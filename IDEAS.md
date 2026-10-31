@@ -2,12 +2,22 @@
 
 Rule: build one small piece, play it, then add the next. Nothing here is lost — it's just "later".
 
-## Now: Step 1 — "Is digging fun?"
+## Step 1 — "Is digging fun?" (done)
 - [x] Little guy, run + jump
 - [x] Dig down / sideways / up through generated ground (endless, made in chunks)
 - [x] Depth counter (1 tile = 1 m), best depth
 - [x] Gets harder deeper (dirt → stone → hard rock), gets darker deeper
 - [x] Basic juice: dust particles, screen shake, crack overlay
+
+## Step 2 — "Why dig, and when to go back up?" (done)
+- [x] Pickaxe hits (cracks, then breaks), swings need room, click/hold to dig
+- [x] Sound: hits per rock, breaking, steps, landing, ambience by depth, drips, creatures
+- [x] Ore types by depth (copper, silver, gold), carried until you reach the surface
+- [x] Surface camp + merchant shop: pickaxe, arms, lamp, coat, rope bag upgrades (saved)
+- [x] Ropes to climb back out (refilled at the surface)
+- [x] Loose boulders that drop when undermined
+- [x] First creature: cave crawler (chase, lunge, bite); fight with the pickaxe; health + death
+- [ ] Lamp oil / fuel: on hold, the lamp never runs out for now
 
 ## Decisions made (can change later)
 - Engine: Godot 4 (built-in 2D lighting/glow for the Dead Cells-style look, exports to web)
@@ -15,7 +25,7 @@ Rule: build one small piece, play it, then add the next. Nothing here is lost �
 - Co-op: "maybe" → Step 1 is single player, decide online yes/no before enemies get added
 
 ## Later list (rough order, pick what sounds most fun after playing)
-1. **Fuel / stamina** — the "go deeper or turn back" tension
+1. **Fuel / stamina** — the "go deeper or turn back" tension (on hold)
 2. **Ore + upgrades** — sell ore, better pickaxe/drill, more fuel, lamp radius
 3. **Enemies + combat** — cave creatures, Dead Cells-style hits/dodges/weapons
 4. **Earth layers** — crust, mantle, core, each with its own look, hazards, creatures

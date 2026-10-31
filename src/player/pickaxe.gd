@@ -1,11 +1,14 @@
 extends Node2D
 class_name Pickaxe
-## The miner's pickaxe: turns held keys into swings, and breaks rock only when a swing lands.
+## The miner's pickaxe: click (one swing) or hold (keep swinging) the dig button; the
+## direction keys aim it (down, up, down+side = diagonal, otherwise the way you face).
+## Rock only breaks when a swing lands.
 ## A swing needs room: if rock is in the way of the wind-up, the pick knocks into it instead
 ## (chips it a little, no real dig), so cramped spots slowly open up rather than trap you.
 ## Lives as a child of the Player; draws the swoosh trail itself.
 
 signal struck(pos: Vector2, mat: int, broke: int, kind: String)   # hit rock; kind "bonk" = no room
+signal hit_thing(pos: Vector2)    # a swing landed on a creature or boulder (group "hittable")
 
 # seconds per frame of a swing (lift, wind-up, peak, hold, strike, IMPACT, recoil, settle);
 # matches the 8-frame dig rows in assets/sprites/miner.png
@@ -30,6 +33,7 @@ const ROOM := {"dig_side": [Vector2(-2, -22), Vector2(-9, -19)],
 var player: Player
 var world: World
 var power := 3.0          # rock removed per second at the centre of a dig (dirt), on average
+var speed := 1.0          # swing speed multiplier
 var kind := ""            # current swing: dig_side / dig_down / dig_diag / dig_up, "" = none
 var frame := 0            # current frame of the swing animation
 var _t := 0.0
@@ -61,10 +65,9 @@ func update(dt: float, dir: float) -> void:
 		kind = want
 		frame = 1          # skip the lift on the first swing, feels snappier
 		_t = 0.0
-	elif want == "" and (frame < IMPACT or not player.is_on_floor()):
-		kind = ""          # let go before the hit (after it, the recoil plays out)
-		return
-	_t += dt
+	power = Progress.pick_power()
+	speed = Progress.swing_speed()
+	_t += dt * speed      # a started swing always plays out; holding the button chains them
 	while _t >= FRAMES[frame]:
 		_t -= FRAMES[frame]
 		frame += 1
@@ -72,6 +75,7 @@ func update(dt: float, dir: float) -> void:
 			return
 		if frame == IMPACT - 1:
 			_trail_t = 0.0
+			Sfx.play("swing", player.global_position, -10.0, 0.1)
 		elif frame == IMPACT:
 			_strike(player.facing)
 		elif frame >= FRAMES.size():
@@ -96,8 +100,11 @@ func _has_room() -> bool:
 	return true
 
 
-## What holding the current keys should dig, or "" for nothing.
+## What the held keys aim at while the dig button is down, or "" for nothing.
+## A click counts too, even if released within the same frame.
 func _intent(dir: float) -> String:
+	if not (Input.is_action_pressed("dig") or Input.is_action_just_pressed("dig")):
+		return ""
 	var down := Input.is_action_pressed("down")
 	if down and dir != 0:
 		return "dig_diag"
@@ -105,21 +112,7 @@ func _intent(dir: float) -> String:
 		return "dig_down"
 	if Input.is_action_pressed("up"):
 		return "dig_up"
-	if dir == 0:
-		return ""
-	# rock in front of the head/chest (or within a step of it): keep chopping while you walk in.
-	# Also when holding a direction without getting anywhere, e.g. pinched by a tunnel's round end.
-	var c := player.global_position
-	var rock_ahead := false
-	for x in [10, 20, 28]:
-		for y in [-14, 2]:
-			if world.is_diggable(c + Vector2(dir * x, y)):
-				rock_ahead = true
-			elif world.is_bedrock(c + Vector2(dir * x, y)):
-				return ""   # the edge of the world: nothing to dig
-	if rock_ahead or player.is_on_wall() or absf(player.get_real_velocity().x) < 20.0:
-		return "dig_side"
-	return ""
+	return "dig_side"
 
 
 ## The pick lands: break rock. Each swing removes on average what continuous digging used to.
@@ -144,6 +137,16 @@ func _strike(dir: int) -> void:
 			res = _merge(_dig_side(c, dir, amount), world.dig(floor_at, floor_at, 12.0, amount))
 	if res.hit:
 		struck.emit(at, res.mat, res.broke, kind)
+	_hit_things(at)
+
+
+## Creatures and boulders where the pick lands take a hit too.
+func _hit_things(at: Vector2) -> void:
+	var damage := 1 + Progress.level("pick") / 2
+	for n in get_tree().get_nodes_in_group("hittable"):
+		if (n as Node2D).global_position.distance_to(at) < 22.0:
+			n.hit(damage, player.global_position)
+			hit_thing.emit(at)
 
 
 ## Tunnel sideways, a bit taller than you: a hole ahead that reaches head and feet height at

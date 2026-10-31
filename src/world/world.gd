@@ -6,7 +6,8 @@ class_name World
 ## Pickaxe hits add "damage" (drawn as cracks); a cell breaks once fill - damage < 0.5.
 ## Generated in 32x32-cell chunks as the player goes down. 24 px = 1 meter.
 
-signal ore_found(pos: Vector2)
+signal ore_found(pos: Vector2, kind: int)   # kind: index into ORES
+signal boulder_shattered(pos: Vector2)
 
 const CELL := 8
 const METER := 24.0
@@ -18,6 +19,12 @@ const R_INT := 5                # how far (cells) the "deep inside rock" darkeni
 enum M { DIRT, STONE, HARD, BEDROCK }
 const HARDNESS := [1.0, 2.6, 5.5, INF]
 const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924")]
+# name, value, nugget colour, glow colour, found from depth (m)
+const ORES := [
+	["copper", 1, Color("d9824a"), Color("ff9c5a"), 0.0],
+	["silver", 3, Color("c9d3e0"), Color("e8f2ff"), 40.0],
+	["gold", 8, Color("f2c14e"), Color("ffd36a"), 110.0],
+]
 
 class Chunk:
 	var key: Vector2i
@@ -36,14 +43,14 @@ class Chunk:
 var chunks := {}                # Vector2i -> Chunk
 var next_row := -2              # next chunk row to generate (rows < -2 are open sky)
 var dug := {}                   # cells the player carved (not natural caves)
-var ores := {}                  # cell -> [lit Sprite2D, glow Sprite2D]
+var ores := {}                  # cell -> [lit Sprite2D, glow Sprite2D, ore kind]
 var decor := {}                 # anchor cell -> Array[Node2D]
 var glow_root := Node2D.new()   # main moves this onto the unlit glow layer
 var noise_cave := FastNoiseLite.new()
 var noise_mat := FastNoiseLite.new()
 var noise_surf := FastNoiseLite.new()
 var rng := RandomNumberGenerator.new()
-var terrain_shader: Shader = preload("res://terrain.gdshader")
+var terrain_shader: Shader = preload("res://src/world/terrain.gdshader")
 var tx := {}
 var deco_tex := {}
 var props := {}                 # name -> [texture, glow texture or null]
@@ -158,10 +165,11 @@ func _populate(ch: Chunk) -> void:
 			var depth := gy * CELL / METER
 			var pos := Vector2(gx * CELL + 4, gy * CELL + 4)
 			if f >= 0.5:
-				if (m == M.STONE or m == M.HARD) and rng.randf() < 0.004:
-					var lit := _sprite(deco_tex.ore, pos, self, 1)
-					var gl := _sprite(deco_tex.ore_glow, pos, glow_root, 0)
-					ores[Vector2i(gx, gy)] = [lit, gl]
+				if depth > 2 and rng.randf() < (0.0025 if m == M.DIRT else 0.004):
+					var kind := _ore_kind(depth)
+					var lit := _sprite(deco_tex.ore[kind], pos, self, 1)
+					var gl := _sprite(deco_tex.ore_glow[kind], pos, glow_root, 0)
+					ores[Vector2i(gx, gy)] = [lit, gl, kind]
 				elif m == M.DIRT and depth > 3 and rng.randf() < 0.0008:
 					_add_decor(Vector2i(gx, gy), _sprite(deco_tex.skull, pos, self, 1))
 				elif depth > 5 and get_fill(gx, gy - 1) < 0.5 and get_fill(gx, gy - 2) < 0.5 \
@@ -178,6 +186,7 @@ func _populate(ch: Chunk) -> void:
 			var surf := Vector2(gx * CELL + 4, gy * CELL)
 			if get_fill(gx, gy - 1) < 0.5 and get_fill(gx, gy - 2) < 0.5:   # a floor
 				_floor_props(Vector2i(gx, gy), surf, depth)
+	_place_boulders(ch)
 	# ceilings: an air cell right under rock
 	for j in C:
 		for i in C:
@@ -187,6 +196,41 @@ func _populate(ch: Chunk) -> void:
 				continue
 			if ch.fill[j * C + i] < 0.5 and get_fill(gx, gy - 1) >= 0.5 and get_fill(gx, gy + 1) < 0.5:
 				_ceiling_props(Vector2i(gx, gy - 1), Vector2(gx * CELL + 4, gy * CELL), gy * CELL / METER)
+
+
+## Loose boulders sit in small pockets inside dirt and stone (dig under one and it drops).
+## Kept away from chunk edges so the pocket stays inside this chunk.
+func _place_boulders(ch: Chunk) -> void:
+	for j in range(3, C - 3):
+		for i in range(3, C - 3):
+			var gx := ch.key.x * C + i
+			var gy := ch.key.y * C + j
+			if gx < 8 or gx >= W - 8 or gy * CELL / METER < 8.0:
+				continue
+			if ch.fill[j * C + i] < 0.99 or ch.mat[j * C + i] == M.HARD or rng.randf() > 0.0012:
+				continue
+			var centre := Vector2(gx * CELL, gy * CELL)
+			for dj in range(-2, 3):
+				for di in range(-2, 3):
+					var c := Vector2((gx + di) * CELL + 4, (gy + dj) * CELL + 4)
+					if c.distance_to(centre) < Boulder.RADIUS + 3.0:
+						ch.fill[(j + dj) * C + i + di] = 0.0
+			var b := Boulder.new()
+			b.world = self
+			b.position = centre
+			b.shattered.connect(boulder_shattered.emit)
+			add_child(b)
+
+
+## Deepest ore found at this depth, sometimes a cheaper one.
+func _ore_kind(depth: float) -> int:
+	var k := 0
+	for i in ORES.size():
+		if depth >= ORES[i][4]:
+			k = i
+	while k > 0 and rng.randf() < 0.45:
+		k -= 1
+	return k
 
 
 func _floor_props(cell: Vector2i, p: Vector2, depth: float) -> void:
@@ -393,10 +437,11 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 			if o:
 				o.col_dirty = true
 		if ores.has(cell):
-			for n in ores[cell]:
-				n.queue_free()
+			var o: Array = ores[cell]
+			o[0].queue_free()
+			o[1].queue_free()
 			ores.erase(cell)
-			ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4))
+			ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
 		if decor.has(cell):
 			for n in decor[cell]:
 				n.queue_free()
@@ -583,21 +628,25 @@ func _make_decor_textures() -> void:
 	lt.width = 256
 	lt.height = 256
 	deco_tex.light = lt
-	var gold := Color("f2c14e")
-	# ore: rough stone lump with gold nuggets (lit) + just the gold (glow)
-	var ore := Image.create(14, 12, false, Image.FORMAT_RGBA8)
-	var ore_g := Image.create(14, 12, false, Image.FORMAT_RGBA8)
-	var r := RandomNumberGenerator.new()
-	r.seed = 3
-	for k in 7:
-		var x := 2 + r.randi() % 9
-		var y := 2 + r.randi() % 7
-		for p in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
-			ore.set_pixelv(Vector2i(x, y) + p, gold.darkened(0.25 if p.y == 1 else 0.0))
-			ore_g.set_pixelv(Vector2i(x, y) + p, Color("ffd36a") if p == Vector2i.ZERO else Color("c08a30"))
-		ore.set_pixel(x + 2, y + 1, Color("3a2a14"))
-	deco_tex.ore = ImageTexture.create_from_image(ore)
-	deco_tex.ore_glow = ImageTexture.create_from_image(ore_g)
+	# ore: nuggets in the rock (lit) + just the shiny bits (glow), one pair per ore kind
+	deco_tex.ore = []
+	deco_tex.ore_glow = []
+	for kind in ORES:
+		var nug: Color = kind[2]
+		var shine: Color = kind[3]
+		var ore := Image.create(14, 12, false, Image.FORMAT_RGBA8)
+		var ore_g := Image.create(14, 12, false, Image.FORMAT_RGBA8)
+		var r := RandomNumberGenerator.new()
+		r.seed = 3
+		for k in 7:
+			var x := 2 + r.randi() % 9
+			var y := 2 + r.randi() % 7
+			for p in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+				ore.set_pixelv(Vector2i(x, y) + p, nug.darkened(0.25 if p.y == 1 else 0.0))
+				ore_g.set_pixelv(Vector2i(x, y) + p, shine if p == Vector2i.ZERO else nug.darkened(0.3))
+			ore.set_pixel(x + 2, y + 1, Color("3a2a14"))
+		deco_tex.ore.append(ImageTexture.create_from_image(ore))
+		deco_tex.ore_glow.append(ImageTexture.create_from_image(ore_g))
 	# glowing mushrooms
 	var mu := Image.create(18, 12, false, Image.FORMAT_RGBA8)
 	for m in [[4, 6], [9, 9], [14, 4]]:

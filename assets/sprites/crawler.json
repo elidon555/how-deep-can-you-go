@@ -1,0 +1,24 @@
+{
+ "cell_w": 64,
+ "cell_h": 48,
+ "columns": 8,
+ "anims": {
+  "walk": {
+   "row": 0,
+   "frames": 6
+  },
+  "lunge": {
+   "row": 1,
+   "frames": 4
+  },
+  "hurt": {
+   "row": 2,
+   "frames": 2
+  },
+  "die": {
+   "row": 3,
+   "frames": 3
+  }
+ },
+ "feet_below_center": 20
+}

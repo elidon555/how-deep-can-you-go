@@ -1,0 +1,102 @@
+extends Node
+## Autoload "Progress": what carries over between runs (money, upgrades, best depth).
+## Saved to user://progress.json. Ore you carry is only banked when you reach the surface.
+
+signal changed
+
+const SAVE_PATH := "user://progress.json"
+const OLD_BEST_PATH := "user://best.txt"
+const UPGRADES := {
+	"pick": {"name": "Sharper pickaxe", "desc": "Breaks rock faster", "costs": [15, 40, 90, 200, 450]},
+	"arms": {"name": "Strong arms", "desc": "Swing faster", "costs": [25, 70, 160]},
+	"lamp": {"name": "Brighter lamp", "desc": "See further in the dark", "costs": [10, 30, 80]},
+	"coat": {"name": "Thick coat", "desc": "+1 health", "costs": [30, 90, 220]},
+	"bag": {"name": "Rope bag", "desc": "+3 ropes per trip", "costs": [12, 35, 90]},
+}
+
+var money := 0
+var best := 0
+var levels := {}   # upgrade id -> level bought
+var dry_run := false   # tests: keep everything in memory
+
+
+func _ready() -> void:
+	_load()
+
+
+func level(id: String) -> int:
+	return levels.get(id, 0)
+
+
+## Price of the next level, or -1 when maxed out.
+func cost(id: String) -> int:
+	var costs: Array = UPGRADES[id].costs
+	return costs[level(id)] if level(id) < costs.size() else -1
+
+
+func buy(id: String) -> bool:
+	var c := cost(id)
+	if c < 0 or money < c:
+		return false
+	money -= c
+	levels[id] = level(id) + 1
+	save()
+	return true
+
+
+func add_money(amount: int) -> void:
+	money += amount
+	save()
+
+
+func record_depth(depth: int) -> bool:
+	if depth <= best:
+		return false
+	best = depth
+	return true
+
+
+# ---------------------------------------------------------------- what upgrades do
+
+func pick_power() -> float:
+	return 3.0 * pow(1.35, level("pick"))
+
+
+func swing_speed() -> float:
+	return 1.0 + 0.15 * level("arms")
+
+
+func lamp_scale() -> float:
+	return 1.0 + 0.25 * level("lamp")
+
+
+func max_health() -> int:
+	return 3 + level("coat")
+
+
+func rope_capacity() -> int:
+	return 5 + 3 * level("bag")
+
+
+# ---------------------------------------------------------------- saving
+
+func save() -> void:
+	if dry_run:
+		changed.emit()
+		return
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels}))
+	changed.emit()
+
+
+func _load() -> void:
+	if FileAccess.file_exists(SAVE_PATH):
+		var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
+		if d is Dictionary:
+			money = int(d.get("money", 0))
+			best = int(d.get("best", 0))
+			for k in d.get("levels", {}):
+				levels[k] = int(d.levels[k])
+	elif FileAccess.file_exists(OLD_BEST_PATH):
+		best = int(FileAccess.get_file_as_string(OLD_BEST_PATH))

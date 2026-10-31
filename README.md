@@ -14,41 +14,66 @@ Or open `project.godot` in the Godot editor and press F5.
 
 ## Controls
 
-| Action | Keyboard | Controller |
+| Action | Keyboard / mouse | Controller |
 |---|---|---|
 | Move | A / D | Left stick / D-pad |
-| Jump | Space | A |
-| Dig down | S | Down |
-| Dig up | W | Up |
-| Dig sideways | Walk into a wall | Walk into a wall |
+| Jump | Space or W | A |
+| Dig (click = one swing, hold = keep swinging) | Left click or J | X |
+| Aim the pick | W up · S down · S + A/D diagonal · otherwise the way you face | Stick / D-pad |
+| Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
+| Trade at the merchant's stall | E | B |
 | Restart | R | Back |
 
-## Status
+Bindings live in `src/game/controls.gd`.
 
-Step 1 prototype: endless generated ground with caves, dirt → stone → hard rock,
-darkness + helmet lamp, depth counter and best depth.
+## How it plays
+
+- Dig down for depth. Swings need room: in a cramped spot the pick knocks the rock first.
+- Ore (copper, deeper silver, deep gold) is carried in your bag and only banked when you
+  get back to the surface; die and it's lost. Ropes get you back up (refilled at the surface).
+- Spend money at the merchant's stall: sharper pickaxe, stronger arms, brighter lamp, thicker
+  coat (+health), rope bag. Upgrades and best depth are saved (`user://progress.json`).
+- Loose boulders drop when you dig out what holds them up. Crawlers hunt in the caves below
+  25 m; fight them with the pickaxe.
 
 See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
 
 ## Code layout
 
+All game code is in `src/`:
+
 | File | What it does |
 |---|---|
-| `main.gd` | Sets up the scene: world, player, camera, lighting, backgrounds, HUD, milestones |
-| `world.gd` | Endless diggable ground: generation, fill/damage grid, collision, cave props |
-| `player.gd` | Movement, animation, helmet lamp |
-| `pickaxe.gd` | Swings: what the keys dig, room check, impact timing, swoosh trail |
-| `fx.gd` | One-shot effects: particle bursts, pickaxe impacts, hit-stop |
-| `watcher.gd` | Glowing eyes in the dark |
-| `terrain.gdshader` / `backwall.gdshader` | Smooth rock with outlines and cracks / cave back wall |
+| `main.gd` / `main.tscn` | Puts the game together; rules across systems (selling, ropes, death, milestones) |
+| `game/controls.gd` | Input bindings (keyboard, mouse, controller) |
+| `game/progress.gd` | Autoload `Progress`: money, upgrades, best depth, save file |
+| `world/world.gd` | Endless diggable ground: generation, fill/damage grid, collision, ore, props |
+| `world/boulder.gd` | Loose boulders that fall when undermined |
+| `world/rope.gd` | Climbable ropes |
+| `world/camp.gd` | Surface camp with the merchant's stall |
+| `world/backdrop.gd` | Back wall and parallax sky / cave layers |
+| `world/terrain.gdshader` / `backwall.gdshader` | Smooth rock with outlines and cracks / cave back wall |
+| `player/player.gd` | Movement, rope climbing, health, animation, helmet lamp |
+| `player/pickaxe.gd` | Swings: aim, room check, impact timing, hitting creatures, swoosh trail |
+| `creatures/crawler.gd` | Cave crawler: patrol, chase, lunge, take hits |
+| `creatures/watcher.gd` | Glowing eyes in the dark |
+| `creatures/spawner.gd` | Spawns / despawns creatures around the player |
+| `fx/fx.gd` | Particle bursts, impacts, hit-stop |
+| `fx/sfx.gd` | Autoload `Sfx`: sound effects, cave ambience, drips |
+| `ui/hud.gd` / `ui/shop.gd` | On-screen info / the merchant's shop |
 
-## Feel test
+## Tests
 
-Headless check that digging never gets stuck and how fast each direction is per material:
+Headless, no window or sound:
 
 ```
-godot --headless --path . --fixed-fps 60 -s tests/feel_test.gd
+godot --headless --path . --fixed-fps 60 res://tests/feel_test.tscn
+godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 ```
+
+`feel_test` checks digging never gets stuck and how fast each direction is per material;
+`systems_test` plays through rope climbing + selling, the shop, a crawler fight and a falling
+boulder and prints PASS/FAIL.
 
 ## Art pipeline
 
@@ -59,8 +84,11 @@ All art is generated, so it can be tweaked and rebuilt:
 | Terrain textures + normal maps | `python3 tools/gen_textures.py` |
 | Parallax backgrounds | `python3 tools/gen_backgrounds.py` |
 | Miner sprite sheet (Blender) | `blender -b --factory-startup -P tools/miner_blender.py -- /tmp/miner && python3 tools/miner_sheet.py /tmp/miner` |
-| Cave props (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
+| Crawler creature sheet + eye glow (Blender) | `blender -b --factory-startup -P tools/crawler_blender.py -- /tmp/crawler && python3 tools/crawler_sheet.py /tmp/crawler` |
+| Cave props, rope, boulder, camp stall (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
 
-The miner and props are low-poly 3D models rendered to cel-shaded pixel art with outlines
+The character scripts take an optional anim list after the output dir to re-render only
+those rows (e.g. `-- /tmp/miner climb,hurt`); the sheet script still needs every frame in the dir.
+The miner, crawler and props are low-poly 3D models rendered to cel-shaded pixel art with outlines
 (the same idea Dead Cells used). Terrain is a fine dig grid drawn as smooth outlined rock by
 `terrain.gdshader`.

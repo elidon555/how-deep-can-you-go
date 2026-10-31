@@ -11,6 +11,10 @@ var tint := Color(2.2, 0.25, 0.15) if randf() < 0.7 else Color(1.8, 1.6, 0.4)
 var wide := randi() % 2 + 3
 
 
+func _ready() -> void:
+	Sfx.play("whisper", global_position, -14.0, 0.2)
+
+
 func _process(dt: float) -> void:
 	life -= dt
 	if not gone and (life <= 0.0 or global_position.distance_to(player.global_position) < 130.0):

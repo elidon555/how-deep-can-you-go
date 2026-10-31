@@ -1,7 +1,7 @@
-extends SceneTree
+extends Node
 ## Headless movement/dig "feel" test. Builds solid blocks of each material, holds inputs
 ## like a player would and reports speed, getting stuck and animation flicker.
-##   godot --headless --path . --fixed-fps 60 -s tests/feel_test.gd
+##   godot --headless --path . --fixed-fps 60 res://tests/feel_test.tscn
 
 const DIRT := 0
 const STONE := 1
@@ -20,15 +20,16 @@ var bonks := 0
 var low := false   # arena pocket only a bit taller than the miner
 
 
-func _initialize() -> void:
-	main = load("res://main.tscn").instantiate()
-	root.add_child(main)
+func _ready() -> void:
+	Progress.dry_run = true     # never touch the real save
+	main = load("res://src/main.tscn").instantiate()
+	add_child(main)
 	_run()
 
 
 func _run() -> void:
-	await physics_frame
-	await physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	w = main.world
 	p = main.player
 	main.fx.hitstop_enabled = false
@@ -38,16 +39,16 @@ func _run() -> void:
 	await _surface_walk()
 	for m in [DIRT, STONE, HARD]:
 		print("--- ", NAMES[m])
-		await _scenario(m, "down", ["down"], 3.0)
-		await _scenario(m, "side", ["right"], 3.0)
-		await _scenario(m, "diag", ["down", "right"], 3.0)
-		await _scenario(m, "up+jump", ["up"], 3.0, true)
-		await _scenario(m, "down,then side", ["down"], 1.5, false, ["right"], 3.0)
+		await _scenario(m, "down", ["dig", "down"], 3.0)
+		await _scenario(m, "side", ["dig", "right"], 3.0)
+		await _scenario(m, "diag", ["dig", "down", "right"], 3.0)
+		await _scenario(m, "up+jump", ["dig", "up"], 3.0, true)
+		await _scenario(m, "down,then side", ["down"], 1.5, false, ["dig", "right"], 3.0)
 		low = true
-		await _scenario(m, "side, low cave", ["right"], 3.0)
-		await _scenario(m, "down, low cave", ["down"], 3.0)
+		await _scenario(m, "side, low cave", ["dig", "right"], 3.0)
+		await _scenario(m, "down, low cave", ["dig", "down"], 3.0)
 		low = false
-	quit()
+	get_tree().quit()
 
 
 func _arena(m: int) -> void:
@@ -66,11 +67,11 @@ func _arena(m: int) -> void:
 	p.global_position = Vector2(64 * World.CELL, 216 * World.CELL - 19)
 	p.velocity = Vector2.ZERO
 	for i in 20:
-		await physics_frame
+		await get_tree().physics_frame
 
 
 func _release_all() -> void:
-	for a in ["left", "right", "up", "down", "jump"]:
+	for a in ["left", "right", "up", "down", "jump", "dig"]:
 		Input.action_release(a)
 
 
@@ -82,7 +83,7 @@ func _scenario(m: int, label: String, keys: Array, secs: float, jump := false,
 		for k in keys:
 			Input.action_press(k)
 		for i in int(secs * 60):
-			await physics_frame
+			await get_tree().physics_frame
 		_release_all()
 		keys = keys2
 		secs = secs2
@@ -97,7 +98,7 @@ func _scenario(m: int, label: String, keys: Array, secs: float, jump := false,
 				Input.action_press("jump")
 			elif i % 30 == 12:
 				Input.action_release("jump")
-		await physics_frame
+		await get_tree().physics_frame
 		st.sample(p)
 	_release_all()
 	var d := (p.global_position - start) / World.METER
@@ -111,12 +112,12 @@ func _surface_walk() -> void:
 		p.global_position = Vector2(World.WIDTH_PX / 2.0, -60)
 		p.velocity = Vector2.ZERO
 		for i in 90:
-			await physics_frame
+			await get_tree().physics_frame
 		var start := p.global_position
 		var st := _Stats.new()
 		Input.action_press(dir)
 		for i in 360:
-			await physics_frame
+			await get_tree().physics_frame
 			st.sample(p)
 		_release_all()
 		var d := (p.global_position - start) / World.METER

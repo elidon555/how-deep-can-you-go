@@ -1,10 +1,12 @@
 extends Node
 class_name Fx
-## One-shot effects: particle bursts, pickaxe impacts and hit-stop.
+## One-shot effects: particle bursts, pickaxe impacts (with their sounds) and hit-stop.
 
 ## Where bursts go: `lit` is darkened by the cave lighting, `glow` blooms.
 var lit: Node
 var glow: Node
+const HIT_SOUND := ["hit_dirt", "hit_stone", "hit_hard", "bonk"]   # by World.M material
+
 var hitstop_enabled := true
 var _hitstop_id := 0
 
@@ -29,7 +31,15 @@ func impact(pos: Vector2, mat: int, broke: int, kind: String, facing: int) -> vo
 		burst(pos, Color(2.4, 1.9, 1.1), n, 220.0, away, 70.0, 0.22, 1.0, true)
 	if broke > 0:
 		burst(pos, Color(0.55, 0.52, 0.5, 0.5), 6, 35.0, away, 180.0, 0.7, 4.0, false, 40.0)
+		Sfx.play("break", pos, -6.0)
+	Sfx.play("bonk" if kind == "bonk" else HIT_SOUND[mat], pos, -2.0)
 	hitstop(0.06 if broke > 0 else 0.035)
+
+
+## Pickaxe landing on a creature or boulder.
+func flesh(pos: Vector2, facing: int) -> void:
+	burst(pos, Color("d8cfd6"), 8, 150.0, Vector2(facing, -0.5), 60.0, 0.4, 2.0)
+	hitstop(0.07)
 
 
 func burst(pos: Vector2, color: Color, amount: int, speed: float, dir := Vector2.UP, spread := 180.0,

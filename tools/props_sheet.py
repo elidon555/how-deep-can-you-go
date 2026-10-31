@@ -15,6 +15,7 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "props")
 os.makedirs(OUT, exist_ok=True)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
 GLOW_KEYS = [np.array(c) for c in ([255, 179, 71], [176, 108, 255], [79, 240, 208])]
+TILE = {"rope": 16}   # rendered several tiles tall: keep one middle tile (rows TILE..2*TILE)
 
 for flat_path in sorted(glob.glob(f"{SRC}/*_flat.png")):
     name = os.path.basename(flat_path)[:-9]
@@ -36,6 +37,9 @@ for flat_path in sorted(glob.glob(f"{SRC}/*_flat.png")):
     n = np.zeros_like(solid)
     n[1:] |= solid[:-1]; n[:-1] |= solid[1:]; n[:, 1:] |= solid[:, :-1]; n[:, :-1] |= solid[:, 1:]
     out[n & ~solid] = OUTLINE
+    if name in TILE:
+        t = TILE[name]
+        out, glow, flat, h = out[t:2 * t], glow[t:2 * t], flat[t:2 * t], t
     Image.fromarray(out, "RGBA").save(f"{OUT}/{name}.png")
     if glow.any():
         g = np.zeros((h, w, 4), np.uint8)

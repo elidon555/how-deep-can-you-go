@@ -1,0 +1,106 @@
+extends PanelContainer
+class_name Shop
+## The merchant's shop: spend banked money on upgrades (Progress.UPGRADES).
+## Click a row's button or press its number key; E / Esc closes.
+
+signal closed
+
+var _money := Label.new()
+var _rows := VBoxContainer.new()
+
+
+func _ready() -> void:
+	visible = false
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.06, 0.05, 0.07, 0.94)
+	style.border_color = Color("8a6a42")
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(22)
+	add_theme_stylebox_override("panel", style)
+	position = Vector2(340, 110)
+	custom_minimum_size = Vector2(600, 0)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 12)
+	add_child(box)
+	var title := Label.new()
+	title.text = "The Merchant"
+	title.add_theme_font_size_override("font_size", 34)
+	title.add_theme_color_override("font_color", Color("f4e3c1"))
+	box.add_child(title)
+	_money.add_theme_font_size_override("font_size", 24)
+	_money.add_theme_color_override("font_color", Color("9fd88a"))
+	box.add_child(_money)
+	_rows.add_theme_constant_override("separation", 8)
+	box.add_child(_rows)
+	var hint := Label.new()
+	hint.text = "1-5 or click to buy · E to close"
+	hint.modulate.a = 0.6
+	box.add_child(hint)
+	Progress.changed.connect(_refresh)
+
+
+func open() -> void:
+	visible = true
+	_refresh()
+
+
+func close() -> void:
+	if visible:
+		visible = false
+		closed.emit()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event.is_action_pressed("interact") or event.is_action_pressed("ui_cancel"):
+		close()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.echo:
+		var n: int = event.physical_keycode - KEY_1
+		var ids := Progress.UPGRADES.keys()
+		if n >= 0 and n < ids.size():
+			_buy(ids[n])
+			get_viewport().set_input_as_handled()
+
+
+func _buy(id: String) -> void:
+	if Progress.buy(id):
+		Sfx.play("coins")
+	else:
+		Sfx.play("ui_click", Vector2.INF, -6.0, 0.0)
+
+
+func _refresh() -> void:
+	_money.text = "You have $%d" % Progress.money
+	for c in _rows.get_children():
+		c.queue_free()
+	var i := 1
+	for id in Progress.UPGRADES:
+		var u: Dictionary = Progress.UPGRADES[id]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 14)
+		var name := Label.new()
+		var lvl := Progress.level(id)
+		name.text = "%d. %s  %s" % [i, u.name, "●".repeat(lvl) + "○".repeat(u.costs.size() - lvl)]
+		name.custom_minimum_size = Vector2(330, 0)
+		name.tooltip_text = u.desc
+		row.add_child(name)
+		var desc := Label.new()
+		desc.text = u.desc
+		desc.modulate.a = 0.6
+		desc.custom_minimum_size = Vector2(0, 0)
+		desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(desc)
+		var b := Button.new()
+		var cost := Progress.cost(id)
+		b.text = "MAX" if cost < 0 else "$%d" % cost
+		b.disabled = cost < 0 or cost > Progress.money
+		b.custom_minimum_size = Vector2(80, 0)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(_buy.bind(id))
+		row.add_child(b)
+		_rows.add_child(row)
+		i += 1
