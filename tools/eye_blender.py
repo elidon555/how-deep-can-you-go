@@ -34,7 +34,7 @@ GAZE_UP = 40             # the eye looks up and out at this angle
 
 COLORS = {
     "sclera": "#d8ccb8", "vein": "#9a2a3a", "crack": "#24161a", "pupil": "#120810",
-    "iris": "#d8c878", "ring": "#8a44b8", "iris_mid": "#b0a25e", "ring_mid": "#6a3890",
+    "iris": "#d8c878", "ring": "#8a44b8", "iris_deep": "#a8963e", "iris_mid": "#b0a25e", "ring_mid": "#6a3890",
     "iris_dim": "#857a4a", "ring_dim": "#4e2e66", "iris_dead": "#5e584a", "ring_dead": "#3a3040",
     "sheen": "#fff8ec", "lid": "#6a5256", "lid_dark": "#4a3a40", "lid_edge": "#8a5a60",
     "stone": "#4e4a52", "stone_dark": "#383440", "rune": "#5e3a78",
@@ -42,7 +42,7 @@ COLORS = {
     "flesh": "#7a2a4a", "flesh_dark": "#4e1a32", "crystal": "#c070ff", "crystal_dim": "#8a50b8",
     "core": "#ff5a8a", "husk": "#3a2a30", "crystal_dead": "#5a5060",
 }
-UNLIT = {"iris", "ring", "iris_mid", "ring_mid", "iris_dim", "ring_dim", "sheen",
+UNLIT = {"iris", "ring", "iris_deep", "iris_mid", "ring_mid", "iris_dim", "ring_dim", "sheen",
          "crystal", "crystal_dim", "core"}
 rng = random.Random(13)
 
@@ -273,7 +273,12 @@ globe = empty((0, 0, EYE_Z))            # turns inside the frame to look left / 
 globe_parts = [ball((0, 0, EYE_Z), R, "sclera", segs=48)]
 IRIS = band(R + 0.4, 0, 20, "iris")
 RING = band(R + 0.35, 20, 25, "ring")
-globe_parts += [IRIS, RING, ball((0, -(R + 0.3), EYE_Z), 1, "pupil", scale=(3.2, 2.2, 15))]
+IRIS_DETAIL = [band(R + 0.55, 3, 7, "iris_deep")]          # darker ring round the pupil
+for k in range(14):                                       # radial streaks in the iris
+    psi = 360 * k / 14 + rng.uniform(-6, 6)
+    IRIS_DETAIL.append(polyline([tuple(on_globe(R + 0.6, phi, psi + rng.uniform(-3, 3))) for phi in (8, 12, 16, 19)],
+                                0.45, "iris_deep"))
+globe_parts += [IRIS, RING, ball((0, -(R + 0.3), EYE_Z), 1, "pupil", scale=(3.2, 2.2, 15))] + IRIS_DETAIL
 for k in range(10):                                      # bloodshot veins creeping toward the iris
     psi = rng.uniform(0, 360)
     pts = []
@@ -321,7 +326,8 @@ eye_frame.rotation_euler.x = math.radians(-GAZE_UP)
 EYE_OBJS = list(current)
 sprite("eye", EYE_W, EYE_H)
 
-IRIS_STATES = [("iris", "ring"), ("iris_mid", "ring_mid"), ("iris_dim", "ring_dim"), ("iris_dead", "ring_dead")]
+IRIS_STATES = [("iris", "ring", "iris_deep"), ("iris_mid", "ring_mid", "iris_dim"),
+               ("iris_dim", "ring_dim", "iris_dead"), ("iris_dead", "ring_dead", "ring_dead")]
 
 
 def pose_eye(p):
@@ -330,9 +336,11 @@ def pose_eye(p):
     lids["upper"].rotation_euler.x = math.radians(-p.get("upper", 0))
     lids["lower"].rotation_euler.x = math.radians(p.get("lower", 0))
     globe.rotation_euler.z = math.radians(p.get("look", 0))
-    i, r = IRIS_STATES[p.get("iris", 0)]
+    i, r, d = IRIS_STATES[p.get("iris", 0)]
     IRIS.data.materials[0] = material(i)
     RING.data.materials[0] = material(r)
+    for o in IRIS_DETAIL:
+        o.data.materials[0] = material(d)
     for k, c in enumerate(CRACKS):
         c.hide_render = k >= p.get("cracks", 0)
     sag = p.get("sag", 0.0)
@@ -360,22 +368,22 @@ EYE_ANIMS = {
 VX = 400                                                 # build it away from the eye
 VEIN_PARTS, CRYSTALS, BURST = [], [], {}
 bulb = empty((VX, 0, 9))
-bulb_parts = [ball((VX, 0, 9), 8.5, "flesh"), ball((VX + 2, -3, 12), 4, "flesh_dark", scale=(1, 1, 0.7)),
-              ball((VX, -4.5, 8), 3.2, "core")]          # glowing core showing through a split
+bulb_parts = [ball((VX, 0, 8.5), 7.5, "flesh"), ball((VX + 2, -3, 11), 3.6, "flesh_dark", scale=(1, 1, 0.7)),
+              ball((VX - 1.5, -6.6, 7.5), 2.6, "core", scale=(0.8, 0.6, 1.5))]   # glowing core in a split
 for k in range(5):                                       # veins wrapping the bulb
     a = 2 * math.pi * k / 5
-    pts = [(VX + 8.6 * math.cos(a + t * 0.6) * math.sin(math.pi * (0.15 + 0.7 * t)), -8.6 * math.sin(a + t * 0.6) * math.sin(math.pi * (0.15 + 0.7 * t)),
-            9 + 8.6 * math.cos(math.pi * (0.15 + 0.7 * t))) for t in (j / 6 for j in range(7))]
+    pts = [(VX + 7.6 * math.cos(a + t * 0.6) * math.sin(math.pi * (0.15 + 0.7 * t)), -7.6 * math.sin(a + t * 0.6) * math.sin(math.pi * (0.15 + 0.7 * t)),
+            8.5 + 7.6 * math.cos(math.pi * (0.15 + 0.7 * t))) for t in (j / 6 for j in range(7))]
     bulb_parts.append(polyline(pts, 0.8, "flesh_dark"))
 for a, h, lean in ((-50, 9, -25), (10, 11, 5), (55, 8, 30), (160, 7, -10)):     # crystal shards
-    base = Vector((VX + 6 * math.sin(math.radians(a)), -6 * math.cos(math.radians(a)) * 0.6, 11))
+    base = Vector((VX + 5 * math.sin(math.radians(a)), -5 * math.cos(math.radians(a)) * 0.6, 10.5))
     tip = base + Vector((h * math.sin(math.radians(lean)), -1, h * math.cos(math.radians(lean))))
     CRYSTALS.append(tube(base, tip, 1.8, 0.1, "crystal", 5))
 bulb_parts += CRYSTALS
 parent_to(bulb_parts, bulb)
 for k in range(5):                                       # roots spreading over the floor
     a = math.radians(-160 + 320 * k / 4)
-    pts = [(VX + r * math.cos(a), -r * math.sin(a) * 0.5, max(0.8, 5 - r * 0.3)) for r in (4, 8, 12, 15, 17)]
+    pts = [(VX + r * math.cos(a), -r * math.sin(a) * 0.5, max(0.8, 5 - r * 0.3)) for r in (4, 7, 10, 13, 15)]
     polyline(pts, 1.6 if k % 2 else 1.3, "flesh_dark")
 # burst: torn flaps, spatter, flying shards, and the flattened husk left behind
 BURST["flaps"] = [tube((VX, 0, 6), (VX + 10 * math.cos(a), -4 * math.sin(a), 6 + 9 * abs(math.sin(a + 1))), 3, 0.3, "flesh", 5)
@@ -407,7 +415,7 @@ def pose_vein(p):
 
 VEIN_ANIMS = {
     "pulse": [dict(pulse=0.0, bright=False), dict(pulse=0.55), dict(pulse=1.0), dict(pulse=0.5, bright=False)],
-    "burst": [dict(pulse=1.6), dict(pulse=0.6, show={"flaps", "spatter", "shards"}),
+    "burst": [dict(pulse=1.4), dict(pulse=0.6, show={"flaps", "spatter", "shards"}),
               dict(show={"husk"})],
 }
 

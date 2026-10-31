@@ -93,7 +93,7 @@ func _drill_ride() -> void:
 	_check("crew rides along inside", d.contains(p.global_position))
 	_station(Stations.Helm).interact(p)
 	_check("helm stops it", d.speed == Drill.Speed.STOP)
-	await _frames(40)
+	await _frames(70)
 	_check("braces grip when it stops", d.grip >= 1.0)
 	var back := p.global_position
 	p.global_position = d.global_position + Vector2(Drill.HW + 20.0, Drill.FLOOR - 30.0)   # step outside
@@ -103,6 +103,32 @@ func _drill_ride() -> void:
 	p.velocity = Vector2.ZERO
 	await _frames(70)
 	_check("and fold away again once they're back in", d.ladders_out == 0.0)
+	await _hatches()
+
+
+## Hatches open for the crew and shut behind them; shut, a crawler can't get into the cabin.
+func _hatches() -> void:
+	var d: Drill = main.drill
+	var home := p.global_position
+	p.global_position = d.global_position + Vector2(-Drill.HW + 20.0, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(40)
+	_check("a hatch opens for the crew", d.hatch_open(-1.0))
+	p.global_position = home
+	await _frames(40)
+	_check("and shuts when nobody's near", not d.hatch_open(-1.0) and not d.hatch_open(1.0))
+	var c := Crawler.new()
+	c.world = w
+	c.player = p
+	c.position = d.global_position + Vector2(-Drill.HW - 30.0, Drill.FLOOR - 9.0)
+	main.add_child(c)
+	c.state = Crawler.State.CHASE
+	for i in 60 * 3:
+		await get_tree().physics_frame
+		c.dir = 1
+		c.velocity.x = Crawler.CHASE_SPEED
+	_check("a shut hatch keeps creatures out", not d.contains(c.global_position))
+	_check("bats treat the shut hull as solid", d.blocks(d.global_position + Vector2(-Drill.HW + 3.0, 20.0), false))
+	c.queue_free()
 
 
 func _furnace_and_workbench() -> void:

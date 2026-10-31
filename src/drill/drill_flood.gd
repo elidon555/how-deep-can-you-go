@@ -1,6 +1,7 @@
 extends Node
 class_name DrillFlood
-## Flooding: each breach with water outside the hull at its height lets water into the cabin
+## Flooding: each breach (and each open hatch) with water outside the hull at its height lets
+## water into the cabin
 ## (`level`: fraction of the cabin's height, floor to roof). The crew swims in it, it cools the
 ## engine, and above STALL the engine drowns. The bilge pump drains it once nothing is leaking.
 
@@ -31,6 +32,12 @@ func update(dt: float) -> void:
 			if outside.y == Liquids.WATER and outside.x > 0.3:
 				leaking += 1
 				break
+	for side in [-1.0, 1.0]:              # an open hatch with water outside it
+		if drill.hatch_open(side):
+			var at := drill.global_position + Vector2(side * (Drill.HW + 6.0), Drill.FLOOR - 6.0)
+			var outside := drill.world.liquid_at(at)
+			if outside.y == Liquids.WATER and outside.x > 0.3:
+				leaking += 1
 	var before := level
 	if leaking > 0:
 		level = minf(level + LEAK * leaking * dt, 1.0)

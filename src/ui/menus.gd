@@ -5,6 +5,7 @@ class_name Menus
 
 signal start_run
 signal restart(to_title: bool)
+signal daily
 
 var title := TitleMenu.new()
 var pause := PauseMenu.new()
@@ -23,6 +24,7 @@ func _ready() -> void:
 		title.visible = false
 		Sfx.music("")
 		start_run.emit())
+	title.daily_pressed.connect(func(): daily.emit())
 	title.settings_pressed.connect(settings.open)
 	pause.settings_pressed.connect(settings.open)
 	pause.restart_pressed.connect(func(): restart.emit(false))

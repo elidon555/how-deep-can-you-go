@@ -1427,7 +1427,7 @@ def music_boss(v=0):
     tr = times(L)
     cluster = (osc(329.63 * (1 + 0.06 * pr)) + osc(349.23 * (1 + 0.06 * pr))) * (0.6 + 0.4 * np.sin(TAU * 8 * tr)) * pr ** 1.5
     tension = np.zeros(n)
-    add_at(tension, start, (0.25 * riser + 0.1 * cluster) * cut)
+    add_at(tension, start, (0.7 * riser + 0.3 * cluster) * cut)
     x = fold(low, n) + 0.5 * stabs + 0.15 * fold(ticks, n) + tension
     return finish_loop(x, -12.0)
 

@@ -3,6 +3,7 @@ class_name TitleMenu
 ## The title screen, shown over the live world (the drill waiting at the surface).
 
 signal start_pressed
+signal daily_pressed
 signal settings_pressed
 
 
@@ -27,6 +28,8 @@ func _ready() -> void:
 	gap.custom_minimum_size = Vector2(0, 150)        # the drill shows through here
 	col.add_child(gap)
 	for b in [UiStyle.button("Start digging", func(): start_pressed.emit()),
+			UiStyle.button("Daily Dig (best today: %d m)" % Progress.daily.get(Progress.today(), 0),
+				func(): daily_pressed.emit()),
 			UiStyle.button("Settings", func(): settings_pressed.emit()),
 			UiStyle.button("Quit", func(): get_tree().quit())]:
 		var row := CenterContainer.new()

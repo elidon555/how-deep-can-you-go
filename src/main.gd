@@ -4,6 +4,7 @@ extends Node2D
 ## dying, milestones. The drill (src/drill) is the crew's base: ore is sold at its workbench.
 
 static var skip_title := false  # set when restarting a run, so it goes straight back in
+static var daily_run := false   # this run is today's Daily Dig
 
 const MILESTONES := {
 	10: "The daylight is gone", 25: "It's very quiet down here", 50: "Something is watching you",
@@ -147,6 +148,8 @@ func _process(dt: float) -> void:
 
 	if Progress.record_depth(depth):
 		new_best = true
+	if daily_run:
+		Progress.record_daily(depth)
 	hud.set_depth(depth, Progress.best, new_best)
 	if not menus.on_title():
 		run_time += dt
@@ -406,6 +409,10 @@ func _game_over(reason: String) -> void:
 
 func _restart(to_title := false) -> void:
 	Progress.save()
+	if to_title:
+		daily_run = false
+	if not daily_run and not Progress.dry_run:
+		World.fixed_seed = -1        # a fresh random world
 	skip_title = not to_title
 	get_tree().paused = false
 	get_tree().reload_current_scene()
@@ -417,6 +424,11 @@ func _setup_menus() -> void:
 	add_child(menus)
 	menus.start_run.connect(_start_run)
 	menus.restart.connect(_restart)
+	menus.daily.connect(func():
+		daily_run = true
+		World.fixed_seed = Progress.daily_seed()
+		_restart())
+	menus.pause.seed_text.text = ("Daily Dig %s · " % Progress.today() if daily_run else "") + "Seed %d" % world.seed
 	menus.can_pause = func(): return not run_over and drill.guns.gunner != player
 	# tests and autotests go straight in; so does "dig again"
 	if skip_title or Progress.dry_run:

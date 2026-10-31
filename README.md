@@ -119,6 +119,7 @@ All art is generated, so it can be tweaked and rebuilt:
 | Drill machine: hull, back wall, head, gripper braces, turrets, stations (helm, furnace, workbench, medkit, sonar, gunner, coolant) + normal maps (Blender) | `blender -b --factory-startup -P tools/drill_blender.py -- /tmp/drill && python3 tools/drill_sheet.py /tmp/drill` |
 | Burrowing worm: body segments + head in 16 directions + normal maps (Blender) | `blender -b --factory-startup -P tools/worm_blender.py -- /tmp/worm && python3 tools/worm_sheet.py /tmp/worm` |
 | Cave bat sheet + normal map + eye glow (Blender) | `blender -b --factory-startup -P tools/bat_blender.py -- /tmp/bat && python3 tools/bat_sheet.py /tmp/bat` |
+| Final boss: THE EYE + its vein nodes, normal maps + glow (Blender) | `blender -b --factory-startup -P tools/eye_blender.py -- /tmp/eye && python3 tools/eye_sheet.py /tmp/eye` |
 
 The character scripts take an optional anim list after the output dir to re-render only
 those rows (e.g. `-- /tmp/miner climb,hurt`); the sheet script still needs every frame in the dir.

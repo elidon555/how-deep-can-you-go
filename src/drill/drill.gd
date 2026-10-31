@@ -7,7 +7,9 @@ class_name Drill
 ##   flooding (drill_flood.gd) water through breaches, the bilge pump
 ##   guns (drill_guns.gd)      the hull turrets and the gunner's seat
 ## Carries whoever is inside. Braces grip the walls while it's still; the ladders fold away
-## when everyone is aboard and telescope down when anyone is outside. Damage (boulders,
+## when everyone is aboard and telescope down when anyone is outside. The side doors are hatches
+## that open for the crew (anyone near the doorway, inside or out) and are shut otherwise, so
+## creatures (and water) only get in while one is open. Damage (boulders,
 ## crawlers, worms, crashes) opens hull breaches that leak hull until repaired. All of the
 ## machine's state lives here and in its components, and stations only call their methods, so
 ## co-op can sync it from one place later.
@@ -36,6 +38,9 @@ const DOOR_TOP := -6.0         # side doors are open from here down to the floor
 const WALL := 8.0
 const HEAD := [Vector2(-84, 56), Vector2(84, 56), Vector2(34, 92), Vector2(0, 104), Vector2(-34, 92)]
 const BRACE_TIME := 0.35       # seconds for the braces to grip / let go
+const BRACE_HOLD := 0.6        # it has to stay still this long before the braces grip again
+const HATCH_TIME := 0.35       # seconds for a hatch to slide open / shut
+const HATCH_REACH := 44.0      # crew this close to a doorway opens its hatch
 const LADDER_TIME := 0.9       # seconds for the ladders to fold away / come down
 const MAX_BREACHES := 4
 const BREACH_LEAK := 0.35      # hull per second per open breach
@@ -49,6 +54,9 @@ var max_hull := 100.0
 var is_wrecked := false
 var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls
 var ladders_out := 1.0         # 0 = folded away, 1 = all the way down
+var hatches := [0.0, 0.0]      # left, right: 0 = shut, 1 = open
+var _hatch_shapes: Array[CollisionShape2D] = []
+var _still_t := 0.0
 var _ladders: Array[DrillLadder] = []
 var cutter := DrillCutter.new()
 var thermal := DrillHeat.new()
@@ -75,6 +83,8 @@ func _ready() -> void:
 	_add_box(Rect2(-HW, TOP, HW * 2.0, ROOF - TOP))                    # roof
 	_add_box(Rect2(-HW, TOP, WALL, DOOR_TOP - TOP))                    # left wall above the door
 	_add_box(Rect2(HW - WALL, TOP, WALL, DOOR_TOP - TOP))              # right wall
+	for side in [-1.0, 1.0]:                                           # the hatches
+		_hatch_shapes.append(_add_box(Rect2(-HW if side < 0 else HW - WALL, DOOR_TOP, WALL, FLOOR - DOOR_TOP)))
 	var head := CollisionShape2D.new()
 	var poly := ConvexPolygonShape2D.new()
 	poly.points = PackedVector2Array(HEAD)
@@ -137,6 +147,7 @@ func _physics_process(dt: float) -> void:
 			changed.emit()
 	cutter.update(dt, running)
 	_update_braces_and_ladders(dt)
+	_update_hatches(dt)
 	guns.update()
 	_engine_sound(running)
 	var leaks := get_breaches().size()
@@ -160,13 +171,48 @@ func _engine_sound(running: bool) -> void:
 ## Braces let go while it sinks and grip when it holds still. Ladders come down whenever a
 ## crew member is outside (so nobody gets locked out) and fold away once everyone is aboard.
 func _update_braces_and_ladders(dt: float) -> void:
-	grip = move_toward(grip, 0.0 if cutter.moving else 1.0, dt / BRACE_TIME)
+	# (it sinks in little steps, so "still" means still for a moment, or the braces flutter)
+	_still_t = 0.0 if cutter.moving else _still_t + dt
+	grip = move_toward(grip, 1.0 if _still_t > BRACE_HOLD else 0.0, dt / BRACE_TIME)
 	var want := 1.0 if _anyone_outside() else 0.0
 	if want != ladders_out and (ladders_out == 0.0 or ladders_out == 1.0):
 		Sfx.play("lever", global_position, -8.0)          # the fold / unfold starts
 	ladders_out = move_toward(ladders_out, want, dt / LADDER_TIME)
 	for l in _ladders:
 		l.extend = ladders_out
+
+
+## A hatch slides open while any crew member is near its doorway (inside or out) and shuts
+## when nobody is; shut, it blocks creatures, crew and water like the rest of the hull.
+func _update_hatches(dt: float) -> void:
+	for i in 2:
+		var door := to_global(Vector2((-1.0 if i == 0 else 1.0) * (HW - WALL / 2.0), (DOOR_TOP + FLOOR) / 2.0))
+		var want := 0.0
+		for p: Player in get_tree().get_nodes_in_group("player"):
+			if p.global_position.distance_to(door) < HATCH_REACH:
+				want = 1.0
+		if want != hatches[i] and (hatches[i] == 0.0 or hatches[i] == 1.0):
+			Sfx.play("lever", door, -10.0)
+		hatches[i] = move_toward(hatches[i], want, dt / HATCH_TIME)
+		_hatch_shapes[i].disabled = hatches[i] > 0.3
+
+
+func hatch_open(side: float) -> bool:
+	return hatches[0 if side < 0.0 else 1] > 0.3
+
+
+## For things that don't use physics (bats, orbs): is this point solid hull for something coming
+## from inside the cabin (`from_inside`) or from outside? The cabin is only reachable from
+## outside through an open hatch.
+func blocks(p: Vector2, from_inside: bool) -> bool:
+	var l := to_local(p)
+	if absf(l.x) >= HW or l.y <= TOP or l.y >= BOTTOM + 50.0:
+		return false
+	if absf(l.x) >= HW - WALL and l.y > DOOR_TOP and l.y < FLOOR:      # a doorway
+		return not hatch_open(signf(l.x))
+	if absf(l.x) < HW - WALL and l.y > ROOF and l.y < FLOOR:          # the cabin
+		return not from_inside
+	return true                                                        # walls, roof, floor, head
 
 
 func _anyone_outside() -> bool:
@@ -245,13 +291,14 @@ func _hull_point_near(l: Vector2) -> Vector2:
 	return Vector2(clampf(l.x, -HW + 18.0, HW - 18.0), randf_range(-2.0, 22.0))
 
 
-func _add_box(r: Rect2) -> void:
+func _add_box(r: Rect2) -> CollisionShape2D:
 	var cs := CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
 	shape.size = r.size
 	cs.shape = shape
 	cs.position = r.get_center()
 	add_child(cs)
+	return cs
 
 
 func _add_station(s: Station, at: Vector2) -> void:

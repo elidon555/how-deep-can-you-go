@@ -21,12 +21,16 @@ func _ready() -> void:
 	box.add_child(UiStyle.button("Settings", func(): settings_pressed.emit()))
 	box.add_child(UiStyle.button("Restart run", func(): restart_pressed.emit()))
 	box.add_child(UiStyle.button("Quit to title", func(): title_pressed.emit()))
+	box.add_child(seed_text)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if visible and event.is_action_pressed("ui_cancel"):
 		close()
 		get_viewport().set_input_as_handled()
+
+
+var seed_text := UiStyle.label("", 16, UiStyle.DIM)
 
 
 func open() -> void:

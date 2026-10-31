@@ -204,6 +204,7 @@ class Vein extends Node2D:
 	var hp := HP
 	var alive := true
 	var _sprite := Sprite2D.new()
+	var _glow := Sprite2D.new()
 	var _anims := {}
 	var _t := 0.0
 
@@ -220,6 +221,12 @@ class Vein extends Node2D:
 			_sprite.centered = false
 			_sprite.offset = Vector2(-float(info.cell_w) / 2.0, -float(info.cell_h))
 			add_child(_sprite)
+			if ResourceLoader.exists("res://assets/sprites/vein_glow.png") and eye.glow_parent:
+				for k in ["texture", "hframes", "vframes", "centered", "offset"]:
+					_glow.set(k, _sprite.get(k))
+				_glow.texture = load("res://assets/sprites/vein_glow.png")
+				eye.glow_parent.add_child(_glow)
+				tree_exiting.connect(_glow.queue_free)
 
 	func is_hit_by(p: Vector2) -> bool:
 		return alive and p.distance_to(global_position + Vector2(0, -14)) < 18.0
@@ -243,6 +250,9 @@ class Vein extends Node2D:
 			var a: Array = _anims["pulse" if alive else "burst"]
 			var f := int(_t * 6.0) % int(a[1]) if alive else mini(int(_t * 8.0), int(a[1]) - 1)
 			_sprite.frame = a[0] * _sprite.hframes + f
+			if _glow.texture:
+				_glow.frame = _sprite.frame
+				_glow.global_position = global_position
 		queue_redraw()
 
 	func _draw() -> void:

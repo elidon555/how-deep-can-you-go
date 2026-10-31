@@ -21,7 +21,7 @@ os.makedirs(OUT, exist_ok=True)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
 KEY = lambda h: np.array([int(h[i:i + 2], 16) for i in (1, 3, 5)])        # noqa: E731
 # unshaded colours; the glowing ones also go to the _glow layer
-EYE_GLOW = [KEY(c) for c in ("#d8c878", "#8a44b8", "#b0a25e", "#6a3890", "#857a4a", "#4e2e66")]
+EYE_GLOW = [KEY(c) for c in ("#d8c878", "#8a44b8", "#a8963e", "#b0a25e", "#6a3890", "#857a4a", "#4e2e66")]
 EYE_UNLIT = EYE_GLOW + [KEY("#fff8ec")]                                   # + the wet highlight
 VEIN_GLOW = [KEY(c) for c in ("#c070ff", "#8a50b8", "#ff5a8a")]
 SHEETS = {

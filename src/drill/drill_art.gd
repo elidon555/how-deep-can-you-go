@@ -28,6 +28,7 @@ var _sparks := CPUParticles2D.new()   # off the cutters while biting rock
 var _grit := CPUParticles2D.new()     # rock dust blown up the gap beside the hull
 var _steam := CPUParticles2D.new()    # coolant flush
 var _flood := Node2D.new()            # water inside the cabin, over the crew
+var _hatches := Node2D.new()          # the hatch doors, in front like the frame
 
 
 func _ready() -> void:
@@ -123,6 +124,10 @@ func _ready() -> void:
 	_flood.z_as_relative = false
 	_flood.draw.connect(_draw_flood)
 	add_child(_flood)
+	_hatches.z_index = 2
+	_hatches.z_as_relative = false
+	_hatches.draw.connect(_draw_hatches)
+	add_child(_hatches)
 
 
 func _process(dt: float) -> void:
@@ -136,6 +141,7 @@ func _process(dt: float) -> void:
 	_sparks.emitting = drill.cutter.drilling and (drill.cutter.chew_mat == World.M.STONE or drill.cutter.chew_mat == World.M.HARD)
 	position = drill.cutter.judder
 	_flood.queue_redraw()
+	_hatches.queue_redraw()
 	# running hot: the hull glows red (a colour change, the art itself doesn't move)
 	var hot := clampf((drill.thermal.heat - 55.0) / 45.0, 0.0, 1.0)
 	_frame.modulate = Color(1.0 + hot * 0.6, 1.0 - hot * 0.25, 1.0 - hot * 0.35)
@@ -152,6 +158,27 @@ func _draw() -> void:
 	draw_texture(_back, BACK_AT)
 	for r: Vector2 in DrillCutter.REAMERS:
 		_draw_reamer(r)
+
+
+## Each hatch is a riveted steel plate that slides up into the wall above the doorway.
+func _draw_hatches() -> void:
+	var h := Drill.FLOOR - Drill.DOOR_TOP
+	for i in 2:
+		var shut: float = 1.0 - drill.hatches[i]
+		if shut <= 0.01:
+			continue
+		var x := -Drill.HW if i == 0 else Drill.HW - Drill.WALL
+		var r := Rect2(x, Drill.DOOR_TOP, Drill.WALL, h * shut)
+		_hatches.draw_rect(r, Color("4a5059"))
+		_hatches.draw_rect(Rect2(r.position, Vector2(r.size.x, 1)), Color("6b737d"))
+		_hatches.draw_rect(r, Color("0c0a0e"), false, 1.0)
+		var y := Drill.DOOR_TOP + 6.0
+		while y < Drill.DOOR_TOP + h * shut - 3.0:                   # rivets
+			_hatches.draw_rect(Rect2(x + Drill.WALL / 2.0 - 0.5, y, 1, 1), Color("8a929c"))
+			y += 10.0
+		if shut > 0.15:                                               # hazard stripes on the edge
+			for k in 4:
+				_hatches.draw_rect(Rect2(x + k * 2.0, r.end.y - 3.0, 2, 3), Color("e0b23a") if k % 2 == 0 else Color("0c0a0e"))
 
 
 ## The water flooding the cabin: translucent, with a rippling surface line.

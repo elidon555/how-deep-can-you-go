@@ -39,6 +39,7 @@ func _init(w: World) -> void:
 		rng.seed = World.fixed_seed
 	else:
 		rng.randomize()
+	world.seed = rng.seed
 	noise_cave.seed = rng.randi()
 	noise_cave.frequency = 0.0045
 	noise_cave.fractal_octaves = 4

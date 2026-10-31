@@ -1,7 +1,8 @@
 extends CharacterBody2D
 class_name Crawler
-## A pale six-legged cave crawler. Patrols cave floors; when it sees you it chases, winds up
-## and lunges to bite. Takes pickaxe hits (group "hittable"), flinches, and dies.
+## A pale six-legged cave crawler. Patrols cave floors; when it sees you it chases (hopping
+## up small ledges, never into lava), winds up and lunges to bite. If you're shut inside the
+## drill it chews at the hull / hatch. Takes pickaxe hits (group "hittable"), flinches, dies.
 
 signal killed(pos: Vector2)
 
@@ -33,6 +34,7 @@ var _anim_t := 0.0
 var _bit := false
 var _growl_t := 0.0
 var _gnaw_t := 1.0
+var _hop_t := 0.0
 var _sprite := Sprite2D.new()
 var _eyes := Sprite2D.new()
 var _anims := {}               # name -> [row, frames]
@@ -66,7 +68,7 @@ func _physics_process(dt: float) -> void:
 	match state:
 		State.PATROL:
 			velocity.x = dir * PATROL_SPEED
-			if is_on_wall() or (is_on_floor() and _ledge_ahead()):
+			if is_on_wall() or (is_on_floor() and _ledge_ahead()) or _lava_ahead():
 				dir = -dir
 			if _sees_player(to_player):
 				state = State.CHASE
@@ -76,8 +78,14 @@ func _physics_process(dt: float) -> void:
 		State.CHASE:
 			dir = 1 if to_player.x > 0 else -1
 			velocity.x = dir * CHASE_SPEED
+			_hop_t -= dt
 			if is_on_floor() and _ledge_ahead() and to_player.y < 10.0:
 				velocity.x = 0.0           # don't run off a cliff unless the target is below
+			elif is_on_floor() and is_on_wall() and _hop_t <= 0.0 and _can_hop():
+				velocity.y = -300.0        # hop up a small ledge toward them
+				_hop_t = 0.8
+			if _lava_ahead():
+				velocity.x = 0.0           # never walk into lava
 			_gnaw(dt)
 			if absf(to_player.x) < LUNGE_RANGE and absf(to_player.y) < 24.0:
 				state = State.WINDUP
@@ -151,6 +159,15 @@ func _sees_player(to_player: Vector2) -> bool:
 		if not world.is_air(global_position + to_player * (k / 8.0)):
 			return false
 	return true
+
+
+func _lava_ahead() -> bool:
+	return world.liquid_at(global_position + Vector2(dir * 18.0, 6.0)).y == Liquids.LAVA
+
+
+## A wall in front that's low enough to hop: open air a body-height up.
+func _can_hop() -> bool:
+	return world.is_air(global_position + Vector2(dir * 18.0, -30.0))
 
 
 func _ledge_ahead() -> bool:

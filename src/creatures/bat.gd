@@ -1,7 +1,8 @@
 extends Node2D
 class_name Bat
 ## A cave bat. Hangs from a ceiling until someone comes close, then drops and flits at them in
-## an erratic swoop, nipping (1 damage) and peeling away. One pickaxe or bolt hit kills it.
+## an erratic swoop, nipping (1 damage) and peeling away. It looks ahead and steers around rock
+## and the drill's hull (it only gets into the cabin through an open hatch). One hit kills it.
 ## Drawn from its rendered sheet (assets/sprites/bat.png): fly / dive / hang / die frames.
 
 signal killed(pos: Vector2)
@@ -82,12 +83,41 @@ func _physics_process(dt: float) -> void:
 			if _t <= 0.0:
 				queue_free()
 	if state != State.HANG:
+		if state != State.DEAD:
+			_steer_around()
 		var next := global_position + velocity * dt
-		if state != State.DEAD and not world.is_air(next):        # bounce off rock
+		if state != State.DEAD and _solid(next):        # still about to hit: bounce off
 			velocity = -velocity * 0.6
 		else:
 			global_position = next
 	_animate(dt)
+
+
+## Rock, or the drill's hull from whichever side we're on.
+func _solid(p: Vector2) -> bool:
+	if not world.is_air(p):
+		return true
+	var d := get_tree().get_first_node_in_group("drill") as Drill
+	return d != null and d.blocks(p, d.contains(global_position))
+
+
+## Something solid just ahead: turn toward whichever side is open (prefer toward the target).
+func _steer_around() -> void:
+	if velocity.length() < 1.0:
+		return
+	var dir := velocity.normalized()
+	if not _solid(global_position + dir * 18.0):
+		return
+	var left := dir.rotated(-PI / 2.0)
+	var right := dir.rotated(PI / 2.0)
+	var prefer := right
+	if is_instance_valid(_target):
+		prefer = left if left.dot(_target.global_position - global_position) > 0.0 else right
+	var other := right if prefer == left else left
+	for side: Vector2 in [prefer, other, -dir]:
+		if not _solid(global_position + side * 18.0):
+			velocity = side * velocity.length()
+			return
 
 
 func _closest_player() -> Player:
