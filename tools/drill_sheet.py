@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from normal_maps import cel_mult, normal_map  # noqa: E402
+from normal_maps import BAKED_CONTRAST, cel_mult, normal_map  # noqa: E402
 
 SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "drill")
@@ -42,7 +42,7 @@ def convert(name):
     clay = np.array(Image.open(f"{SRC}/{name}_clay.png").convert("RGB")).astype(np.float32) / 255
     solid = flat[..., 3] > 128
     lum = clay.mean(-1)
-    mult = cel_mult(lum) if name not in CONTRAST else cel_mult(lum, cel_mult.__defaults__[0] * CONTRAST[name])
+    mult = cel_mult(lum, BAKED_CONTRAST * CONTRAST.get(name, 1.0))
     rgb = flat[..., :3] * mult[..., None]
     keep = (near(flat, UNLIT) | near(flat, GLOW)) & solid
     rgb[keep] = flat[..., :3][keep]

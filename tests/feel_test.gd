@@ -33,6 +33,7 @@ func _run() -> void:
 	await get_tree().physics_frame
 	w = main.world
 	p = main.player
+	p.pick.mouse_aim = false     # aim with the keys, like J / a controller
 	main.fx.hitstop_enabled = false
 	p.pick.struck.connect(func(_pos, _mat, _broke, kind): if kind == "bonk": bonks += 1)
 	w.ensure_generated(AY1 * World.CELL + 600)

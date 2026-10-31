@@ -5,7 +5,7 @@
  "anims": {
   "walk": {
    "row": 0,
-   "frames": 6
+   "frames": 8
   },
   "lunge": {
    "row": 1,

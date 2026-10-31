@@ -311,22 +311,25 @@ def feet(**off):
 
 ANIMS = {}
 # walk: alternating tripods (near front + far mid + near rear, then the other three).
-# A foot slides back STRIDE on the floor, then lifts and swings forward.
+# A foot slides back STRIDE on the floor, then lifts and swings forward (eased in and out).
+WALK_FRAMES = 8
 STRIDE, LIFT = 0.18, 0.14
 TRIPOD = {"fn": 0, "mf": 0, "rn": 0, "ff": 0.5, "mn": 0.5, "rf": 0.5}
 walk = []
-for i in range(6):
+for i in range(WALK_FRAMES):
     f = {}
     for leg, off in TRIPOD.items():
-        t = (i / 6 + off) % 1
+        t = (i / WALK_FRAMES + off) % 1
         if t < 0.5:
             f[leg] = (STRIDE * (1 - 4 * t), 0.0)
         else:
             u = (t - 0.5) * 2
-            f[leg] = (STRIDE * (2 * u - 1), LIFT * math.sin(math.pi * u))
-    ph = i / 6 * 2 * math.pi
-    walk.append({"z": 0.025 * math.cos(2 * ph), "head": 4 * math.sin(ph), "tail": 4 * math.sin(ph + 1),
-                 "ant": 8 * math.sin(ph), "jaw": 4 + 4 * math.sin(2 * ph), "feet": feet(**f)})
+            ease = u * u * (3 - 2 * u)
+            f[leg] = (STRIDE * (2 * ease - 1), LIFT * math.sin(math.pi * u))
+    ph = i / WALK_FRAMES * 2 * math.pi
+    walk.append({"z": 0.025 * math.cos(2 * ph), "mid": 1.5 * math.sin(2 * ph), "head": 4 * math.sin(ph),
+                 "tail": 4 * math.sin(ph + 1), "ant": 8 * math.sin(ph), "jaw": 4 + 4 * math.sin(2 * ph),
+                 "feet": feet(**f)})
 ANIMS["walk"] = walk
 
 # lunge: coil back, spring forward with the jaws wide, snap shut on the bite, settle

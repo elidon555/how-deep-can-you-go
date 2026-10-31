@@ -1,8 +1,10 @@
 extends Node2D
 class_name Pickaxe
-## The miner's pickaxe: click (one swing) or hold (keep swinging) the dig button; the
-## direction keys aim it (down, up, down+side = diagonal, otherwise the way you face).
-## Rock only breaks when a swing lands.
+## The miner's pickaxe: click (one swing) or hold (keep swinging) the dig button.
+## With the mouse, the swing goes where you point and breaks rock right at the cursor (up to
+## arm's reach; a marker shows the spot). With J / a controller, the direction keys aim it
+## (down, up, down+side = diagonal, otherwise the way you face). Rock only breaks when a
+## swing lands.
 ## A swing needs room: if rock is in the way of the wind-up, the pick knocks into it instead
 ## (chips it a little, no real dig), so cramped spots slowly open up rather than trap you.
 ## Lives as a child of the Player; draws the swoosh trail itself.
@@ -23,6 +25,9 @@ const DOWN_BONUS := 1.4   # straight down stays the fastest way deeper (diagonal
 const TRAIL := {"dig_side": [-1.75, 0.26], "dig_down": [-1.75, 1.4], "dig_diag": [-1.75, 1.1],
 	"dig_up": [2.27, -1.66]}
 const TRAIL_TIME := 0.13
+const REACH := 32.0       # how far from the shoulder a mouse-aimed swing can land
+const AIM_R := 11.0       # size of the bite where a mouse-aimed swing lands
+const SHOULDER := Vector2(0, -6)
 # points (facing right, from the miner's centre) the pick passes through on the wind-up, over
 # and behind the head (top of head is -18); they must be open air. Our own tunnels are carved
 # tall enough to keep these clear.
@@ -39,6 +44,9 @@ var frame := 0            # current frame of the swing animation
 var _t := 0.0
 var _trail_t := 9.0
 var _cooldown := 0.0
+var mouse_aim := true     # last aimed with the mouse (vs J / controller + direction keys)
+var _target := Vector2.ZERO   # where a mouse-aimed swing lands (global)
+var aim_at := Vector2.INF     # set to aim somewhere other than the local mouse (tests, co-op)
 
 
 func _ready() -> void:
@@ -53,11 +61,20 @@ func anim() -> String:
 	return "dig_down" if kind == "dig_diag" else kind
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion or event is InputEventMouseButton:
+		mouse_aim = true
+	elif event.is_action_pressed("dig"):        # J or a controller button
+		mouse_aim = false
+
+
 ## Called by the player every physics frame with the horizontal input.
 func update(dt: float, dir: float) -> void:
 	_trail_t += dt
 	_cooldown -= dt
 	queue_redraw()
+	if mouse_aim:
+		_target = _aim_point()
 	var want := _intent(dir)
 	if kind == "":
 		if want == "" or _cooldown > 0.0:
@@ -65,6 +82,8 @@ func update(dt: float, dir: float) -> void:
 		kind = want
 		frame = 1          # skip the lift on the first swing, feels snappier
 		_t = 0.0
+	if mouse_aim and absf(_target.x - player.global_position.x) > 2.0:
+		player.facing = 1 if _target.x > player.global_position.x else -1   # face where you swing
 	power = Progress.pick_power()
 	speed = Progress.swing_speed()
 	_t += dt * speed      # a started swing always plays out; holding the button chains them
@@ -105,6 +124,8 @@ func _has_room() -> bool:
 func _intent(dir: float) -> String:
 	if not (Input.is_action_pressed("dig") or Input.is_action_just_pressed("dig")):
 		return ""
+	if mouse_aim:
+		return _kind_towards(_target - (player.global_position + SHOULDER))
 	var down := Input.is_action_pressed("down")
 	if down and dir != 0:
 		return "dig_diag"
@@ -115,12 +136,40 @@ func _intent(dir: float) -> String:
 	return "dig_side"
 
 
+## The cursor, pulled in to arm's reach.
+func _aim_point() -> Vector2:
+	var shoulder := player.global_position + SHOULDER
+	var to := aim_at if aim_at != Vector2.INF else get_global_mouse_position()
+	return shoulder + (to - shoulder).limit_length(REACH)
+
+
+## Which swing (and animation) fits a direction from the shoulder.
+static func _kind_towards(v: Vector2) -> String:
+	var ang := rad_to_deg(atan2(v.y, absf(v.x)))     # -90 straight up .. 90 straight down
+	if ang > 62.0:
+		return "dig_down"
+	if ang < -55.0:
+		return "dig_up"
+	if ang > 22.0:
+		return "dig_diag"
+	return "dig_side"
+
+
 ## The pick lands: break rock. Each swing removes on average what continuous digging used to.
 func _strike(dir: int) -> void:
 	var c := player.global_position
 	var amount := power * SWING_TIME
 	var res: Dictionary
 	var at := c
+	if mouse_aim:     # exactly where you pointed (+ keep room around your body when tunnelling)
+		at = _target
+		res = world.dig(at, at, AIM_R, amount * (DOWN_BONUS if kind == "dig_down" else 1.0))
+		if kind == "dig_side" or kind == "dig_diag":
+			res = _merge(res, world.dig(c + Vector2(0, -19), c + Vector2(0, 10), 10.0, amount))
+		if res.hit:
+			struck.emit(at, res.mat, res.broke, kind)
+		_hit_things(at)
+		return
 	match kind:
 		"dig_down":
 			at = c + Vector2(0, 21)
@@ -161,8 +210,15 @@ static func _merge(a: Dictionary, b: Dictionary) -> Dictionary:
 	return {"hit": a.hit or b.hit, "mat": a.mat if a.hit else b.mat, "broke": a.broke + b.broke}
 
 
-## Swoosh behind the pick head for the strike + impact frames.
+## Swoosh behind the pick head for the strike + impact frames, and the aim marker.
 func _draw() -> void:
+	if mouse_aim and not player.frozen and player.health > 0:
+		var p := to_local(_target)
+		var rock := world.is_diggable(_target)
+		var c := Color(1, 0.95, 0.8, 0.7 if rock else 0.3)
+		draw_arc(p, AIM_R, 0.0, TAU, 20, c, 1.0)
+		draw_line(p - Vector2(3, 0), p + Vector2(3, 0), c, 1.0)
+		draw_line(p - Vector2(0, 3), p + Vector2(0, 3), c, 1.0)
 	var alpha := 1.0 - _trail_t / TRAIL_TIME
 	if alpha <= 0.0 or not TRAIL.has(kind):
 		return

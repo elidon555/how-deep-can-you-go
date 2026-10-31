@@ -299,6 +299,7 @@ func _autotest() -> void:
 	if out == "":
 		return
 	fx.hitstop_enabled = false
+	player.pick.mouse_aim = false
 	drill.fuel = drill.max_fuel
 	await get_tree().create_timer(1.0).timeout
 	get_viewport().get_texture().get_image().save_png(out.replace(".png", "_0.png"))

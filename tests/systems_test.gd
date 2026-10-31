@@ -19,12 +19,14 @@ func _ready() -> void:
 	await _frames(30)
 	w = main.world
 	p = main.player
+	p.pick.mouse_aim = false     # aim with the keys, like J / a controller
 	main.fx.hitstop_enabled = false
 	var saved_money := Progress.money
 	var saved_levels := Progress.levels.duplicate()
 	await _drill_ride()
 	await _furnace_and_workbench()
 	await _breach()
+	await _mouse_aim()
 	await _rope_climb()
 	await _crawler_fight()
 	await _boulder()
@@ -114,6 +116,25 @@ func _breach() -> void:
 	await _hold(["interact"], 2.2)
 	await _frames(2)
 	_check("holding E repairs it", d.get_breaches().is_empty())
+
+
+## Mouse aiming: the swing digs exactly at the aimed spot (here: ahead and below), nowhere else.
+func _mouse_aim() -> void:
+	w.ensure_generated(320 * World.CELL)
+	_arena(280)
+	p.heal_full()
+	p.global_position = Vector2(60 * World.CELL, 280 * World.CELL - 19)
+	await _frames(30)
+	var target := p.global_position + Vector2(20, 26)        # down and to the right
+	var straight_below := p.global_position + Vector2(-14, 30)
+	p.pick.mouse_aim = true
+	p.pick.aim_at = target
+	_check("aiming down-right picks a diagonal swing", Pickaxe._kind_towards(target - (p.global_position + Pickaxe.SHOULDER)) == "dig_diag")
+	await _hold(["dig"], 1.5)
+	_check("rock at the aimed spot is gone", w.is_air(target))
+	_check("rock elsewhere is untouched", not w.is_air(straight_below))
+	p.pick.aim_at = Vector2.INF
+	p.pick.mouse_aim = false
 
 
 func _rope_climb() -> void:
