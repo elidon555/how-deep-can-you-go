@@ -30,6 +30,7 @@ var title := TitleMenu.new()
 var pause := PauseMenu.new()
 var settings_menu := SettingsMenu.new()
 var game_over := GameOver.new()
+var note_view := NoteView.new()
 var run_time := 0.0
 var kills := 0
 var run_over := false
@@ -47,6 +48,7 @@ var new_best := false
 
 func _ready() -> void:
 	Controls.setup()
+	Lore.reset_run()
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--autotest"):
 			Progress.dry_run = true   # the test's changes stay in memory, never in the save
@@ -110,6 +112,9 @@ func _ready() -> void:
 	spawner.drill = drill
 	spawner.worm_coming.connect(_on_worm_coming)
 	spawner.worm_killed.connect(_on_worm_killed)
+	spawner.bat_killed.connect(func(pos):
+		kills += 1
+		fx.burst(pos, Color("3a2a30"), 6, 90.0, Vector2.UP, 160.0, 0.5, 2.0, false, 500.0, true))
 	spawner.lit_parent = self
 	spawner.glow_parent = glow_layer
 	spawner.crawler_killed.connect(_on_crawler_killed)
@@ -333,7 +338,7 @@ func _restart(to_title := false) -> void:
 func _setup_menus() -> void:
 	menus.layer = 20
 	add_child(menus)
-	for m in [title, pause, settings_menu, game_over]:
+	for m in [title, pause, settings_menu, game_over, note_view]:
 		menus.add_child(m)
 	title.start_pressed.connect(_start_run)
 	title.settings_pressed.connect(func(): settings_menu.open())
@@ -363,7 +368,7 @@ func _start_run() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Esc pauses, unless something else used it (shop, sonar, the turret seat take it first)
 	if event.is_action_pressed("ui_cancel") and not title.visible and not run_over \
-			and not pause.visible and drill.gunner != player:
+			and not pause.visible and not note_view.visible and drill.gunner != player:
 		pause.open()
 		get_viewport().set_input_as_handled()
 

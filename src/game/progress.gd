@@ -20,6 +20,7 @@ const UPGRADES := {
 var money := 0
 var best := 0
 var levels := {}   # upgrade id -> level bought
+var found_notes: Array = []   # Lore.NOTES ids you've read, ever
 var dry_run := false   # tests: keep everything in memory
 
 
@@ -50,6 +51,12 @@ func buy(id: String) -> bool:
 
 func can_afford(price: int) -> bool:
 	return GameConfig.infinite_resources() or money >= price
+
+
+func find_note(id: int) -> void:
+	if not found_notes.has(id):
+		found_notes.append(id)
+		save()
 
 
 func add_money(amount: int) -> void:
@@ -106,7 +113,7 @@ func save() -> void:
 		return
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels}))
+		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels, "notes": found_notes}))
 	changed.emit()
 
 
@@ -118,5 +125,7 @@ func _load() -> void:
 			best = int(d.get("best", 0))
 			for k in d.get("levels", {}):
 				levels[k] = int(d.levels[k])
+			for n in d.get("notes", []):
+				found_notes.append(int(n))
 	elif FileAccess.file_exists(OLD_BEST_PATH):
 		best = int(FileAccess.get_file_as_string(OLD_BEST_PATH))

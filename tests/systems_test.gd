@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _sonar_and_worm()
 	await _mouse_aim()
 	await _rope_climb()
+	await _camps()
 	await _liquids()
 	await _crawler_fight()
 	await _boulder()
@@ -275,6 +276,53 @@ func _arena(y_cell: int) -> void:
 		ch.int_dirty = true
 		ch.col_dirty = true
 	w._flush()
+
+
+## Camps are generated: there's at least one in the first 300 m, its crate pays out once and
+## its note gets read. Then a bat roost wakes up, bites, and dies to the pickaxe.
+func _camps() -> void:
+	w.ensure_generated(int(300 * World.METER))
+	var crates := []
+	var notes := []
+	for n in w.get_children():
+		if n is CampItems.LootCrate:
+			crates.append(n)
+		elif n is CampItems.Note:
+			notes.append(n)
+	_check("ruined camps are generated", crates.size() > 0 and notes.size() > 0,
+		"%d crates, %d notes" % [crates.size(), notes.size()])
+	if crates.is_empty() or notes.is_empty():
+		return
+	var v := p.ore_value
+	crates[0].interact(p)
+	var v2 := p.ore_value
+	crates[0].interact(p)
+	_check("a crate pays out once", v2 > v and p.ore_value == v2, "$%d -> $%d" % [v, v2])
+	var nid: int = notes[0].note_id
+	notes[0].interact(p)
+	await _frames(2)
+	_check("reading a note remembers it", Progress.found_notes.has(nid) and main.note_view.visible)
+	main.note_view.visible = false
+	get_tree().paused = false
+	# bats
+	_arena(340)
+	p.heal_full()
+	p.global_position = Vector2(64 * World.CELL, 340 * World.CELL - 19)
+	await _frames(60)
+	var b := Bat.new()
+	b.world = w
+	b.glow_parent = main.glow_layer
+	b.position = p.global_position + Vector2(40, -70)
+	main.add_child(b)
+	var hp := p.health
+	for i in 60 * 6:
+		await get_tree().physics_frame
+		if p.health < hp:
+			break
+	_check("a bat wakes and bites", b.state != Bat.State.HANG and p.health < hp, "hp %d -> %d" % [hp, p.health])
+	b.hit(1, p.global_position)
+	_check("one hit kills a bat", b.state == Bat.State.DEAD)
+	p.heal_full()
 
 
 ## Water pours out of a pocket you open, swims / takes your breath; water meets lava -> rock.

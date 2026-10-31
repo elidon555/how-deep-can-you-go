@@ -32,6 +32,7 @@ var _toast_tween: Tween
 
 
 func _ready() -> void:
+	add_to_group("hud")
 	layer = 10
 	var under := CanvasLayer.new()
 	under.layer = 5

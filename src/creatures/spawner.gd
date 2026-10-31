@@ -5,12 +5,15 @@ class_name Spawner
 ## behind), and every so often deep down, a worm that burrows toward the drill.
 
 signal crawler_killed(pos: Vector2)
+signal bat_killed(pos: Vector2)
 signal worm_coming(worm: Worm)
 signal worm_killed(pos: Vector2)
 
 const WATCHERS_FROM := 15.0    # meters
 const CRAWLERS_FROM := 25.0
 const DESPAWN_DIST := 800.0
+const BATS_FROM := 12.0
+const MAX_BATS := 10
 const WORMS_FROM := 40.0       # meters (drill depth)
 const WORM_EVERY := Vector2(70.0, 130.0)   # seconds between worms
 
@@ -22,6 +25,7 @@ var glow_parent: Node          # glowing eyes go here (bloom)
 var _watch_t := 5.0
 var _crawl_t := 4.0
 var _worm_t := 35.0
+var _bat_t := 3.0
 
 
 func _process(dt: float) -> void:
@@ -35,8 +39,13 @@ func _process(dt: float) -> void:
 	if depth > CRAWLERS_FROM and _crawl_t <= 0.0:
 		_crawl_t = randf_range(2.0, 5.0)
 		var cap := 2 + int(depth / 100.0)
-		if get_tree().get_nodes_in_group("creature").size() < cap:
+		if get_tree().get_nodes_in_group("creature").size() - get_tree().get_nodes_in_group("bat").size() < cap:
 			_spawn_crawler()
+	_bat_t -= dt
+	if depth > BATS_FROM and _bat_t <= 0.0:
+		_bat_t = randf_range(4.0, 9.0)
+		if get_tree().get_nodes_in_group("bat").size() < MAX_BATS:
+			_spawn_roost()
 	for c: Node2D in get_tree().get_nodes_in_group("creature"):
 		if c.global_position.distance_to(player.global_position) > DESPAWN_DIST:
 			c.queue_free()
@@ -45,6 +54,31 @@ func _process(dt: float) -> void:
 		if _worm_t <= 0.0:
 			_worm_t = randf_range(WORM_EVERY.x, WORM_EVERY.y)
 			spawn_worm()
+
+
+## A roost of 3-5 bats hanging from a natural cave ceiling, off screen.
+func _spawn_roost() -> void:
+	for i in 40:
+		var pos := player.global_position + Vector2(randf_range(-420, 420), randf_range(-260, 200))
+		var d := pos.distance_to(player.global_position)
+		if d < 230.0 or not _open_cave(pos, 10.0):
+			continue
+		var ceil_y := pos.y
+		while world.is_air(Vector2(pos.x, ceil_y - 4.0)) and ceil_y > pos.y - 120.0:
+			ceil_y -= 4.0
+		if ceil_y <= pos.y - 120.0:
+			continue
+		for k in randi_range(3, 5):
+			var at := Vector2(pos.x + k * 9.0 - 18.0, ceil_y)
+			if not world.is_air(at + Vector2(0, 4)) or world.is_air(at + Vector2(0, -4)):
+				continue        # needs rock right above to hang from
+			var b := Bat.new()
+			b.world = world
+			b.glow_parent = glow_parent
+			b.position = at
+			b.killed.connect(bat_killed.emit)
+			lit_parent.add_child(b)
+		return
 
 
 ## A worm starts burrowing toward the drill from ~16 m away, off to one side and below.

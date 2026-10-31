@@ -83,7 +83,8 @@ var deco_tex := {}
 var props := {}                 # name -> [texture, glow texture or null]
 var flicker := []               # lantern lights
 var time := 0.0
-const PROP_NAMES := ["lantern", "beam", "crystal_p", "crystal_t", "skeleton", "roots", "cart", "crate", "chains"]
+const PROP_NAMES := ["lantern", "beam", "crystal_p", "crystal_t", "skeleton", "roots", "cart", "crate", "chains",
+	"tent_ruin", "bunk", "table", "barrel", "lamp_post"]
 
 
 func _ready() -> void:
@@ -292,22 +293,23 @@ func _populate(ch: Chunk) -> void:
 					var gl := _sprite(deco_tex.ore_glow[kind], pos, glow_root, 0)
 					ores[Vector2i(gx, gy)] = [lit, gl, kind]
 				elif m == M.DIRT and depth > 3 and rng.randf() < 0.0008:
-					_add_decor(Vector2i(gx, gy), _sprite(deco_tex.skull, pos, self, 1))
+					add_decor(Vector2i(gx, gy), _sprite(deco_tex.skull, pos, self, 1))
 				elif depth > 5 and get_fill(gx, gy - 1) < 0.5 and get_fill(gx, gy - 2) < 0.5 \
 						and rng.randf() < 0.06:
 					var mush := _sprite(deco_tex.mushroom, Vector2(pos.x, gy * CELL - 5), glow_root, 0)
-					_add_decor(Vector2i(gx, gy), mush)
+					add_decor(Vector2i(gx, gy), mush)
 					if rng.randf() < 0.5:
-						_add_decor(Vector2i(gx, gy), _light(Vector2(pos.x, gy * CELL - 8), Color("3fe0c0"), 0.55, 0.9))
+						add_decor(Vector2i(gx, gy), _light(Vector2(pos.x, gy * CELL - 8), Color("3fe0c0"), 0.55, 0.9))
 			elif depth > 10 and get_fill(gx, gy - 1) >= 0.5 and rng.randf() < 0.035:
 				var worm := _sprite(deco_tex.worm, Vector2(pos.x, gy * CELL + 10), glow_root, 0)
-				_add_decor(Vector2i(gx, gy - 1), worm)
+				add_decor(Vector2i(gx, gy - 1), worm)
 			if f < 0.5 or gx < 6 or gx >= W - 6:
 				continue
 			var surf := Vector2(gx * CELL + 4, gy * CELL)
 			if get_fill(gx, gy - 1) < 0.5 and get_fill(gx, gy - 2) < 0.5:   # a floor
 				_floor_props(Vector2i(gx, gy), surf, depth)
 	_place_boulders(ch)
+	Camps.try_place(self, ch)
 	# ceilings: an air cell right under rock
 	for j in C:
 		for i in C:
@@ -366,42 +368,42 @@ func _floor_props(cell: Vector2i, p: Vector2, depth: float) -> void:
 			if get_fill(cell.x + dx, cell.y) < 0.5 or get_fill(cell.x + dx, cell.y - 1) >= 0.5:
 				flat = false
 		if flat and h >= 8 and h <= 11:
-			_prop("beam", p + Vector2(0, 3), false, cell)
+			place_prop("beam", p + Vector2(0, 3), false, cell)
 			return
 	r = rng.randf()
 	if depth > 50 and r < 0.014:
 		var c := "crystal_p" if depth > 90 and rng.randf() < 0.7 else "crystal_t"
-		_prop(c, p + Vector2(0, 3), false, cell, Color("b06cff") if c == "crystal_p" else Color("4ff0d0"))
+		place_prop(c, p + Vector2(0, 3), false, cell, Color("b06cff") if c == "crystal_p" else Color("4ff0d0"))
 	elif depth > 12 and r < 0.018:
-		_prop("skeleton", p + Vector2(0, 2), false, cell)
+		place_prop("skeleton", p + Vector2(0, 2), false, cell)
 	elif depth > 8 and depth < 200 and r < 0.021:
-		_prop("cart", p + Vector2(0, 3), false, cell)
+		place_prop("cart", p + Vector2(0, 3), false, cell)
 	elif depth > 5 and r < 0.025:
-		_prop("crate", p + Vector2(0, 2), false, cell)
+		place_prop("crate", p + Vector2(0, 2), false, cell)
 
 
 func _ceiling_props(cell: Vector2i, p: Vector2, depth: float) -> void:
 	var r := rng.randf()
 	if depth > 2 and depth < 45 and get_mat(cell.x, cell.y) == M.DIRT and r < 0.05:
-		_prop("roots", p - Vector2(0, 3), true, cell)
+		place_prop("roots", p - Vector2(0, 3), true, cell)
 	elif depth > 6 and depth < 150 and r < 0.058:
 		var open := true
 		for k in range(1, 6):
 			if get_fill(cell.x, cell.y + k) >= 0.5:
 				open = false
 		if open:
-			var l := _prop("lantern", p - Vector2(0, 2), true, cell, Color("ffb347"))
+			var l := place_prop("lantern", p - Vector2(0, 2), true, cell, Color("ffb347"))
 			flicker.append(l)
 	elif depth > 30 and r < 0.064:
-		_prop("chains", p - Vector2(0, 2), true, cell)
+		place_prop("chains", p - Vector2(0, 2), true, cell)
 	elif depth > 70 and r < 0.072:
 		var c := "crystal_p" if rng.randf() < 0.6 else "crystal_t"
-		_prop(c, p - Vector2(0, 3), true, cell, Color("b06cff") if c == "crystal_p" else Color("4ff0d0"))
+		place_prop(c, p - Vector2(0, 3), true, cell, Color("b06cff") if c == "crystal_p" else Color("4ff0d0"))
 
 
 ## Places a Blender prop. anchor_top: hangs from p (ceiling); else stands on p (floor).
 ## Returns the light if one was added.
-func _prop(name: String, p: Vector2, anchor_top: bool, cell: Vector2i, light := Color(0, 0, 0, 0)) -> PointLight2D:
+func place_prop(name: String, p: Vector2, anchor_top: bool, cell: Vector2i, light := Color(0, 0, 0, 0)) -> PointLight2D:
 	var t: Array = props[name]
 	var tex: Texture2D = t[0]
 	var flip := rng.randf() < 0.5
@@ -418,10 +420,10 @@ func _prop(name: String, p: Vector2, anchor_top: bool, cell: Vector2i, light := 
 		s.z_index = -1 if name == "beam" else 0
 		var parent: Node = glow_root if k == 1 else self
 		parent.add_child(s)
-		_add_decor(cell, s)
+		add_decor(cell, s)
 	if light.a > 0:
 		var l := _light(p + off, light, 0.9 if name == "lantern" else 0.7, 1.1)
-		_add_decor(cell, l)
+		add_decor(cell, l)
 		return l
 	return null
 
@@ -448,7 +450,7 @@ func _sprite(t: Texture2D, pos: Vector2, parent: Node, z: int) -> Sprite2D:
 	return s
 
 
-func _add_decor(cell: Vector2i, n: Node2D) -> void:
+func add_decor(cell: Vector2i, n: Node2D) -> void:
 	if not decor.has(cell):
 		decor[cell] = []
 	decor[cell].append(n)
