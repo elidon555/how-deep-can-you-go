@@ -3,7 +3,8 @@ class_name Worm
 ## A huge worm that burrows through solid rock (leaving real tunnels) to ram the drill:
 ## it hunts toward the hull, charges, rams (hull damage + a breach), backs off, and comes back.
 ## Bites anyone outside it passes. Takes hits from the pickaxe and the turrets (group "hittable").
-## Drawn from parts in code for now (round segments + jaws), never by rotating an image.
+## Drawn from rendered sprites: round segments (the same from every angle) and a head rendered
+## in 16 directions x mouth closed/open; never by rotating an image. Shapes if art is missing.
 
 signal killed(pos: Vector2)
 
@@ -18,6 +19,7 @@ const BURROW_R := 12.0         # the tunnel it leaves
 const FLESH := Color("b8a0a8")
 const FLESH_DARK := Color("5e4652")
 const OUTLINE := Color("0c0a0e")
+const ART := "res://assets/sprites/"
 
 enum State { HUNT, RAM, RETREAT, DEAD }
 
@@ -32,6 +34,11 @@ var _side := 1.0
 var _flash := 0.0
 var _bite_t := 0.0
 var _sound := AudioStreamPlayer2D.new()
+var _seg_tex: Texture2D
+var _seg_rects := []           # [Rect2 per size], biggest first
+var _seg_sizes := []
+var _head_tex: Texture2D
+var _head_info := {}
 
 
 func _ready() -> void:
@@ -41,6 +48,14 @@ func _ready() -> void:
 	for i in SEGMENTS:
 		body.append(global_position - heading * SPACING * i)
 	_side = 1.0 if randf() < 0.5 else -1.0
+	if ResourceLoader.exists(ART + "worm_head.json") and ResourceLoader.exists(ART + "worm_segment.json"):
+		var si = JSON.parse_string(FileAccess.get_file_as_string(ART + "worm_segment.json"))
+		for r in si.rects:
+			_seg_rects.append(Rect2(r[0], r[1], r[2], r[3]))
+		_seg_sizes = si.sizes
+		_seg_tex = Art.lit(ART + "worm_segment.png")
+		_head_info = JSON.parse_string(FileAccess.get_file_as_string(ART + "worm_head.json"))
+		_head_tex = Art.lit(ART + "worm_head.png")
 	_sound.stream = Sfx.looping("worm_burrow")
 	_sound.max_distance = 900.0
 	add_child(_sound)
@@ -144,7 +159,32 @@ func _radius(i: int) -> float:
 
 
 func _draw() -> void:
-	var flash := Color(1, 1, 1) * (1.0 + _flash * 1.5)
+	var tint := Color(1, 1, 1) * (1.0 + _flash * 1.5)
+	if _head_tex:
+		_draw_sprites(tint)
+	else:
+		_draw_shapes(tint)
+
+
+func _draw_sprites(tint: Color) -> void:
+	for i in range(SEGMENTS - 1, 0, -1):          # tail first, head on top
+		var want := _radius(i) * 2.0 + 2.0          # pick the closest rendered size
+		var k := 0
+		for j in _seg_sizes.size():
+			if absf(_seg_sizes[j] - want) < absf(_seg_sizes[k] - want):
+				k = j
+		var r: Rect2 = _seg_rects[k]
+		draw_texture_rect_region(_seg_tex, Rect2(to_local(body[i]) - r.size / 2.0, r.size), r, tint)
+	var dirs := int(_head_info.dirs)
+	var cell := float(_head_info.cell)
+	var col := posmod(int(round(heading.angle() / TAU * dirs)), dirs)   # heading -> rendered direction
+	var open := sin(Time.get_ticks_msec() * (0.02 if state == State.RAM else 0.008)) > 0.0
+	var src := Rect2(col * cell, (1 if open else 0) * cell, cell, cell)
+	draw_texture_rect_region(_head_tex, Rect2(to_local(body[0]) - Vector2(cell, cell) / 2.0, Vector2(cell, cell)), src, tint)
+
+
+func _draw_shapes(tint: Color) -> void:
+	var flash := tint
 	for i in range(SEGMENTS - 1, -1, -1):          # tail first, head on top
 		var c := to_local(body[i])
 		var r := _radius(i)

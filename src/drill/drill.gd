@@ -110,7 +110,7 @@ func _ready() -> void:
 		var t := Turret.new()
 		t.side = side
 		t.world = world
-		t.position = Vector2(side * (HW + 6.0), -30.0)
+		t.position = Vector2(side * (HW + 6.0), -20.0)     # just above the door, below the upper brace
 		t.bolt_hit.connect(bolt_hit.emit)
 		add_child(t)
 		turrets.append(t)

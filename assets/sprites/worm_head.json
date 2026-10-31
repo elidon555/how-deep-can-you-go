@@ -1,0 +1,6 @@
+{
+ "dirs": 16,
+ "frames": 2,
+ "cell": 32,
+ "note": "column = direction (0 = moving right, +22.5 deg clockwise, y down), row = mouth (0 closed, 1 open); the head's centre is the cell centre"
+}

@@ -28,7 +28,7 @@ COLORS = {
     "steel": "#59606b", "steel_lit": "#7d8591", "steel_dark": "#3a3f47", "rust": "#6e4632",
     "rust_dark": "#4a3024", "soot": "#2a2a2e", "bolt": "#8d949f", "grate": "#4a5058",
     "hole": "#16181c", "hazard_y": "#e0b23a", "hazard_k": "#1a1714", "glass_red": "#7a1a14",
-    "lens": "#e8e0c0", "rubber": "#1e1c1e",
+    "lens": "#e8e0c0", "rubber": "#2a2628", "chrome": "#c4ccd6",
     # back wall: dark and low contrast
     "back_steel": "#34373c", "back_rust": "#3a2f29", "back_wood": "#3a2c22", "back_wood_b": "#33271e",
     "back_seam": "#1e1b18", "pipe": "#5e4630", "pipe_band": "#7a5c3a", "cable": "#1a1a1d",
@@ -38,7 +38,7 @@ COLORS = {
     # stations
     "console": "#3b4048", "screen": "#0c1a1c", "slot": "#121316", "knob_r": "#c8322a",
     "knob_g": "#3fae5a", "knob_y": "#d0a03f", "furnace": "#2c2a2c", "furnace_lit": "#4a4446",
-    "fire": "#ff8a2a", "fire_hot": "#ffd27a", "coal": "#242228", "bench": "#6b4a2e",
+    "fire": "#ff8a2a", "fire_hot": "#ffd27a", "coal": "#242228", "bench": "#6b4a2e", "seat": "#5a3a2a",
     "bench_dark": "#4a3320", "iron": "#7d8591", "tool": "#9aa3b2", "handle": "#7a5636",
     "cabinet": "#d8d4cc", "cross": "#c8322a",
 }
@@ -310,19 +310,7 @@ for side in (-1, 1):                                                 # headlight
     rect(side * 60 - 2.5, 55.5, side * 60 + 2.5, 57, "lens", -14.5, -9)
 for x in range(-92, 96, 8):
     stud(x, 54.5, 0.7, "bolt", -12.2)
-# braces out to the shaft walls: hydraulic cylinder, rod and a gripping pad
-for side in (-1, 1):
-    for y in (-36, 20):
-        rod(side * 96, y, side * 110, y, 3.2, "steel_dark", d=0)
-        rod(side * 110, y, side * 117, y, 1.7, "steel_lit", d=0)
-        xa, xb = sorted((side * 116, side * 120))
-        rect(xa, y - 7, xb, y + 7, "steel", -5, 5, 0.5)
-        ra, rb = sorted((side * 119, side * 120.5))
-        rect(ra, y - 6, rb, y + 6, "rubber", -5.5, 4.5)
-        ma, mb = sorted((side * 96, side * 100))
-        rect(ma, y - 5, mb, y + 5, "steel", -6, 6, 0.5)             # mount block on the hull
-    # the low brace sits beside the open door, so a strut carries it from the floor band
-    rod(side * 97, 42, side * 106, 23, 1.8, "steel_dark", d=-1)
+# (the side braces are their own animated sprites, see the gripper section below)
 # exhaust stack and beacon on the roof
 rod(-62, -56, -62, -72, 4.0, "soot", d=0, verts=12)
 rod(-62, -72, -62, -76, 6.0, "soot", d=0, verts=12)
@@ -475,6 +463,159 @@ rect(-4, -1.5, 4, 1.5, "cross", -3.4, -2.6)
 rect(5, -2, 6, 2, "steel_dark", -3.6, -2.8)                       # latch
 sprite("medkit", -8, -7, 16, 14)
 
+# ================================================================ side braces: hydraulic grippers
+# 8 frames, 0 = retracted (pads tucked against the hull, nothing past x +-104) to 7 = extended
+# (rubber pads on the shaft walls at x +-120.5). Housings stay bolted to the hull; a sleeve and
+# a chrome rod telescope out of each and the pad rides on the rod. The low gripper hangs beside the open door on a post, and a diagonal support ram
+# pivots on the floor band and pins under its pad. Rendered full width; drill_sheet.py crops the
+# two 36 px strips and clears everything inside the hull's x +-96.
+BRACE_FRAMES = 8
+BRACE_STROKE = 17.0          # how far the pads travel
+HOUSING_END = 99.0           # outer end of each cylinder housing
+
+
+def gripper(side, y, e):
+    """One hydraulic gripper at height y, extended by e px, on the given side (-1 left, +1 right)."""
+    X = lambda v: side * v                                            # noqa: E731
+    rod(X(90), y, X(HOUSING_END), y, 3.4, "steel_dark", d=0)          # housing (runs into the hull)
+    rod(X(96), y, X(97.6), y, 5.2, "steel", d=0, verts=12)            # bolted flange
+    xp = HOUSING_END + e                                              # pad's inner face
+    if e > 1:
+        rod(X(HOUSING_END - 1), y, X(HOUSING_END + e / 2), y, 2.6, "steel_dark", d=0)   # sleeve
+        rod(X(HOUSING_END + e / 2 - 1), y, X(xp), y, 1.6, "chrome", d=0, verts=12)     # chrome rod
+        rod(X(HOUSING_END + e / 2 - 0.6), y, X(HOUSING_END + e / 2 + 0.6), y, 2.9, "steel", d=0)  # seal ring
+    xa, xb = sorted((X(xp), X(xp + 3)))
+    rect(xa, y - 7, xb, y + 7, "steel", -5, 5, 0.5)                   # pad plate
+    xa, xb = sorted((X(xp + 3), X(xp + 4.5)))
+    rect(xa, y - 6, xb, y + 6, "rubber", -5.5, 4.5)                   # rubber face
+    for dy in (-4.5, 4.5):
+        stud(X(xp + 1.5), y + dy, 0.7, "bolt", -5.4)
+    return xp
+
+
+for i in range(BRACE_FRAMES):
+    e = BRACE_STROKE * i / (BRACE_FRAMES - 1)
+    for side in (-1, 1):
+        gripper(side, -36, e)
+        xp = gripper(side, 20, e)
+        xa, xb = sorted((side * 96, side * 99))
+        rect(xa, 14, xb, 40, "steel_dark", -4, 4, 0.4)                # post beside the door
+        xa, xb = sorted((side * 96, side * 103))
+        rect(xa, 38, xb, 42, "steel", -5, 5, 0.4)                     # pivot bracket on the floor band
+        # support ram: pivots at the bracket, its rod pinned under the pad
+        base, pin = Vector((side * 100.5, 39.5)), Vector((side * (xp + 1.5), 25.5))
+        u = (pin - base).normalized()
+        mid = base + u * 9
+        rod(base.x, base.y, mid.x, mid.y, 1.9, "steel_dark", d=-2.5)
+        rod(mid.x - u.x, mid.y - u.y, pin.x, pin.y, 1.1, "chrome", d=-2.5, verts=8)
+        disc(base.x, base.y, 1.6, "bolt", -5.5, -2.5, 8)
+        disc(pin.x, pin.y, 1.2, "bolt", -5.5, -2.5, 8)
+    sprite(f"drill_braces_{i}", -124, -76, 248, 168)
+
+
+# sonar: console with a round CRT (a flat dark disc, 16 px, centre 10 px below the top: the game
+# draws the sweep and blips on it), dials, a speaker grille and a cable
+rect(-12, -29, 12, 0, "console", -6, 6, 0.8)
+rect(-13, -1.5, 13, 0, "steel_dark", -7, 7)
+disc(0, -20, 9.6, "steel_dark", -7, -6, 24)                          # bezel
+disc(0, -20, 8, "screen", -7.6, -6.8, 32)
+for x, r in ((-8, 2.2), (-2.5, 1.7)):                                # dials
+    disc(x, -6, r + 0.6, "brass", -6.8, -6, 12)
+    disc(x, -6, r, "gauge_face", -7.2, -6.6, 12)
+    rod(x, -6, x + r * 0.6, -6 - r * 0.6, 0.35, "needle", d=-7.3, verts=5)
+rect(3, -10, 10, -3, "steel_dark", -6.8, -6, 0.3)                    # speaker grille
+for k in range(3):
+    rect(4, -9 + k * 2.2, 9, -8 + k * 2.2, "hole", -7.2, -6.6)
+for x in (-10, 10):
+    stud(x, -27, 0.6, "bolt", -6.3)
+curve([(-11, -27), (-12.6, -22), (-12.6, -8), (-11.5, -1)], 0.7, "cable", d=-6.5)
+sprite("sonar", -13, -30, 26, 30)
+
+# gunner: seat on a pedestal, a periscope coming down from the ceiling, a yoke with two grips
+rect(-9, -1.5, 1, 0, "steel_dark", -6, 6)
+rect(-6, -10, -3, -1.5, "steel_dark", -3, 3)
+rect(-10, -13, 1, -10, "seat", -5, 5, 0.8)                           # cushion
+rect(-10, -26, -7, -12, "seat", -5, 5, 0.8)                          # backrest
+rod(-8.5, -12, -5, -10, 0.6, "steel_dark", d=-5.5)
+rod(5, -34.5, 5, -24, 2.0, "steel_dark", d=0, verts=12)              # periscope tube
+disc(5, -31, 2.6, "steel", -2.5, 2.5, 12)
+rect(0, -27, 8, -22, "steel", -4, 4, 0.5)                            # eyepiece housing
+rect(-1.5, -26.5, 0, -22.5, "rubber", -3.5, 3.5)                     # eyecup
+rod(5, -22, 5, -15.5, 1.2, "steel_dark", d=0)                        # yoke column
+rect(1, -16.5, 10, -15, "steel", -3, 3, 0.3)                         # yoke bar
+for x in (1.8, 9.2):
+    rod(x, -15, x, -10, 1.1, "handle", d=-1)                         # hand grips
+rect(2.6, -14.2, 3.8, -12.2, "knob_r", -2.2, -0.2)                   # triggers
+rect(8.4, -14.2, 9.6, -12.2, "knob_r", -2.2, -0.2)
+sprite("gunner", -11, -34, 22, 34)
+
+# ================================================================ hull turrets: harpoon cannons
+# A fixed armoured mount on each side wall with the gun pivoting at (+-102, -30). Rendered at 16
+# aim angles (-90 up .. +90 down, 12 degree steps, 0 = straight out) and again with the barrel
+# recoiled and the bolt fired. drill_sheet.py packs turret_r.png / turret_l.png + turret.json.
+TURRET_ANGLES = [-90 + 12 * k for k in range(16)]
+TURRET_PIVOT = (102, -30)
+MUZZLE = 116.5            # muzzle end x when aiming straight out (right side)
+TURRETS = {}              # side -> (pivot empty, slide empty, bolt objects)
+
+
+def parent_to(objs, parent):
+    bpy.context.view_layer.update()
+    for o in objs:
+        o.parent = parent
+        o.matrix_parent_inverse = parent.matrix_world.inverted()
+
+
+def empty(name, x, y, d=0.0):
+    e = bpy.data.objects.new(name, None)
+    scene.collection.objects.link(e)
+    e.location = (x, d, -y)
+    return e
+
+
+for side in (-1, 1):
+    X = lambda v: side * v                                            # noqa: E731
+    px, py = X(TURRET_PIVOT[0]), TURRET_PIVOT[1]
+    # fixed mount: plate bolted to the hull side, an arm, the armoured ring
+    xa, xb = sorted((X(96), X(100)))
+    rect(xa, -41, xb, -19, "steel", -6, 6, 0.5)
+    for y in (-38, -22):
+        stud(X(98), y, 0.7, "bolt", -6.2)
+    xa, xb = sorted((X(99), X(102)))
+    rect(xa, -33.5, xb, -26.5, "steel_dark", -5, 5)
+    disc(px, py, 6.6, "steel_dark", -4, 4, 20)
+    for k in range(6):
+        a = k * math.pi / 3 + 0.3
+        stud(px + 5.2 * math.cos(a), py + 5.2 * math.sin(a), 0.6, "bolt", -4.2)
+    # the gun, built aiming straight out, parented to the pivot
+    first = len(current)
+    disc(px, py, 3.2, "steel", -10.5, -8.5, 14)                       # trunnion hub
+    xa, xb = sorted((X(98), X(108)))
+    rect(xa, py - 3.5, xb, py + 3.5, "steel", -8.5, -4.5, 0.5)        # breech block
+    xa, xb = sorted((X(99), X(107)))
+    rect(xa, py - 5.2, xb, py - 3.5, "hazard", -8, -5)                # striped cowl over the breech
+    gun = current[first:]
+    first = len(current)
+    rod(X(106), py, X(MUZZLE - 2), py, 2.1, "steel", d=-6.5, verts=12)           # barrel
+    rod(X(109.5), py, X(110.8), py, 2.6, "steel_lit", d=-6.5, verts=12)          # cooling band
+    rod(X(MUZZLE - 2), py, X(MUZZLE), py, 2.8, "steel_lit", d=-6.5, verts=12)    # muzzle collar
+    slide = current[first:]
+    first = len(current)
+    rod(X(MUZZLE), py, X(MUZZLE + 1.2), py, 0.6, "steel_lit", d=-6.5, verts=6)   # bolt shaft
+    bpy.ops.mesh.primitive_cone_add(vertices=6, radius1=1.8, radius2=0, depth=2.8,
+                                    location=(X(MUZZLE + 2.4), -6.5, -py), rotation=(0, side * math.radians(90), 0))
+    add(bpy.context.active_object, "chrome")                          # harpoon head
+    for dy in (-1, 1):                                                 # barbs
+        rod(X(MUZZLE + 1.3), py + dy * 0.6, X(MUZZLE + 0.3), py + dy * 1.9, 0.4, "chrome", d=-6.5, verts=5)
+    bolt = current[first:]
+    pivot = empty(f"turret_pivot_{side}", px, py)
+    slide_e = empty(f"turret_slide_{side}", px, py)
+    parent_to([slide_e] + gun, pivot)
+    parent_to(slide + bolt, slide_e)
+    TURRETS[side] = (pivot, slide_e, bolt)
+    sprite(f"turret_{'r' if side > 0 else 'l'}", px - 20, py - 20, 40, 40)
+MUZZLE_LEN = MUZZLE - TURRET_PIVOT[0]
+
 
 # ---------------------------------------------------------------- render each sprite alone
 def render(name, left, top, w, h):
@@ -496,6 +637,19 @@ for name, (objs, left, top, w, h) in SPRITES.items():
         for i in range(HEAD_FRAMES):            # 1/8 turn over the cycle: the 8 flutes line up again
             head_pivot.rotation_euler.z = math.radians(-45 * i / HEAD_FRAMES)
             render(f"drill_head_{i}", left, top, w, h)
+    elif name.startswith("turret_"):
+        side = 1 if name.endswith("r") else -1
+        pivot, slide_e, bolt = TURRETS[side]
+        rest = slide_e.location.copy()
+        for row in range(2):                     # row 1: barrel kicked back 3 px, bolt fired
+            slide_e.location = rest + Vector((-3 * side if row else 0, 0, 0))
+            for o in bolt:
+                o.hide_render = row == 1
+            for i, a in enumerate(TURRET_ANGLES):
+                # y-down screen angle a: right gun turns by a, the mirrored left gun by -a
+                pivot.rotation_euler.y = math.radians(a * side)
+                render(f"{name}_{row}_{i}", left, top, w, h)
+        slide_e.location = rest
     else:
         render(name, left, top, w, h)
-print("DRILL_DONE", list(SPRITES))
+print("DRILL_DONE", list(SPRITES), "MUZZLE_LEN", MUZZLE_LEN)

@@ -4,7 +4,9 @@ and 1 px outline as the miner and props.
 
 Every sprite also gets a normal map X_n.png (see tools/normal_maps.py). The hull frame keeps its interior and door openings fully transparent (the outline is drawn
 inward there), the back wall is toned down, the furnace gets a _glow image of its fire, and
-the six drill head frames are packed left to right into drill_head.png + drill_head.json.
+the six drill head frames are packed left to right into drill_head.png + drill_head.json, and
+the side braces' 8 gripper frames (retracted -> extended) into drill_braces_l.png / _r.png +
+drill_braces.json, and the hull turrets' aim frames into turret_r.png / turret_l.png + turret.json.
 Run:  python3 tools/drill_sheet.py <render_dir>
 """
 import json
@@ -28,6 +30,10 @@ CLEAR = {"drill_frame": [(-88, -48, 88, 40), (-96, -6, -88, 40), (88, -6, 96, 40
 ORIGIN = {"drill_frame": (-124, -76)}
 CONTRAST = {"drill_back": 0.55}     # extra softening of the tone bands: the crew stands in front of it
 HEAD_FRAMES = 6
+BRACE_FRAMES = 8
+for _i in range(BRACE_FRAMES):      # braces: keep only what is outside the hull's sides
+    CLEAR[f"drill_braces_{_i}"] = [(-96, -76, 96, 92)]
+    ORIGIN[f"drill_braces_{_i}"] = (-124, -76)
 
 
 def near(flat, keys):
@@ -66,7 +72,7 @@ def convert(name):
     return out, glow, flat, normal_map(f"{SRC}/{name}_normal.png", out)
 
 
-for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit"):
+for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit", "sonar", "gunner"):
     out, glow, flat, normals = convert(name)
     Image.fromarray(out, "RGBA").save(f"{OUT}/{name}.png")
     Image.fromarray(normals, "RGBA").save(f"{OUT}/{name}_n.png")
@@ -86,3 +92,28 @@ meta = {"frame_w": fw, "frame_h": fh, "frames": HEAD_FRAMES, "top_left": [-88, 5
         "note": "frames left to right; one loop = 1/8 turn of the head"}
 json.dump(meta, open(f"{OUT}/drill_head.json", "w"), indent=1)
 print("wrote drill_head", (fw * HEAD_FRAMES, fh))
+
+# side braces: two strips of 8 frames, each frame the outer 36 px of one side
+braces = [convert(f"drill_braces_{i}") for i in range(BRACE_FRAMES)]
+for tag, cols in (("l", np.s_[:, 0:36]), ("r", np.s_[:, 212:248])):
+    Image.fromarray(np.concatenate([b[0][cols] for b in braces], axis=1), "RGBA").save(f"{OUT}/drill_braces_{tag}.png")
+    Image.fromarray(np.concatenate([b[3][cols] for b in braces], axis=1), "RGBA").save(f"{OUT}/drill_braces_{tag}_n.png")
+meta = {"frames": BRACE_FRAMES, "frame_w": 36, "frame_h": 168, "left_top_left": [-124, -76], "right_top_left": [88, -76]}
+json.dump(meta, open(f"{OUT}/drill_braces.json", "w"), indent=1)
+print("wrote drill_braces_l/_r", (36 * BRACE_FRAMES, 168))
+
+# hull turrets: per side a 16 x 2 grid of 40 px frames (aim angles; row 1 = recoiled, bolt fired)
+TURRET_FRAMES, TURRET_CELL = 16, 40
+MUZZLE_LEN = 14.5           # MUZZLE - pivot x in drill_blender.py
+for tag in ("r", "l"):
+    grid = [[convert(f"turret_{tag}_{row}_{i}") for i in range(TURRET_FRAMES)] for row in range(2)]
+    for k, suffix in ((0, ""), (3, "_n")):
+        rows = [np.concatenate([f[k] for f in r], axis=1) for r in grid]
+        Image.fromarray(np.concatenate(rows, axis=0), "RGBA").save(f"{OUT}/turret_{tag}{suffix}.png")
+meta = {"frames": TURRET_FRAMES, "frame": TURRET_CELL, "first_angle_deg": -90, "step_deg": 12,
+        "pivot_px": [20, 20], "right_pivot_local": [102, -30], "left_pivot_local": [-102, -30],
+        "muzzle_len_px": MUZZLE_LEN, "recoil_row": 1,
+        "note": "row 0 loaded, row 1 recoiled (barrel 3 px back, bolt fired); angles y-down, "
+                "0 = straight out from the hull (right for turret_r, left for turret_l)"}
+json.dump(meta, open(f"{OUT}/turret.json", "w"), indent=1)
+print("wrote turret_r/_l", (TURRET_CELL * TURRET_FRAMES, TURRET_CELL * 2))

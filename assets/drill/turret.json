@@ -1,0 +1,21 @@
+{
+ "frames": 16,
+ "frame": 40,
+ "first_angle_deg": -90,
+ "step_deg": 12,
+ "pivot_px": [
+  20,
+  20
+ ],
+ "right_pivot_local": [
+  102,
+  -30
+ ],
+ "left_pivot_local": [
+  -102,
+  -30
+ ],
+ "muzzle_len_px": 14.5,
+ "recoil_row": 1,
+ "note": "row 0 loaded, row 1 recoiled (barrel 3 px back, bolt fired); angles y-down, 0 = straight out from the hull (right for turret_r, left for turret_l)"
+}
