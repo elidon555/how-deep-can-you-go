@@ -1,0 +1,10 @@
+{
+ "frame_w": 176,
+ "frame_h": 56,
+ "frames": 6,
+ "top_left": [
+  -88,
+  54
+ ],
+ "note": "frames left to right; one loop = 1/8 turn of the head"
+}

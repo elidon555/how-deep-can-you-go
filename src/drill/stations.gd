@@ -1,11 +1,21 @@
 ## The drill's stations. Each is small: a prompt, what using it does (via the Drill), and how
-## it looks. Shared look helpers are in DrillArt.
+## it looks: a Blender sprite (assets/drill) standing on the floor at the station's position,
+## plus whatever changes in play drawn on top.
 
 class_name Stations
+
+const DIR := "res://assets/drill/"
+
+
+## Draws a station sprite with its bottom-centre at the station's origin.
+static func stand(ci: CanvasItem, tex: Texture2D) -> void:
+	ci.draw_texture(tex, Vector2(-tex.get_width() / 2.0, -tex.get_height()))
 
 
 ## Speed lever + depth screen.
 class Helm extends Station:
+	var _tex: Texture2D = load(Stations.DIR + "helm.png")
+
 	func prompt(_p: Player) -> String:
 		var next: String = Drill.SPEED_NAMES[(drill.speed + 1) % 3]
 		if drill.fuel <= 0.0:
@@ -20,8 +30,7 @@ class Helm extends Station:
 		queue_redraw()
 
 	func _draw() -> void:
-		DrillArt.box(self, Rect2(-12, -22, 24, 22), Color("3b4048"))
-		draw_rect(Rect2(-9, -19, 18, 9), Color("0c1a1c"))
+		Stations.stand(self, _tex)
 		var lit := Color("3fd0c0") if drill.fuel > 0.0 else Color("d04a3f")
 		for i in 3:      # speed bars
 			if i < drill.speed or (i == 0 and drill.speed == 0):
@@ -33,6 +42,18 @@ class Helm extends Station:
 
 ## Coal goes in here; the mouth glows while the head is turning.
 class Furnace extends Station:
+	var _tex: Texture2D = load(Stations.DIR + "furnace.png")
+	var _fire := Sprite2D.new()
+
+	func _ready() -> void:
+		super._ready()
+		_fire.texture = load(Stations.DIR + "furnace_glow.png")
+		_fire.offset = Vector2(0, -_fire.texture.get_height() / 2.0)
+		var unlit := CanvasItemMaterial.new()
+		unlit.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
+		_fire.material = unlit
+		add_child(_fire)
+
 	func prompt(p: Player) -> String:
 		if p.coal > 0:
 			return "E: shovel in %d coal (+%d fuel)" % [p.coal, int(p.coal * Drill.FUEL_PER_COAL)]
@@ -48,16 +69,16 @@ class Furnace extends Station:
 		queue_redraw()
 
 	func _draw() -> void:
-		DrillArt.box(self, Rect2(-13, -30, 26, 30), Color("2c2a2c"))
-		draw_rect(Rect2(-4, -48, 8, 18), Color("2c2a2c"))   # chimney into the roof
-		var heat := 0.4 + (0.6 if drill.drilling else 0.0) + 0.1 * sin(Time.get_ticks_msec() * 0.02)
-		draw_rect(Rect2(-8, -16, 16, 10), Color(1.6, 0.6, 0.15) * heat)
-		for x in [-17, -14, -11]:                          # coal pile
-			draw_circle(Vector2(x - 2, -2), 3.0, Color("18171b"))
+		Stations.stand(self, _tex)
+		# the fire burns brighter while the head is cutting rock, and flickers
+		var heat := 0.5 + (0.9 if drill.drilling else 0.0) + 0.15 * sin(Time.get_ticks_msec() * 0.02)
+		_fire.modulate = Color(heat, heat, heat) if drill.fuel > 0.0 else Color(0.2, 0.2, 0.2)
 
 
 ## Sells the metal ore you carry, restocks ropes and opens the upgrades.
 class Workbench extends Station:
+	var _tex: Texture2D = load(Stations.DIR + "workbench.png")
+
 	func prompt(p: Player) -> String:
 		if p.ore_value > 0:
 			return "E: sell %d ore ($%d) and upgrade" % [p.ore_count, p.ore_value]
@@ -72,17 +93,14 @@ class Workbench extends Station:
 		drill.workbench_used.emit(p)
 
 	func _draw() -> void:
-		DrillArt.box(self, Rect2(-15, -14, 30, 4), Color("6b4a2e"))
-		draw_rect(Rect2(-13, -10, 3, 10), Color("4a3320"))
-		draw_rect(Rect2(10, -10, 3, 10), Color("4a3320"))
-		draw_rect(Rect2(-8, -19, 8, 5), Color("7d8591"))    # vice
-		draw_line(Vector2(4, -15), Vector2(11, -20), Color("9aa3b2"), 2.0)   # wrench
+		Stations.stand(self, _tex)
 
 
 ## Patches you up, then needs a while to recharge.
 class Medkit extends Station:
 	const RECHARGE := 45.0
 	var _ready_at := 0.0
+	var _tex: Texture2D = load(Stations.DIR + "medkit.png")
 
 	func prompt(p: Player) -> String:
 		if not p.is_hurt():
@@ -103,9 +121,7 @@ class Medkit extends Station:
 
 	func _draw() -> void:
 		var ok := Time.get_ticks_msec() / 1000.0 >= _ready_at
-		DrillArt.box(self, Rect2(-7, -6, 14, 12), Color("d8d4cc") if ok else Color("6b6966"))
-		draw_rect(Rect2(-1.5, -4, 3, 8), Color("c8322a"))
-		draw_rect(Rect2(-4, -1.5, 8, 3), Color("c8322a"))
+		draw_texture(_tex, -_tex.get_size() / 2.0, Color.WHITE if ok else Color(0.45, 0.45, 0.45))
 
 
 ## A crack in the hull: sparks and hissing, leaks hull until someone holds E on it.
