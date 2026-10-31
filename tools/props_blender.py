@@ -1,7 +1,8 @@
 """Models the cave props in Blender and renders flat + clay + normal passes for each.
 
 Run headless:
-  blender -b --factory-startup -P tools/props_blender.py -- <out_dir>
+  blender -b --factory-startup -P tools/props_blender.py -- <out_dir> [name,name,...]
+(the optional list renders only those props; an animated prop by its base name, e.g. fire).
 Same scale as the miner (22 px per unit). tools/props_sheet.py makes the sprites.
 """
 import math
@@ -16,7 +17,9 @@ from mathutils import Matrix, Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
 
-OUT = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else "/tmp/props"
+ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+OUT = ARGS[0] if ARGS else "/tmp/props"
+ONLY = set(ARGS[1].split(",")) if len(ARGS) > 1 else None   # optional: render just these props
 os.makedirs(OUT, exist_ok=True)
 PX_PER_UNIT = 80 / 3.625
 random.seed(5)
@@ -32,8 +35,20 @@ COLORS = {
     "canvas_old": "#8a7a5e", "canvas_dark": "#5e5240", "wax": "#d8d0b4", "paper": "#d6c890",
     "ink": "#3a2e22", "straw": "#b49a52", "leather": "#6e4028", "leather_dark": "#3a2016",
     "lava": "#ff7a1a", "lava_hot": "#ffd060", "lava_crust": "#4a1c10", "lava_rock": "#3a3034",
+    # crew tools and hazards
+    "dyn": "#b8322a", "dyn_end": "#d8b48a", "tape": "#2e2a28", "spark": "#fff4c8",
+    "flare_body": "#a8342c", "flare_cap": "#2a2628", "flare": "#ff3a2a", "flare_hot": "#ffc8a8",
+    "ext_red": "#c0302a", "rubber": "#2a2628", "fire_r": "#e8401a",
+    # fungal layer
+    "cap": "#22384a", "cap_m": "#3e2244", "stem": "#b4c0b8", "leaf": "#1e3a3a", "pod": "#203440",
+    "glow_c": "#5ae8f0", "glow_m": "#f060d8",
+    # ice layer
+    "ice": "#a8d4ec", "ice_dark": "#6894b8", "ice_lit": "#d4ecf8", "ice_glow": "#9ff8ff",
+    # ruins layer
+    "ruin": "#464a56", "ruin_dark": "#2c2e38", "ruin_void": "#121418", "rune": "#4ff0d0",
 }
-GLOW = {"glass", "cryst_p", "cryst_t", "lava", "lava_hot"}   # these stay bright (emissive) in the clay pass too
+GLOW = {"glass", "cryst_p", "cryst_t", "lava", "lava_hot", "spark", "flare", "flare_hot", "fire_r",
+        "glow_c", "glow_m", "ice_glow", "rune"}   # these stay bright (emissive) in the clay pass too
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
@@ -513,9 +528,388 @@ for f in range(LAVA_FRAMES):
     lava_frame(f)
 
 
+# ================================================================ crew tools, hazards and layer props
+# Modelled in game px: x right, z up from the floor, d = depth (smaller = nearer the viewer).
+# Thin features (runes, seams) sit on whole px so they land on single pixels.
+rng3 = random.Random(77)     # own stream: the props above keep their shapes
+
+
+def pbox(x0, z0, x1, z1, mat, d0=-2.0, d1=2.0, rot=0.0):
+    """Box over the px rect x0..x1, z0..z1, from depth d0 to d1, turned rot degrees (top toward +x)."""
+    return box(((x0 + x1) / 2 * U, (d0 + d1) / 2 * U, (z0 + z1) / 2 * U),
+               ((x1 - x0) * U, (d1 - d0) * U, (z1 - z0) * U), mat, rot=(0, math.radians(rot), 0))
+
+
+def prod(x0, z0, x1, z1, r, mat, d=0.0, verts=10, r2=None, smooth=True):
+    """Cylinder (or a cone tapering to r2) from px point (x0, z0) to (x1, z1) at depth d."""
+    a, b = Vector((x0 * U, d * U, z0 * U)), Vector((x1 * U, d * U, z1 * U))
+    bpy.ops.mesh.primitive_cone_add(vertices=verts, radius1=r * U, radius2=(r if r2 is None else r2) * U,
+                                    depth=(b - a).length, location=(a + b) / 2)
+    o = bpy.context.active_object
+    o.rotation_euler = (b - a).to_track_quat("Z", "Y").to_euler()
+    return add(o, mat, smooth=smooth)
+
+
+def pball(x, z, r, mat, d=0.0, scale=(1, 1, 1)):
+    return ball((x * U, d * U, z * U), r * U, mat, scale=scale)
+
+
+def pdisc(x, z, r, mat, d0=-1.0, d1=0.0, verts=16):
+    """Round plate facing the viewer."""
+    return cyl((x * U, (d0 + d1) / 2 * U, z * U), r * U, (d1 - d0) * U, mat, rot=(math.radians(90), 0, 0), verts=verts)
+
+
+def pring(x, z, r, t, mat, d=0.0, segs=20):
+    """Ring facing the viewer."""
+    bpy.ops.mesh.primitive_torus_add(major_radius=r * U, minor_radius=t * U, major_segments=segs, minor_segments=4,
+                                     location=(x * U, d * U, z * U), rotation=(math.radians(90), 0, 0))
+    return add(bpy.context.active_object, mat, smooth=True)
+
+
+def pcurve(points, r, mat, d=0.0):
+    """Thick poly line through px points (fuses, hoses, hooks)."""
+    cu = bpy.data.curves.new("c", "CURVE")
+    cu.dimensions = "3D"
+    cu.bevel_depth = r * U
+    cu.bevel_resolution = 2
+    sp = cu.splines.new("POLY")
+    sp.points.add(len(points) - 1)
+    for p, (x, z) in zip(sp.points, points):
+        p.co = (x * U, d * U, z * U, 1)
+    ob = bpy.data.objects.new("c", cu)
+    scene.collection.objects.link(ob)
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
+    bpy.ops.object.convert(target="MESH")
+    return add(ob, mat, smooth=True)
+
+
+def prock(x, z, r, mat, flat=0.8, rng=None):
+    """Chunky faceted stone (like the boulder), r px, squashed by flat."""
+    rng = rng or rng3
+    bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=r * U, location=(x * U, 0, z * U))
+    o = bpy.context.active_object
+    for v in o.data.vertices:
+        v.co *= rng.uniform(0.8, 1.12)
+    o.scale = (1.0, 0.9, flat)
+    o.rotation_euler = (rng.uniform(-0.4, 0.4), rng.uniform(0, 6.28), rng.uniform(-0.3, 0.3))
+    return add(o, mat)
+
+
+def hang(name, w, h, samples=96):
+    """Close a prop that hangs from a ceiling: the sprite's top row is the ceiling (z = 0)."""
+    prop(name, w, h, (0, -h / 2 * U), samples)
+
+
+def place(objs, pivot, rot):
+    """Turn objects (modelled around pivot, unrotated) about pivot by the 3x3 matrix rot."""
+    for o in objs:
+        o.location = rot @ (o.location - pivot) + pivot
+        o.rotation_euler = (rot @ o.rotation_euler.to_matrix()).to_euler()
+
+
+# 4 x 5 rune glyphs (top row first) and 3 x 4 small ones for narrow stones
+GLYPHS = [["####", "#...", "###.", "#...", "#..."], [".##.", "#..#", ".##.", "..#.", "..#."],
+          ["#..#", "#.#.", "##..", "#.#.", "#..#"], ["#.##", "#.#.", "###.", "..#.", "..#."],
+          ["...#", "..#.", ".#..", "####", "#..."], ["##.#", ".#.#", ".###", ".#..", "##.."],
+          ["#..#", "####", ".#..", ".#..", ".###"], [".#..", "###.", ".#.#", ".###", "...#"]]
+GLYPHS_S = [["#.#", ".#.", "#.#", "..#"], ["##.", "#.#", "##.", "#.."], [".#.", "###", ".#.", "#.#"],
+            ["#..", "###", "..#", ".##"], ["#.#", "###", "#.#", ".#."]]
+
+
+def glyph(x, z, pattern, d, mat="rune"):
+    """Carved rune: one 1 px block per '#'; (x, z) is its top-left px corner."""
+    for row, line in enumerate(pattern):
+        for col, c in enumerate(line):
+            if c == "#":
+                pbox(x + col, z - row - 1, x + col + 1, z - row, mat, d - 0.4, d)
+
+
+def dome(r, flat, mat, segs=16):
+    """Upper half of a sphere (a mushroom cap), base at its origin."""
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=segs, ring_count=8, radius=r * U, location=(0, 0, 0))
+    o = bpy.context.active_object
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z < -1e-6], context="VERTS")
+    bm.to_mesh(o.data)
+    bm.free()
+    o.scale = (1, 1, flat)
+    return add(o, mat, smooth=True)
+
+
+def mushroom(x, h, cap_r, cap_mat, gill_mat, stem_r, lean=0.0, tilt=-9, spots=(), rng=None, flat=0.62):
+    """Stem curving up to (x + lean, h), a domed cap tipped toward the viewer so its glowing gills show,
+    and glowing spots [(mat, size)] scattered over the front of the cap."""
+    rng = rng or rng3
+    n = 4
+    pts = [(x + lean * (i / n) ** 2 + 0.25 * stem_r * math.sin(i / n * math.pi), h * i / n) for i in range(n + 1)]
+    for i in range(n):
+        r0, r1 = stem_r * (1.2 - 0.35 * i / n), stem_r * (1.2 - 0.35 * (i + 1) / n)
+        prod(*pts[i], *pts[i + 1], r0, "stem", r2=r1)
+        pball(*pts[i + 1], r1, "stem")
+    pball(x, stem_r * 0.4, stem_r * 1.5, "stem", scale=(1, 1, 0.45))            # foot
+    cx, cz = pts[-1]
+    pivot = Vector((cx * U, 0, (cz + 0.12 * cap_r) * U))
+    cap = dome(cap_r, flat, cap_mat)
+    depth = 0.28 * cap_r
+    bpy.ops.mesh.primitive_cone_add(vertices=16, radius1=stem_r * U, radius2=cap_r * 0.97 * U, depth=depth * U,
+                                    location=(0, 0, -depth / 2 * U))
+    gills = add(bpy.context.active_object, gill_mat)
+    parts = [cap, gills]
+    for mat, size in spots:
+        th = rng.uniform(math.pi * 1.15, math.pi * 1.85)                         # front half of the cap
+        ph = rng.uniform(0.3, 1.1)
+        loc = Vector((cap_r * math.cos(ph) * math.cos(th), cap_r * math.cos(ph) * math.sin(th),
+                      flat * cap_r * math.sin(ph))) * U
+        parts.append(ball(loc, size * U, mat, scale=(1, 1, 0.6)))
+    for o in parts:
+        o.location = o.location + pivot
+    rot = Matrix.Rotation(math.radians(tilt), 3, "X") @ Matrix.Rotation(math.radians(lean * 4), 3, "Y")
+    place(parts, pivot, rot)
+
+
+# ---- dynamite: three red sticks taped together, a fuse with a spark (anchor: bottom centre)
+for x, d in ((-2.6, 0.8), (2.6, 0.8), (0, -1.2)):
+    prod(x, 0.4, x, 9.4, 1.45, "dyn", d=d, verts=12)
+    prod(x, 9.4, x, 9.9, 1.3, "dyn_end", d=d, verts=12)
+for z in (2.2, 6.6):
+    pbox(-4.2, z, 4.2, z + 1.1, "tape", -2.9, 2.6)
+pcurve([(0, 9.8), (0.3, 11.0), (1.2, 11.9), (2.3, 12.2)], 0.45, "hemp_dark", d=-1.2)
+pball(2.6, 12.4, 0.95, "spark", d=-1.6)
+for dx, dz in ((1.2, 0.4), (-0.6, 0.9), (0.9, -0.8)):
+    pball(2.6 + dx, 12.4 + dz, 0.45, "lava_hot", d=-1.4)
+ground("dynamite", 10, 14)
+
+# ---- road flare: paper stick with a cap at the foot, burning red tip (anchor: bottom centre)
+prod(0, 0.3, 0, 1.8, 2.1, "flare_cap", verts=12)
+prod(0, 1.8, 0, 6.8, 1.95, "flare_body", verts=12)
+prod(0, 3.6, 0, 4.6, 2.02, "wax", verts=12)                                       # label band
+prod(0, 6.8, 0, 8.4, 1.9, "flare", verts=12)                                     # burning end
+prod(-0.1, 8.0, 0.4, 10.9, 1.6, "flare", r2=0.2, verts=10)                        # flame tongue
+pball(0, 8.6, 0.95, "flare_hot", d=-1.9)                                          # white-hot core
+ground("flare", 6, 12)
+
+# ---- grappling hook head: shank with an eye, two curved barbed prongs (anchor: bottom centre)
+prod(0, 2.4, 0, 9.0, 0.85, "iron")
+pring(0, 10.1, 1.25, 0.5, "steel")
+pball(0, 2.3, 1.5, "iron_dark")
+for s in (-1, 1):
+    pcurve([(0, 2.3), (s * 2.2, 1.2), (s * 3.7, 1.5), (s * 4.5, 3.0), (s * 4.6, 4.8)], 0.65, "iron")
+    prod(s * 4.6, 4.7, s * 4.2, 6.9, 0.8, "steel", r2=0.05, verts=6)               # barb tip
+pcurve([(0, 2.3), (0, 1.2), (0.4, 1.0)], 0.6, "iron", d=-1.6)                       # third prong, toward the viewer
+prod(0.4, 1.0, 0.9, 3.6, 0.75, "steel", d=-3.0, r2=0.05, verts=6)
+ground("grapple", 12, 12)
+
+# ---- ore sled: iron-shod runners curling up at the front, plank deck, a box of ore (anchor: bottom centre)
+for d, mat in ((2.6, "iron_dark"), (-2.6, "iron")):
+    pcurve([(-12.3, 1.0), (8.8, 1.0), (11.3, 1.6), (12.5, 3.3), (12.2, 5.2)], 0.7, mat, d=d)
+for x in (-10, -3, 4, 9.5):
+    pbox(x - 0.6, 1.4, x + 0.6, 3.1, "wood_dark", -3.2, 3.2)
+pbox(-12.4, 3.0, 11.0, 4.6, "plank", -3.8, 3.8)
+for x in (-6.4, -0.6, 5.2):
+    pbox(x, 3.0, x + 0.4, 4.6, "wood_dark", -3.9, -3.7)                           # plank seams
+pbox(-10.0, 4.6, 5.0, 10.0, "plank", -3.2, 3.2)                                   # the box
+for z0, z1 in ((4.6, 5.5), (9.1, 10.0)):
+    pbox(-10.2, z0, 5.2, z1, "wood_dark", -3.4, 3.4)
+for x in (-10.2, 4.3):
+    pbox(x, 4.6, x + 0.9, 10.0, "wood_dark", -3.4, 3.4)
+pball(-2.5, 10.0, 6.0, "ore_rock", scale=(1.15, 0.5, 0.3))                             # heaped ore
+for i in range(9):
+    x = -8.0 + i * 1.3 + rng3.uniform(-0.4, 0.4)
+    pball(x, 10.4 + 1.6 * (1 - abs(x + 2.5) / 7) + rng3.uniform(-0.3, 0.3), rng3.uniform(1.0, 1.5),
+          ("gold", "ore_rock", "copper", "ore_rock", "gold", "ore_rock", "copper", "ore_rock", "gold")[i],
+          d=rng3.uniform(-2, 0), scale=(1.2, 1, 0.8))
+pcurve([(11.6, 4.4), (12.6, 5.6), (12.2, 6.6), (11.2, 6.2)], 0.45, "hemp")           # tow loop
+ground("sled", 28, 14)
+
+# ---- fire extinguisher: red bottle, valve head with a lever, hose down the side (anchor: bottom centre)
+X = -0.6
+prod(X, 0.5, X, 9.6, 2.85, "ext_red", verts=16)
+pball(X, 9.6, 2.85, "ext_red", scale=(1, 1, 0.42))
+prod(X, 0.3, X, 1.3, 3.0, "iron_dark", verts=16)
+pbox(X - 2.0, 4.0, X + 1.6, 7.0, "wax", -3.3, -2.6)                                  # label
+pbox(X - 2.0, 5.2, X + 1.6, 5.8, "ext_red", -3.4, -3.25)
+prod(X, 10.6, X, 11.6, 1.0, "steel")
+pbox(X - 1.5, 11.4, X + 1.8, 12.6, "iron_dark", -1.2, 1.2)
+prod(X - 0.4, 12.9, X + 3.6, 13.7, 0.45, "steel")                                   # lever
+prod(X + 0.4, 12.0, X + 3.6, 12.2, 0.4, "iron")                                     # handle
+pcurve([(X + 1.6, 12.0), (X + 3.6, 11.3), (X + 4.2, 9.0), (X + 3.9, 5.2), (X + 3.5, 3.8)], 0.5, "rubber", d=-1.0)
+prod(X + 3.5, 3.9, X + 3.4, 2.4, 0.7, "iron_dark", d=-1.0)
+ground("extinguisher", 10, 16)
+
+
+# ---- fire: 8 frames of licking flames (anchor: bottom centre). Each frame is modelled again:
+# tongues stretch and sway on their own phases, blobs break off the tips and rise. Nested
+# layers (red behind, orange, yellow, white-hot in front) make the flame's hot core.
+FIRE_FRAMES = 8
+TONGUES = [(0.0, 17.0, 3.8, 0.0, 0.1), (-3.4, 11.5, 2.9, 0.35, 0.6), (3.4, 12.5, 2.9, 0.7, 0.3),
+           (-5.2, 6.5, 1.8, 0.15, 0.85), (5.2, 7.0, 1.8, 0.55, 0.45)]          # x, height, radius, phases
+LAYERS = [("fire_r", 1.0, 1.0, 2.5), ("lava", 0.74, 0.78, 0.5), ("lava_hot", 0.5, 0.52, -1.5), ("spark", 0.28, 0.26, -3.0)]
+BLOBS = [(0.6, 0.0, 1.7), (-2.6, 0.4, 1.3), (2.8, 0.75, 1.2)]                # x, phase, radius
+
+
+def fire_frame(f):
+    t = f / FIRE_FRAMES
+    wave = lambda ph, k=1: math.sin(2 * math.pi * (k * t + ph))                  # noqa: E731, loops
+    for x, hgt, r, ph, ph2 in TONGUES:
+        h = hgt * (0.84 + 0.16 * wave(ph) + 0.05 * wave(ph2, 2))
+        sway = 0.22 * wave(ph2) + 0.08 * wave(ph, 3)
+        for mat, ks, kh, d in LAYERS:
+            rr, hh = r * ks, h * kh
+            if hh < rr * 1.6:
+                continue
+            pball(x, rr, rr, mat, d=d)
+            prod(x, rr, x + sway * hh, hh, rr, mat, d=d, r2=0.15, verts=10)
+    pball(0, 1.6, 6.6, "fire_r", d=2.5, scale=(1, 1, 0.3))                          # glowing bed
+    pball(0, 1.4, 4.6, "lava", d=0.5, scale=(1, 1, 0.3))
+    for x, ph, r in BLOBS:                                                           # licks that break off
+        k = (t + ph) % 1
+        z = 13 + k * 9.5
+        rr = r * (1 - k * 0.75)
+        if rr > 0.45:
+            pball(x + 0.8 * math.sin(2 * math.pi * (k + ph)), z, rr, "lava" if k < 0.4 else "fire_r", d=0, scale=(0.9, 1, 1.25))
+    ground(f"fire_{f}", 16, 24)
+
+
+for f in range(FIRE_FRAMES):
+    fire_frame(f)
+
+# ---- rubble: a pile of broken rock (anchor: bottom centre)
+for x, r, mat in ((-1.0, 5.0, "boulder"), (-7.0, 3.6, "rock"), (6.0, 4.0, "ore_rock"), (10.2, 2.0, "boulder"),
+                  (-10.6, 1.8, "ore_rock")):
+    prock(x, r * 0.75, r, mat)
+for x, z, r, mat in ((2.6, 7.6, 3.0, "boulder"), (-4.4, 6.6, 2.7, "rock"), (7.8, 6.2, 2.0, "rock"),
+                     (-8.2, 5.2, 1.6, "boulder")):
+    prock(x, z, r, mat)
+for i in range(7):                                                                  # grit at the foot
+    x = rng3.choice((-1, 1)) * rng3.uniform(3, 11.5)
+    prock(x, 0.7, rng3.uniform(0.7, 1.2), rng3.choice(("rock", "boulder", "ore_rock")))
+ground("rubble", 26, 14)
+
+# ---- fungal layer: big glowing mushroom, a small pair, a spore pod (anchor: bottom centre)
+mushroom(0, 22, 11.2, "cap", "glow_c", 2.6, lean=1.2,
+         spots=[("glow_c", 1.4), ("glow_c", 1.0), ("glow_c", 1.2), ("glow_m", 1.1), ("glow_c", 0.9), ("glow_m", 0.8)])
+mushroom(-7.0, 4.5, 2.8, "cap_m", "glow_m", 0.8, lean=-0.6, spots=[("glow_c", 0.6)])
+mushroom(7.6, 3.0, 2.1, "cap", "glow_c", 0.7, lean=0.4, spots=[])
+for x in (-3.5, 3.0, -10.0, 10.5):
+    pball(x, 0.4, 1.6, "leaf", scale=(1.3, 1, 0.5))
+ground("mushroom_big", 26, 34)
+
+mushroom(1.0, 8.0, 4.6, "cap_m", "glow_m", 1.25, lean=0.5, spots=[("glow_c", 0.8), ("glow_c", 0.6), ("glow_m", 0.6)])
+mushroom(-3.4, 3.8, 2.3, "cap", "glow_c", 0.75, lean=-0.4, spots=[("glow_c", 0.5)])
+pball(-1.2, 0.3, 1.4, "leaf", scale=(1.6, 1, 0.5))
+ground("mushroom_small", 14, 16)
+
+for a in (-1, 0, 1):                                                                 # leaves at the foot
+    prod(0, 0.3, a * 3.8, 2.3 - abs(a) * 0.4, 1.2, "leaf", d=0.5 - abs(a) * 1.5, r2=0.1, verts=6)
+prod(0, 0.2, 0, 2.6, 0.95, "leaf")
+pball(0, 5.6, 3.2, "glow_c", scale=(1, 1, 1.15))                                     # glowing heart
+for k in range(3):                                                                   # dark ribs around it
+    rib = pball(0, 5.6, 3.6, "pod", scale=(0.25, 1, 1.12))
+    rib.rotation_euler = (0, 0, math.radians(30 + 60 * k))
+prod(0, 1.9, 0, 3.3, 1.0, "pod", r2=2.6, verts=10)                                    # cup under the bulb
+prod(0, 9.2, 0, 10.4, 1.2, "pod", r2=0.4, verts=8)                                    # nub on top
+pball(0, 10.3, 0.75, "glow_m", d=-0.6)
+ground("spore_pod", 12, 12)
+
+# ---- ice layer: an icicle hanging from the ceiling (anchor: top centre), a crystal cluster
+r4 = random.Random(12)
+prod(0, -0.6, 0.0, 0.0, 3.0, "ice_dark", r2=3.2, verts=8)                            # frozen onto the rock
+o = prod(0.2, -0.3, 0.4, -20.0, 2.5, "ice", r2=0.05, verts=7, smooth=False)
+for v in o.data.vertices:
+    v.co.x *= r4.uniform(0.85, 1.12)
+    v.co.y *= r4.uniform(0.85, 1.12)
+prod(-1.7, -0.3, -2.2, -8.5, 1.25, "ice_dark", r2=0.05, verts=6, d=0.6, smooth=False)
+prod(1.9, -0.3, 2.1, -11.5, 1.15, "ice", r2=0.05, verts=6, d=0.8, smooth=False)
+prod(-0.5, -1.0, -0.1, -14.0, 0.45, "ice_lit", d=-2.2, r2=0.1, verts=5)             # wet highlight
+hang("icicle", 8, 22)
+
+pball(0, 0.6, 5.6, "ice_dark", scale=(1.15, 0.9, 0.22))                              # frozen base
+for x, ang, ln, r, mat, core in ((0.2, 3, 11.0, 2.4, "ice", True), (-3.0, -22, 7.0, 1.8, "ice_dark", False),
+                                 (3.2, 19, 8.0, 1.9, "ice", True), (-5.0, -40, 3.4, 1.2, "ice", False),
+                                 (5.0, 36, 3.6, 1.2, "ice_dark", False), (1.4, 8, 4.5, 1.3, "ice_lit", False)):
+    a = math.radians(ang)
+    dx, dz = math.sin(a), math.cos(a)
+    d = -1.2 if mat == "ice_lit" else 0.0
+    prod(x, 0.5, x + dx * ln, 0.5 + dz * ln, r, mat, d=d, verts=6, smooth=False)
+    prod(x + dx * ln, 0.5 + dz * ln, x + dx * (ln + 1.7 * r), 0.5 + dz * (ln + 1.7 * r), r, mat, d=d,
+         r2=0.05, verts=6, smooth=False)
+    if core:                                                                         # faint inner light
+        prod(x + dx * 1.5, 2.0, x + dx * ln * 0.85, 0.5 + dz * ln * 0.85, 0.75, "ice_glow", d=-r * 0.9, verts=6)
+ground("ice_crystal", 16, 20)
+
+# ---- ruins layer: carved dark stone with teal runes (anchor: bottom centre)
+# pillar: plinth, square shaft with a recessed rune panel, a capital broken off on one side
+pbox(-7, 0, 7, 2, "ruin_dark", -5, 5)
+pbox(-6, 2, 6, 4, "ruin", -4.6, 4.6)
+pbox(-4.5, 4, 4.5, 33, "ruin", -4, 4)
+for x in (-4.6, 3.6):
+    pbox(x, 4, x + 1, 33, "ruin_dark", -4.1, -3.9)                                    # edge chamfers
+pbox(-3, 6, 3, 31, "ruin_dark", -4.15, -3.95)                                         # rune panel
+for k, g in enumerate((0, 3, 6, 1)):
+    glyph(-2, 30 - k * 6, GLYPHS[g], -4.15)
+pbox(-6, 33, 6, 35, "ruin_dark", -5, 5)
+pbox(-7, 35, 7, 38, "ruin", -5.5, 5.5)
+pbox(-7, 38, 2.5, 40, "ruin", -5.5, 5.5)                                              # top slab, broken off
+prock(4.0, 38.4, 1.6, "ruin", flat=0.7)
+pbox(-1.0, 16.5, 4.0, 17.2, "ruin_void", -4.3, -4.1, rot=-28)                          # crack
+prock(6.2, 0.9, 1.3, "ruin_dark")                                                    # fallen chip
+ground("ruin_pillar", 16, 42)
+
+# statue: a hooded figure on a rune-carved plinth, hands clasped round a glowing orb, eyes in the dark hood
+pbox(-10, 0, 10, 2, "ruin_dark", -6, 6)
+pbox(-9, 2, 9, 9, "ruin", -5, 5)
+for k, g in enumerate((2, 5, 7)):
+    glyph(-7 + k * 5, 8, GLYPHS[g], -5.0)
+prod(0, 9, 0, 23.5, 7.0, "ruin", r2=4.2, verts=12)                                    # robe
+for x, rot in ((-3.6, 8), (-1.2, 2), (1.6, -3), (4.0, -9)):
+    pbox(x - 0.3, 9.3, x + 0.3, 19, "ruin_dark", -7.3, -6.8, rot=rot)                 # folds
+pball(0, 23, 5.4, "ruin", scale=(1, 0.85, 0.5))                                      # shoulders
+for s in (-1, 1):
+    prod(s * 4.4, 22, s * 1.4, 16.4, 1.9, "ruin", d=-3.0)                             # sleeves
+pball(0, 16.0, 2.0, "ruin_dark", d=-4.4)                                              # hands
+pball(0, 17.6, 1.5, "rune", d=-5.6)                                                   # orb
+prod(0, 24, 0, 21.5, 4.6, "ruin", r2=5.6, verts=12)                                   # hood drape
+pball(0, 27.6, 4.6, "ruin", scale=(1, 1, 1.1))                                        # hood
+prod(0.0, 30.5, 0.8, 34.0, 3.0, "ruin", r2=0.3, verts=10)                             # hood peak
+pball(0, 27.0, 3.0, "ruin_void", d=-3.4, scale=(0.95, 0.6, 1.1))                       # face in shadow
+for x in (-2, 1):
+    pbox(x, 27, x + 1, 28, "rune", -5.6, -5.2)                                        # eyes
+ground("ruin_statue", 24, 36)
+
+# door: a sealed arch, rune seal across the slab, runes up both jambs
+pbox(-15, 0, 15, 2, "ruin_dark", -5, 5)
+for s in (-1, 1):
+    x0, x1 = sorted((s * 9, s * 14))
+    pbox(x0, 2, x1, 23, "ruin", -4, 4)
+    for k, g in enumerate((0, 2, 4) if s < 0 else (1, 3, 0)):
+        glyph(x0 + 1, 21 - k * 6, GLYPHS_S[g], -4.0)
+N_STONES = 7
+for k in range(N_STONES):                                                            # arch stones
+    a = math.pi * (k + 0.5) / N_STONES
+    key = k == N_STONES // 2
+    rr = 11.5 + (0.4 if key else 0)
+    hw = 11.5 * math.pi / N_STONES / 2 - 0.25
+    cx, cz = rr * math.cos(a), 23 + rr * math.sin(a)
+    o = pbox(cx - hw, cz - 2.5 - (0.4 if key else 0), cx + hw, cz + 2.5 + (0.4 if key else 0),
+             "ruin_dark" if key else "ruin", -4.4 if key else -4, 4, rot=math.degrees(math.pi / 2 - a))
+pbox(-9, 2, 9, 23, "ruin_dark", -2.5, 3)                                              # the sealed slab
+pdisc(0, 23, 9, "ruin_dark", -2.5, 3, verts=28)
+pbox(0, 2, 1, 32, "ruin_void", -2.8, -2.5)                                            # seam between the leaves
+pring(0, 15.5, 5.0, 0.5, "rune", d=-2.8, segs=28)                                     # the seal
+glyph(-2, 18, GLYPHS[7], -2.8)
+for z in (8.5, 22.5):
+    pbox(0, z, 1, z + 1, "rune", -3.2, -2.8)
+ground("ruin_door", 32, 38)
+
+
 # ---------------------------------------------------------------- render each prop alone
 all_objs = [o for objs, *_ in PROPS.values() for o in objs]
 for name, (objs, w, h, centre, samples) in PROPS.items():
+    if ONLY and name not in ONLY and name.rstrip("0123456789").rstrip("_") not in ONLY:
+        continue
     scene.cycles.samples = samples
     for o in all_objs:
         o.hide_render = o not in objs
@@ -527,4 +921,4 @@ for name, (objs, w, h, centre, samples) in PROPS.items():
         set_mode(mode)
         scene.render.filepath = os.path.join(OUT, f"{name}_{mode}.png")
         bpy.ops.render.render(write_still=True)
-print("PROPS_DONE", list(PROPS))
+print("PROPS_DONE", [n for n in PROPS if not ONLY or n in ONLY or n.rstrip("0123456789").rstrip("_") in ONLY])

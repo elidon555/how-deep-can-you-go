@@ -89,7 +89,7 @@ func update(dt: float, dir: float) -> void:
 		_t = 0.0
 	if mouse_aim and absf(_target.x - player.global_position.x) > 2.0:
 		player.facing = 1 if _target.x > player.global_position.x else -1   # face where you swing
-	power = Progress.pick_power()
+	power = Progress.pick_power() * Roles.pick_mult(player.role)
 	speed = Progress.swing_speed()
 	_t += dt * speed      # a started swing always plays out; holding the button chains them
 	while _t >= FRAMES[frame]:

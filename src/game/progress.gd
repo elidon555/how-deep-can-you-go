@@ -14,7 +14,13 @@ const UPGRADES := {
 	"arms": {"name": "Strong arms", "desc": "Swing faster", "costs": [25, 70, 160]},
 	"lamp": {"name": "Brighter lamp", "desc": "See further in the dark", "costs": [10, 30, 80]},
 	"coat": {"name": "Thick coat", "desc": "+1 health", "costs": [30, 90, 220]},
-	"bag": {"name": "Rope bag", "desc": "+3 ropes per trip", "costs": [12, 35, 90]},
+	"sled": {"name": "Ore sled", "desc": "Drag a sled: +15 ore carried", "costs": [40, 110]},
+	# modules: built onto the drill once (DrillModules)
+	"cargo": {"name": "Cargo hold", "desc": "Keeps the ore the drill grinds through", "costs": [80], "module": true},
+	"floodlights": {"name": "Floodlights", "desc": "Light up the shaft around the drill", "costs": [40], "module": true},
+	"sprinklers": {"name": "Sprinklers", "desc": "Douse fires in the cabin", "costs": [60], "module": true},
+	"drone": {"name": "Defence drone", "desc": "Zaps creatures near the drill", "costs": [120], "module": true},
+	"bunk": {"name": "Crew bunk", "desc": "Bled-out crew are back sooner", "costs": [50], "module": true},
 }
 
 var money := 0
@@ -131,8 +137,8 @@ func max_health() -> int:
 	return 3 + level("coat")
 
 
-func rope_capacity() -> int:
-	return 5 + 3 * level("bag")
+func bag_bonus() -> int:
+	return 15 * level("sled")
 
 
 # ---------------------------------------------------------------- online co-op

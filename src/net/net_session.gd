@@ -31,7 +31,7 @@ func _ready() -> void:
 		main.world.record = true
 		Progress.changed.connect(_send_progress)
 	else:
-		Net.send(1, "ready", {"name": Settings.player_name})
+		Net.send(1, "ready", {"name": Settings.player_name, "role": Settings.role})
 
 
 ## Host: what a joining client needs to load this run.
@@ -76,7 +76,8 @@ func receive(from: int, kind: String, data: Variant) -> void:
 func _host_receive(from: int, kind: String, data: Variant) -> void:
 	match kind:
 		"ready":
-			_add_peer(from, str(data.get("name", "")).left(14) if data is Dictionary else "")
+			var d: Dictionary = data if data is Dictionary else {}
+			_add_peer(from, str(d.get("name", "")).left(14), str(d.get("role", "miner")))
 		"input":
 			var p: Player = _ready_peers.get(from)
 			if p and data is Array:
@@ -118,10 +119,10 @@ func _echo(data: Array) -> void:
 # ---------------------------------------------------------------- host: the crew
 
 ## A client loaded the world: give them a miner in the drill and everything that's changed.
-func _add_peer(peer: int, display_name: String) -> void:
+func _add_peer(peer: int, display_name: String, role: String) -> void:
 	if _ready_peers.has(peer) or is_full():
 		return
-	var p: Player = main.add_remote_player(NetInput.new(peer), display_name)
+	var p: Player = main.add_remote_player(NetInput.new(peer), display_name, role)
 	_ready_peers[peer] = p
 	for key: Vector2i in main.world.touched:
 		Net.send(peer, "chunk", NetWorld.pack_chunk(main.world, key))

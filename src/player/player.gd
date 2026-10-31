@@ -1,6 +1,6 @@
 extends CharacterBody2D
 class_name Player
-## The little digger: tight platformer controls, rope climbing, health, animation, helmet lamp.
+## The little digger: tight platformer controls, the grapple and tools, health, animation, helmet lamp.
 ## Digging lives in the Pickaxe child (pickaxe.gd). Group "player".
 ## Online, the host simulates every miner; on clients they're puppets showing the host's state
 ## (net_state / net_apply, see src/net/net_entities.gd).
@@ -10,10 +10,10 @@ signal bag_changed
 signal went_down                       # health ran out: down, bleeding out, a crewmate can help
 signal bled_out                        # nobody helped in time (main respawns them in the drill)
 signal revived
-signal rope_requested(feet: Vector2)   # main decides if there's a rope left to hang
 signal kicked_dust(at: Vector2, strength: float)   # steps, jumps, landings
 signal breath_changed(left: float)                 # 0..1 while underwater, 1 = full
 signal pinged(at: Vector2)                         # marked a spot for the crew
+signal message(text: String)                       # something for this player's screen only
 
 const SPEED := 150.0
 const ACCEL := 1300.0
@@ -23,7 +23,6 @@ const JUMP_V := -390.0
 const MAX_FALL := 560.0
 const COYOTE := 0.1
 const JUMP_BUFFER := 0.12
-const CLIMB_SPEED := 110.0
 const INVULNERABLE := 1.0      # seconds after a hit
 const HALF_HEIGHT := 18.0
 const SWIM_UP := -120.0         # holding jump in water
@@ -34,6 +33,8 @@ const ROLL_SPEED := 270.0
 const ROLL_TIME := 0.32        # untouchable for the whole roll
 const ROLL_COOLDOWN := 0.55
 const BLEED_OUT := 30.0         # seconds down before it's too late to help them up
+const CARRY_SPEED := 0.65       # how fast you go with a crewmate on your shoulders
+const BAG := 15                 # ore + coal you can carry (more with the sled, as a miner)
 
 # each miner's work clothes and name tag: blue, red, green, violet (by player number)
 const CREW_COLORS := [Color("3f8fd8"), Color("d84a3f"), Color("4fb84a"), Color("9a5ad8")]
@@ -44,15 +45,21 @@ const SHEET_INFO := "res://assets/sprites/miner.json"
 const ANIM_SPEED := {
 	"idle": [4.0, true], "run": [13.0, true], "jump": [10.0, false], "fall": [6.0, true],
 	"land": [14.0, false], "climb": [9.0, true], "hurt": [10.0, false], "roll": [18.0, false],
-	"swim": [8.0, true], "down": [3.0, true],
+	"swim": [8.0, true], "down": [3.0, true], "carried": [4.0, true], "carry": [13.0, true],
+	"throw": [20.0, false],
 }
 # used while the sheet doesn't have an animation yet
 const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land", "swim": "fall",
-	"down": "hurt"}
+	"down": "hurt", "carried": "hurt", "carry": "run", "throw": "dig_side"}
 
 var world: World
 var pick := Pickaxe.new()
 var interactor := Interactor.new()
+var tools := PlayerTools.new()
+var role := "miner"              # Roles: miner / engineer / gunner / medic
+var carrying: Player = null      # a downed crewmate on your shoulders
+var carried_by: Player = null    # (downed) who's carrying you
+var sled: OreSled = null         # follows you once the ore sled is bought
 var input := PlayerInput.new()   # whose controls drive this player (set before adding)
 var number := 1                  # player 1, 2 ... (sets their colour)
 var display_name := ""           # shown on their name tag ("" = "P<number>")
@@ -62,7 +69,6 @@ var puppet := false              # online client: shows the host's miner, doesn'
 var ore_count := 0
 var ore_value := 0
 var coal := 0
-var ropes := 0
 var sold_value := 0            # this run: ore sold at the workbench
 var health := 3
 var max_health := 3
@@ -70,14 +76,10 @@ var frozen := false            # e.g. while the shop is open
 var light_mul := 1.0           # set by main for flicker
 var lamp_on := false
 var facing := 1
-var rope: Rope = null          # the rope being climbed
 var sprite := Sprite2D.new()
 var anim := "idle"
 
 var _anims := {}               # name -> [row, frames]
-var _rope_x := 0.0             # where the hands hold the rope, px right of the sprite centre
-var _rope_last_y := 0.0
-var _snagged := false
 var _anim_t := 0.0
 var _coyote_t := 0.0
 var _buffer_t := 0.0
@@ -99,6 +101,7 @@ var _tag := Label.new()          # name over their head (shown when there's a cr
 var downed := false              # out of health, on the ground, waiting for help
 var bleed := 0.0                 # seconds left to help them up
 var _revive_spot: ReviveSpot = null
+var _throw_t := 0.0
 
 
 func _ready() -> void:
@@ -121,40 +124,41 @@ func _ready() -> void:
 	add_child(pick)
 	interactor.player = self
 	add_child(interactor)
-	ropes = Progress.rope_capacity()
+	tools.player = self
+	add_child(tools)
 	max_health = Progress.max_health()
 	health = max_health
 
 
 func _physics_process(dt: float) -> void:
+	_update_sled()
 	if puppet:
 		_update_lamp(dt)
 		pick.show_trail(dt)
 		return
 	input.update(self)
+	_throw_t -= dt
 	if downed:
 		_lie_there(dt)
+		return
+	if tools.haul(dt):
+		_animate(dt)
 		return
 	var dir := 0.0 if frozen else input.axis("left", "right")
 	if dir != 0:
 		facing = int(sign(dir))
-	if rope == null and not frozen:
-		_try_grab_rope()
 	_roll_cool -= dt
-	if not frozen and rope == null and _roll_t <= 0.0 and _roll_cool <= 0.0 \
+	if not frozen and _roll_t <= 0.0 and _roll_cool <= 0.0 and carrying == null \
 			and input.just_pressed("roll") and pick.kind == "":
 		_start_roll(dir)
 	_liquids(dt)
-	if rope:
-		_climb(dt, dir)
-	elif _roll_t > 0.0:
+	if _roll_t > 0.0:
 		_roll(dt)
 	else:
 		_move(dt, dir)
-	if not frozen and _roll_t <= 0.0:
+	if not frozen and _roll_t <= 0.0 and carrying == null:       # (hands full while carrying)
 		pick.update(dt, dir)
-		if input.just_pressed("rope"):
-			rope_requested.emit(global_position + Vector2(0, HALF_HEIGHT))
+		tools.update(dt)
 	if not frozen and input.just_pressed("ping"):
 		pinged.emit(aim_point())
 	_update_lamp(dt)
@@ -188,7 +192,8 @@ func _move(dt: float, dir: float) -> void:
 	if _hurt_t > 0.0:
 		pass                       # knocked back: no control for a moment
 	elif dir != 0:
-		velocity.x = move_toward(velocity.x, dir * SPEED * (WATER_DRAG if in_water else 1.0), ACCEL * dt)
+		var top := SPEED * (WATER_DRAG if in_water else 1.0) * (CARRY_SPEED if carrying else 1.0)
+		velocity.x = move_toward(velocity.x, dir * top, ACCEL * dt)
 	else:
 		velocity.x = move_toward(velocity.x, 0, FRICTION * dt)
 	var fall_speed := velocity.y
@@ -259,52 +264,6 @@ func is_rolling() -> bool:
 	return _roll_t > 0.0
 
 
-## W / Up next to a rope grabs it (instead of jumping); so does Down while falling past one.
-func _try_grab_rope() -> void:
-	var up := input.pressed("up")
-	var down := input.pressed("down") and not is_on_floor()
-	if not (up or down):
-		return
-	for r: Rope in get_tree().get_nodes_in_group("rope"):
-		if r.covers(global_position):
-			rope = r
-			_rope_last_y = r.global_position.y
-			velocity = Vector2.ZERO
-			_buffer_t = 0.0
-			return
-
-
-func _climb(dt: float, dir: float) -> void:
-	var v := 0.0 if frozen else input.axis("up", "down")
-	velocity = Vector2(0, v * CLIMB_SPEED)
-	var hold_x := rope.global_position.x - _rope_x * facing     # rope in the hands, not through the body
-	if not _snagged:      # (snagged on a rock lip: let the slide below move him round it)
-		global_position.x = move_toward(global_position.x, hold_x, 200.0 * dt)
-	global_position.y += rope.global_position.y - _rope_last_y   # ride along if it moves (drill ladders)
-	_rope_last_y = rope.global_position.y
-	var y0 := global_position.y
-	move_and_slide()
-	# caught on the shaft wall: shift sideways (away from the rock, staying by the rope) next time
-	_snagged = v < 0.0 and global_position.y > y0 - 0.2 and get_slide_collision_count() > 0
-	if _snagged:
-		var n := get_slide_collision(0).get_normal()
-		global_position.x = clampf(global_position.x + signf(n.x) * 1.5, rope.global_position.x - 12.0,
-			rope.global_position.x + 12.0)
-	# you can climb until your feet are level with the anchor, so you can step off at the top
-	if global_position.y < rope.top_y() - HALF_HEIGHT - 6.0:
-		global_position.y = rope.top_y() - HALF_HEIGHT - 6.0
-	var jump_off := input.just_pressed("jump") and not input.pressed("up")
-	var off_bottom := global_position.y > rope.bottom_y() and v > 0
-	var step_off := dir != 0 and v == 0
-	var at_top := global_position.y < rope.top_y() - HALF_HEIGHT + 4.0
-	if jump_off or off_bottom or step_off or not is_instance_valid(rope):
-		rope = null
-		if jump_off:
-			velocity = Vector2(facing * 120.0, JUMP_V * 0.6)
-		elif step_off and at_top:
-			velocity = Vector2(dir * SPEED, JUMP_V * 0.55)   # little hop onto the ledge
-
-
 # ---------------------------------------------------------------- controls for stations
 # (what this player is pointing at / pressing; per player so co-op can feed them from the network)
 
@@ -330,13 +289,23 @@ func wants_leave() -> bool:
 
 # ---------------------------------------------------------------- bag
 
-func add_ore(kind: int) -> void:
+## Room left in the bag (ore and coal count alike).
+func bag_space() -> int:
+	return BAG + Progress.bag_bonus() + Roles.bag_bonus(role) - ore_count - coal
+
+
+## Puts ore in the bag; false (and a word to the player) when it's full.
+func add_ore(kind: int) -> bool:
+	if bag_space() <= 0:
+		tell("Bag full! Sell your ore at the drill's workbench.")
+		return false
 	if kind == World.COAL:
 		coal += 1
 	else:
 		ore_count += 1
 		ore_value += World.ORES[kind][1]
 	bag_changed.emit()
+	return true
 
 
 func add_value(value: int) -> void:
@@ -362,9 +331,49 @@ func take_coal() -> int:
 	return c
 
 
-func refill_ropes() -> void:
-	ropes = maxi(ropes, Progress.rope_capacity())
+## Restocked at the workbench (flares, dynamite).
+func restock() -> void:
+	tools.restock()
 	bag_changed.emit()
+
+
+func tell(text: String) -> void:
+	message.emit(text)
+
+
+func start_throw() -> void:
+	_throw_t = 0.3
+	_anim_t = 0.0
+
+
+# ---------------------------------------------------------------- carrying the downed
+
+## Hoists a downed crewmate onto your shoulders (they bleed slower while carried).
+func carry(other: Player) -> void:
+	if carrying or not other.downed or other.carried_by:
+		return
+	carrying = other
+	other.carried_by = self
+	Sfx.play("land", global_position, -6.0)
+
+
+func drop_carried() -> void:
+	if carrying == null:
+		return
+	var other := carrying
+	carrying = null
+	other.carried_by = null
+	other.global_position = global_position + Vector2(facing * 14.0, 0)
+	other.velocity = Vector2.ZERO
+
+
+## The ore sled (an upgrade) trails behind you; on every machine, it's only for show.
+func _update_sled() -> void:
+	if sled == null and Progress.level("sled") > 0 and is_inside_tree():
+		sled = OreSled.new()
+		sled.player = self
+		get_parent().add_child.call_deferred(sled)
+		tree_exiting.connect(sled.queue_free)
 
 
 func lose_bag() -> void:
@@ -381,8 +390,8 @@ func hurt(damage: int, from: Vector2) -> void:
 		return
 	health = maxi(health - damage, 0)
 	_invuln_t = INVULNERABLE
+	drop_carried()                      # (a hit makes you drop whoever you carry)
 	_hurt_t = 0.3
-	rope = null
 	var away := signf(global_position.x - from.x)
 	velocity = Vector2((away if away != 0 else -facing) * 180.0, -220.0)
 	Sfx.play("player_hurt", global_position)
@@ -396,7 +405,6 @@ func hurt(damage: int, from: Vector2) -> void:
 func _go_down() -> void:
 	downed = true
 	bleed = BLEED_OUT
-	rope = null
 	_revive_spot = ReviveSpot.new()
 	_revive_spot.downed = self
 	add_child(_revive_spot)
@@ -404,10 +412,15 @@ func _go_down() -> void:
 
 
 func _lie_there(dt: float) -> void:
-	bleed -= dt
-	velocity.x = move_toward(velocity.x, 0.0, FRICTION * dt)
-	velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
-	move_and_slide()
+	bleed -= dt * (0.5 if carried_by else 1.0)       # carried, you bleed slower
+	if carried_by:
+		global_position = carried_by.global_position + Vector2(0, -26)
+		facing = carried_by.facing
+		velocity = Vector2.ZERO
+	else:
+		velocity.x = move_toward(velocity.x, 0.0, FRICTION * dt)
+		velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
+		move_and_slide()
 	sprite.visible = true
 	_animate(dt)
 	if bleed <= 0.0:
@@ -415,12 +428,12 @@ func _lie_there(dt: float) -> void:
 		bled_out.emit()
 
 
-## A crewmate helped them up: back on their feet with a sliver of health.
-func revive() -> void:
+## A crewmate helped them up: back on their feet with a sliver of health (more from a medic).
+func revive(by: Player = null) -> void:
 	if not downed:
 		return
 	_get_up()
-	health = 1
+	health = Roles.revive_health(by.role) if by else 1
 	_invuln_t = 2.0
 	Sfx.play("repair", global_position, -4.0)
 	health_changed.emit(health, max_health)
@@ -429,6 +442,9 @@ func revive() -> void:
 
 func _get_up() -> void:
 	downed = false
+	if carried_by:
+		carried_by.carrying = null
+		carried_by = null
 	if _revive_spot:
 		_revive_spot.queue_free()
 		_revive_spot = null
@@ -454,7 +470,6 @@ func _setup_sprite() -> void:
 	for name in info.anims:
 		_anims[name] = [int(info.anims[name].row), int(info.anims[name].frames)]
 		rows = maxi(rows, int(info.anims[name].row) + 1)
-	_rope_x = float(info.get("climb_rope_x", 0.0))
 	sprite.texture = Art.lit(SHEET)
 	sprite.hframes = int(info.columns)
 	sprite.vframes = rows
@@ -547,7 +562,11 @@ func _animate(dt: float) -> void:
 	var dig := pick.anim()
 	var want := "idle"
 	if downed:
-		want = "down"
+		want = "carried" if carried_by else "down"
+	elif carrying:
+		want = "carry" if absf(velocity.x) > 15.0 or not is_on_floor() else "idle"
+	elif _throw_t > 0.0:
+		want = "throw"
 	elif dig != "":
 		want = dig
 	elif _hurt_t > 0.0:
@@ -556,8 +575,6 @@ func _animate(dt: float) -> void:
 		want = "roll"
 	elif in_water and not is_on_floor():
 		want = "swim"
-	elif rope:
-		want = "climb"
 	elif not is_on_floor():
 		want = "jump" if velocity.y < 0 else "fall"
 	elif _land_t > 0.0 and absf(velocity.x) < 60.0:
@@ -578,8 +595,6 @@ func _animate(dt: float) -> void:
 		var rate: float = spd[0]
 		if anim == "run":
 			rate *= clampf(absf(velocity.x) / SPEED, 0.4, 1.2)
-		elif anim == "climb":
-			rate *= absf(velocity.y) / CLIMB_SPEED
 		_anim_t += dt * rate
 		frame = int(_anim_t) % int(a[1]) if spd[1] else mini(int(_anim_t), int(a[1]) - 1)
 	sprite.frame = a[0] * sprite.hframes + frame
@@ -612,8 +627,8 @@ static func _cone_texture() -> ImageTexture:
 
 func net_state() -> Array:
 	return [peer, number, display_name, sprite.frame, facing, sprite.visible, visible, health, max_health, breath,
-		ore_count, ore_value, coal, ropes, sold_value, _lamp_dir, pick.kind, pick.trail_age(),
-		interactor.prompt_text(), frozen, downed, bleed]
+		ore_count, ore_value, coal, 0, sold_value, _lamp_dir, pick.kind, pick.trail_age(),
+		interactor.prompt_text(), frozen, downed, bleed, tools.net_state(), role, carrying != null]
 
 
 func net_apply(s: Array) -> void:
@@ -634,12 +649,11 @@ func net_apply(s: Array) -> void:
 	if breath != s[9]:
 		breath = s[9]
 		breath_changed.emit(breath / BREATH)
-	var bag := [ore_count, ore_value, coal, ropes, sold_value]
+	var bag := [ore_count, ore_value, coal, 0, sold_value]
 	if bag != s.slice(10, 15):
 		ore_count = s[10]
 		ore_value = s[11]
 		coal = s[12]
-		ropes = s[13]
 		sold_value = s[14]
 		bag_changed.emit()
 	_lamp_dir = s[15]
@@ -648,3 +662,5 @@ func net_apply(s: Array) -> void:
 	frozen = s[19]
 	downed = s[20]
 	bleed = s[21]
+	tools.net_apply(s[22])
+	role = s[23]

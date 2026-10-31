@@ -9,7 +9,10 @@ noise spectrum has a whole number of cycles per loop, events near the end wrap r
 to the start, and reverb runs in steady state, so they loop seamlessly. Each loop is
 normalized to its own quieter peak (see the finish_loop() call in its function).
 
-Run:  python3 tools/gen_sfx.py
+Later additions with the same conventions: fire_crackle, generator_hum, fuse, flare_burn,
+borer_drill and drone_buzz are loops (finish_loop); the rest are one-shots.
+
+Run:  python3 tools/gen_sfx.py [name ...]
 """
 import os
 import wave
@@ -1460,6 +1463,456 @@ def music_ending(v=0):
     return finish(x, peak_db=-12.0, fade_in=1.0, fade_out=6.0)
 
 
+# ----------------------------------------------------------------------------- fire / power / tools
+
+def fire_crackle(v=0):
+    rng = np.random.default_rng(9000 + v)
+    T = 3.0
+    t = times(secs(T))
+    n = len(t)
+    roar = loop_noise(n, rng, lowband(240)) * (0.65 + 0.35 * loop_rough(n, rng, 5))
+    lick = loop_noise(n, rng, band(750, 0.9)) * (0.3 + 0.7 * loop_rough(n, rng, 9)) ** 2   # flames licking
+    buf, m = np.zeros(2 * n), secs(0.05)
+    tm = times(m)
+    for _ in range(80):                                                # small pops and ticks
+        f = np.exp(rng.uniform(np.log(1200), np.log(7000)))
+        pop = burst(m, rng, 0.0002, rng.uniform(0.0015, 0.006), "bp", f, 1.0)
+        buf += rng.uniform(0.2, 1.0) * place(2 * n, rng.uniform(0, T), pop)
+    for _ in range(9):                                                 # bigger snaps of wood
+        f = rng.uniform(500, 1100)
+        snap = burst(m, rng, 0.0003, 0.004, "bp", 2500, 0.8)
+        snap = snap + 0.7 * unit(modes(m, [f, 1.7 * f], [0.012, 0.008], [1.0, 0.5]))
+        snap = snap + 0.5 * osc(glide(200, 80, m, 0.02)) * env(m, 0.001, 0.015)
+        buf += rng.uniform(0.5, 1.0) * place(2 * n, rng.uniform(0, T), snap)
+    return finish_loop(unit(roar) + 0.3 * unit(lick) + 0.6 * unit(fold(buf, n)), -14.0)
+
+
+def fire_ignite(v=0):
+    rng = np.random.default_rng(9100 + v)
+    n, puff = secs(0.9), 0.07
+    t = times(n)
+    m = n - secs(puff)
+    scratch = unit(svf(noise(n, rng) * env(n, 0.003, 0.025) * rough(n, rng, 120), glide(2500, 5500, n, 0.06), q=2.0))
+    thump = place(n, puff, osc(glide(115, 45, m, 0.08)) * env(m, 0.003, 0.1))
+    whump = burst(n, rng, 0.01, 0.1, "lp", 350, delay=puff)
+    amp = np.clip((t - puff) / 0.12, 0, 1) ** 1.5 * np.exp(-np.maximum(t - 0.3, 0) / 0.3)
+    cutoff = 300 + 2800 * np.exp(-((t - 0.28) / 0.14) ** 2)
+    whoosh = unit(svf(noise(n, rng) * amp, cutoff, q=0.9, mode="lp"))   # the gas catches
+    roar = biquad(noise(n, rng), "lp", 180) * amp
+    crackle = grains(n, rng, 32, 0.15, 0.85, 1800, 8000, length=(0.0005, 0.0015), decay=0.4, q=0.8, skew=1.0)
+    x = 0.35 * scratch + thump + 0.6 * unit(whump) + 0.8 * whoosh + 0.3 * unit(roar) + 0.45 * unit(crackle)
+    return finish(x, fade_out=0.15)
+
+
+def extinguish(v=0):
+    rng = np.random.default_rng(9200 + v)
+    n = secs(1.4)
+    t = times(n)
+    amp = (np.clip(t / 0.025, 0, 1) * (1 - 0.3 * np.clip((t - 0.1) / 0.9, 0, 1))
+           * np.exp(-np.maximum(t - 0.95, 0) / 0.11) * (1 + 0.1 * wobble(n, rng, 18)))
+    src = noise(n, rng)
+    hiss = biquad(src, "hp", 1800) + 0.8 * biquad(src, "bp", 5500, 0.5)
+    jet = svf(noise(n, rng), glide(5200, 3200, n, 1.1), q=2.0)          # pressure falling
+    roar = biquad(noise(n, rng), "lp", 600)
+    jets = (unit(hiss) + 0.35 * unit(jet) + 0.25 * unit(roar)) * amp
+    puff = burst(n, rng, 0.002, 0.05, "lp", 700)
+    valve = unit(modes(n, [850, 1450, 2300], [0.03, 0.02, 0.012], [1.0, 0.6, 0.4])) + burst(n, rng, 0.0002, 0.002, "hp", 3000)
+    spit = unit(grains(n, rng, 40, 0.9, 1.35, 2000, 8000, length=(0.0008, 0.003), decay=0.3, skew=1.0))  # frost sputter
+    return finish(jets + 0.45 * puff + 0.35 * valve + 0.2 * spit, fade_out=0.12)
+
+
+def generator_hum(v=0):
+    rng = np.random.default_rng(9300 + v)
+    T = 2.0
+    t = times(secs(T))
+    n = len(t)
+    ph = TAU * per(60, T) * t + 0.08 * lfo(t, 1, 0.0, T)
+    hum = sum(a * np.sin(k * ph + 0.3 * k) for k, a in [(1, 0.6), (2, 1.0), (3, 0.4), (4, 0.3), (5, 0.18), (6, 0.12), (8, 0.06)])
+    hum *= 0.85 + 0.15 * lfo(t, 2, 0.5, T)
+    throb = loop_noise(n, rng, lowband(100)) * (0.6 + 0.4 * lfo(t, 3, 1.0, T))
+    whine = (np.sin(TAU * per(1180, T) * t + 0.5 * lfo(t, 2, 0.0, T)) + 0.3 * np.sin(TAU * per(2360, T) * t)) * (0.75 + 0.25 * lfo(t, 3, 1.3, T))
+    fizz = loop_noise(n, rng, band(2600, 0.6)) * loop_rough(n, rng, 70) * (0.6 + 0.4 * lfo(t, 4, 0.2, T))
+    x = unit(hum) + 0.35 * throb + 0.07 * whine + 0.05 * unit(fizz)
+    return finish_loop(x, -14.0)
+
+
+def spark(v=0):
+    rng = np.random.default_rng(9400 + v)
+    n = secs(0.35)
+    t = times(n)
+    p = 1 + 0.15 * (v - 1)
+    snap = burst(n, rng, 0.0002, 0.003, "hp", 3000)
+    crackle = unit(grains(n, rng, 70 + 15 * v, 0.0, 0.16, 2500, 9500, length=(0.0003, 0.0015), decay=0.06, q=0.8))
+    f0 = glide(2400 * p, 170, n, 0.14)                                  # arc collapsing to mains buzz
+    src = harmonic(f0, tilt=0.6, fmax=9000)
+    zap = np.tanh(2.0 * unit(biquad(src, "bp", 3200 * p, 0.8) + 0.3 * unit(src)))
+    zap = zap * env(n, 0.0005, 0.05) * (0.5 + 0.5 * rough(n, rng, 220))
+    ring = unit(modes(n, np.array([4300, 6200]) * p, [0.012, 0.008], [1.0, 0.5]))
+    pop = osc(glide(320, 110, n, 0.02)) * env(n, 0.001, 0.015)
+    x = 0.8 * snap + 0.7 * crackle + 0.8 * zap + 0.25 * ring + 0.3 * pop
+    return finish(x, fade_out=0.09)
+
+
+def power_down(v=0):
+    rng = np.random.default_rng(9500 + v)
+    n = secs(1.5)
+    t = times(n)
+    f0 = 52 + 780 * np.exp(-t / 0.33)                                   # flywheel winding down
+    whine = biquad(harmonic(f0, tilt=1.0, fmax=3500), "lp", 2500)
+    whine = unit(whine) * np.exp(-t / 0.6) * np.clip(t / 0.01, 0, 1)
+    hum = np.sin(TAU * np.cumsum(60 * (1 - 0.4 * np.clip(t / 1.3, 0, 1))) / SR)
+    hum = (hum + 0.5 * np.sin(2 * TAU * np.cumsum(60 * (1 - 0.4 * np.clip(t / 1.3, 0, 1))) / SR)) * np.exp(-t / 0.55)
+    rate = 20 * (3.0 / 20) ** np.clip(t / 1.3, 0, 1)                    # brownout stutter, slowing down
+    gate = 0.45 + 0.55 * (np.sin(TAU * np.cumsum(rate) / SR) > -0.2)
+    gate = biquad(gate, "lp", 400)
+    m = n - secs(1.28)
+    relay = place(n, 1.28, modes(m, [140, 330, 720, 1500], [0.07, 0.04, 0.025, 0.012], [1.0, 0.6, 0.4, 0.25]))
+    relay += 0.5 * burst(n, rng, 0.0003, 0.006, "lp", 1800, delay=1.28)
+    x = (0.8 * whine + 0.5 * unit(hum)) * gate + 0.4 * unit(relay)
+    return finish(x, fade_out=0.15)
+
+
+def power_up(v=0):
+    rng = np.random.default_rng(9600 + v)
+    n = secs(1.3)
+    t = times(n)
+    clunk = unit(modes(n, [150, 340, 760, 1600], [0.06, 0.035, 0.02, 0.01], [1.0, 0.6, 0.4, 0.25])) + 0.5 * burst(n, rng, 0.0003, 0.006, "lp", 1800)
+    e = np.maximum(t - 0.06, 0)
+    f0 = 55 + 900 * (1 - np.exp(-e / 0.3))                              # flywheel spinning up
+    whine = biquad(harmonic(f0, tilt=1.0, fmax=3500), "lp", 2500)
+    whine = unit(whine) * np.clip(e / 0.05, 0, 1) * np.exp(-np.maximum(t - 0.5, 0) / 0.2)
+    ph = TAU * np.cumsum(60 * (1 + 0.0 * t)) / SR
+    hum = (np.sin(ph) + 0.5 * np.sin(2 * ph) + 0.2 * np.sin(3 * ph)) * np.clip((t - 0.15) / 0.4, 0, 1)
+    rate = 3 + 17 * np.clip(t / 0.5, 0, 1)                              # lights flicker, then catch
+    gate = 0.5 + 0.5 * (np.sin(TAU * np.cumsum(rate) / SR) > -0.2)
+    gate = biquad(np.where(t < 0.55, gate, 1.0), "lp", 400)
+    x = 0.5 * clunk + (0.7 * whine + 0.35 * unit(hum)) * gate
+    return finish(x, fade_out=0.25)
+
+
+def fuse(v=0):
+    rng = np.random.default_rng(9700 + v)
+    T = 2.0
+    t = times(secs(T))
+    n = len(t)
+    hiss = loop_noise(n, rng, band(5500, 1.1)) * (0.6 + 0.4 * loop_rough(n, rng, 30))
+    fizz = loop_noise(n, rng, band(2800, 0.7)) * loop_rough(n, rng, 90) ** 2
+    spit = loop_grains(n, rng, 170, 2000, 9000, length=(0.0005, 0.003))
+    sputter = loop_grains(n, rng, 14, 600, 1800, length=(0.003, 0.008))
+    return finish_loop(unit(hiss) + 0.5 * unit(fizz) + 0.7 * unit(spit) + 0.3 * unit(sputter), -16.0)
+
+
+def throw(v=0):
+    rng = np.random.default_rng(9800 + v)
+    n = secs(0.4)
+    p = np.arange(n) / n
+    amp = np.sin(np.pi * p ** 0.7) ** 2
+    centre = 300 + 1800 * np.sin(np.pi * p ** 0.6) ** 2
+    whoosh = unit(svf(noise(n, rng) * amp, centre, q=1.8))
+    low = unit(biquad(noise(n, rng) * amp, "lp", 250))
+    grip = burst(n, rng, 0.002, 0.02, "bp", 1500, 0.8) + 0.6 * burst(n, rng, 0.001, 0.01, "bp", 3200, 1.0)
+    return finish(0.75 * whoosh + 0.35 * low + 0.3 * grip, fade_out=0.1)
+
+
+def flare_burn(v=0):
+    rng = np.random.default_rng(9900 + v)
+    T = 3.0
+    t = times(secs(T))
+    n = len(t)
+    hiss = loop_noise(n, rng, band(6500, 1.0)) * (0.7 + 0.3 * loop_rough(n, rng, 20))
+    fizz = loop_noise(n, rng, band(3000, 0.8)) * loop_rough(n, rng, 70)
+    spit = loop_grains(n, rng, 230, 3000, 10000, length=(0.0005, 0.002))
+    body = loop_noise(n, rng, band(900, 0.8)) * (0.5 + 0.5 * lfo(t, 2, 0.4, T)) * (0.5 + 0.5 * loop_rough(n, rng, 8))
+    flicker = 0.85 + 0.15 * lfo(t, 7, 1.1, T) * lfo(t, 3, 0.2, T)
+    x = (unit(hiss) + 0.45 * unit(fizz) + 0.5 * unit(spit) + 0.3 * unit(body)) * flicker
+    return finish_loop(x, -15.0)
+
+
+def grapple_fire(v=0):
+    rng = np.random.default_rng(10000 + v)
+    n, t0 = secs(1.0), 0.03
+    t = times(n)
+    m = n - secs(t0)
+    clack = unit(modes(n, [1500, 2400, 3600], [0.02, 0.015, 0.01], [1.0, 0.6, 0.4])) + 0.5 * burst(n, rng, 0.0002, 0.002, "hp", 3500)
+    tm = times(m)
+    f = glide(640, 230, m, 0.3) * (1 + 0.1 * np.sin(TAU * 34 * tm) * np.exp(-tm / 0.12))   # spring twang
+    twang = place(n, t0, osc(f) * env(m, 0.002, 0.14))
+    metal = unit(modes(n, [420, 1130, 1950, 2800], [0.25, 0.12, 0.08, 0.05], [1.0, 0.6, 0.4, 0.3], delay=t0)
+                 + modes(n, [423, 1141, 1960, 2820], [0.25, 0.12, 0.08, 0.05], [0.6, 0.4, 0.25, 0.2], delay=t0))
+    thump = place(n, t0, osc(glide(190, 70, m, 0.04)) * env(m, 0.002, 0.05))
+    air = unit(svf(noise(n, rng) * env(n, 0.005, 0.1, delay=t0), glide(4500, 800, n, 0.3), q=1.5))
+    rattle, tc = np.zeros(n), t0 + 0.06                                   # chain paying out
+    while tc < 0.85:
+        r = rng.uniform(0.85, 1.2)
+        link = modes(n, np.array([2100, 3300, 4700]) * r, [0.02, 0.012, 0.008], [1.0, 0.6, 0.35], delay=tc)
+        rattle += np.exp(-(tc - t0) / 0.4) * link
+        tc += 1 / (rng.uniform(26, 42))
+    x = 0.5 * clack + 0.7 * twang + 0.35 * metal + 0.8 * thump + 0.4 * air + 0.4 * unit(rattle)
+    return finish(reverb(x, mix=0.15), fade_out=0.15)
+
+
+def grapple_hit(v=0):
+    rng = np.random.default_rng(10100 + v)
+    n = secs(0.7)
+    ratios = np.array([1.0, 1.52, 2.76, 3.43, 5.40]) * (1 + rng.uniform(-0.015, 0.015, 5))
+    f = 1250 * ratios
+    clang = unit(modes(n, f, [0.2, 0.14, 0.1, 0.06, 0.04], [1.0, 0.7, 0.9, 0.5, 0.35])
+                 + modes(n, f * 1.003 + 1.1, [0.2, 0.14, 0.1, 0.06, 0.04], [0.6, 0.4, 0.5, 0.3, 0.2]))
+    click = burst(n, rng, 0.0002, 0.002, "hp", 4000)
+    bite = burst(n, rng, 0.0005, 0.015, "bp", 2000, 0.8)               # steel biting into rock
+    thump = osc(glide(170, 60, n, 0.05)) * env(n, 0.001, 0.05)
+    crumble = unit(grains(n, rng, 40, 0.0, 0.3, 500, 4500, decay=0.1))
+    jingle = np.zeros(n)
+    for tc, a in [(0.12, 0.7), (0.2, 0.5), (0.3, 0.35), (0.42, 0.2)]:   # the chain settling
+        r = rng.uniform(0.85, 1.2)
+        jingle += a * modes(n, np.array([2100, 3300, 4700]) * r, [0.03, 0.02, 0.012], [1.0, 0.6, 0.35], delay=tc)
+    x = np.tanh(1.4 * (0.8 * click + 0.6 * bite + 0.7 * clang + 0.7 * thump)) + 0.3 * crumble + 0.25 * unit(jingle)
+    return finish(reverb(x, mix=0.15), fade_out=0.15)
+
+
+def quake(v=0):
+    rng = np.random.default_rng(10200 + v)
+    n = secs(3.0)
+    t = times(n)
+    swell = np.clip(t / 0.5, 0, 1) ** 1.2 * np.clip((3.0 - t) / 1.1, 0, 1)
+    shake = 0.65 + 0.35 * rough(n, rng, 7)
+    low = unit(biquad(biquad(noise(n, rng), "lp", 70), "lp", 70)) + 0.5 * unit(biquad(noise(n, rng), "bp", 38, 1.0))
+    sub = osc(glide(24, 32, n, 2.5)) * rough(n, rng, 5)
+    mid = unit(biquad(noise(n, rng) * rough(n, rng, 10), "bp", 190, 0.8))
+    cracks = np.zeros(n)
+    for tc, a in [(0.45, 1.0), (0.95, 0.6), (1.3, 0.9), (1.85, 0.7), (2.3, 0.5)]:   # rock splitting
+        m = n - secs(tc)
+        thump = place(n, tc, osc(glide(110, 42, m, 0.06)) * env(m, 0.002, 0.08))
+        c = (burst(n, rng, 0.0003, 0.012, "hp", 1500, delay=tc) + 0.9 * burst(n, rng, 0.001, 0.03, "bp", 1100, 0.8, delay=tc)
+             + 0.6 * thump)
+        cracks += a * c
+    debris = unit(grains(n, rng, 140, 0.3, 2.8, 300, 4000, decay=1e9, skew=1.0))
+    x = (unit(low) + 0.4 * sub) * swell * shake + 0.35 * unit(mid) * swell + 0.9 * unit(cracks) + 0.2 * debris * swell
+    return finish(reverb(np.tanh(1.2 * x), size=2.0, fb=0.7, mix=0.25, damp=1500), fade_out=0.35)
+
+
+def rubble(v=0):
+    rng = np.random.default_rng(10300 + v)
+    n = secs(1.5)
+    t = times(n)
+    slide_amp = np.clip(t / 0.08, 0, 1) * np.exp(-t / 0.5) * rough(n, rng, 35)
+    slide = unit(biquad(noise(n, rng) * slide_amp, "bp", 750, 0.8))
+    m = secs(0.35)
+    rocks = np.zeros(n)
+    for _ in range(30):                                                # rocks bouncing down the pile
+        tk = 0.02 + 1.2 * rng.random() ** 1.5
+        a = rng.uniform(0.3, 1.0) * np.exp(-tk / 0.8)
+        f = rng.uniform(70, 230)
+        thump = osc(glide(f, f * 0.45, m, 0.04)) * env(m, 0.001, 0.05)
+        r = rng.uniform(600, 1900)
+        stone = modes(m, np.array([1.0, 1.6, 2.3]) * r, [0.02, 0.012, 0.008], [1.0, 0.5, 0.3])
+        tick = burst(m, rng, 0.0003, 0.006, "bp", rng.uniform(1200, 3500), 1.0)
+        rocks += a * place(n, tk, 0.7 * thump + 0.5 * unit(stone) + 0.6 * tick)
+    debris = unit(grains(n, rng, 170, 0.0, 1.4, 400, 4500, decay=0.5))
+    settle = sum(place(n, tc, a * unit(modes(m, [rng.uniform(900, 2200)], [0.012], [1.0])))
+                 for tc, a in [(1.15, 0.3), (1.24, 0.2), (1.3, 0.25), (1.38, 0.12)])
+    x = 0.45 * slide + 0.9 * unit(rocks) + 0.45 * debris + 0.25 * settle
+    return finish(reverb(x, size=1.2, fb=0.6, mix=0.2), fade_out=0.15)
+
+
+def radio(v=0):
+    rng = np.random.default_rng(10400 + v)
+    n = secs(1.4)
+    t = times(n)
+    squelch = np.zeros(n)
+    for t0, dur, a in [(0.0, 0.14, 1.0), (1.1, 0.12, 0.7)]:             # keying up / dropping the carrier
+        m = secs(dur)
+        squelch += a * place(n, t0, noise(m, rng) * np.exp(-times(m) / (dur * 0.35)) * np.clip(times(m) / 0.003, 0, 1))
+    bed = np.clip((t - 0.1) / 0.05, 0, 1) * np.clip((1.12 - t) / 0.05, 0, 1)
+    static = noise(n, rng) * bed * (0.2 + 0.2 * rough(n, rng, 25))
+    crackle = unit(grains(n, rng, 40, 0.15, 1.05, 1500, 6000, length=(0.0005, 0.003), decay=1e9, skew=1.0)) * bed
+    beeps = np.zeros(n)
+    for t0, dur, f in [(0.2, 0.09, 1000.0), (0.34, 0.09, 1000.0), (0.5, 0.2, 1400.0)]:
+        m = secs(dur)
+        tm = times(m)
+        tone = np.tanh(2.0 * (osc(f, m) + 0.2 * osc(2 * f, m)))
+        beeps += place(n, t0, tone * np.clip(tm / 0.004, 0, 1) * np.clip((dur - tm) / 0.006, 0, 1))
+    x = 0.5 * unit(squelch) + 0.35 * static + 0.25 * crackle + 0.6 * beeps
+    x = biquad(biquad(np.tanh(1.5 * x), "hp", 350), "lp", 3400)           # small speaker
+    return finish(x, fade_out=0.05)
+
+
+def contract_done(v=0):
+    rng = np.random.default_rng(10500 + v)
+    n = secs(1.7)
+    stamp = osc(glide(130, 58, n, 0.05)) * env(n, 0.002, 0.06) + 0.6 * burst(n, rng, 0.001, 0.025, "bp", 900, 0.8)
+    chime = np.zeros(n)
+    for t0, f, a in [(0.14, 523.25, 0.9), (0.14, 783.99, 0.7), (0.24, 659.25, 0.55), (0.34, 1046.5, 1.0)]:   # C5 G5 E5 C6
+        chime += a * modes(n, [f, f * 1.002, 2 * f, 2.76 * f, 4.1 * f], [0.9, 0.85, 0.5, 0.25, 0.1],
+                           [1.0, 0.5, 0.25, 0.12, 0.05], delay=t0)
+    tm = times(n)
+    pad = sum(np.sin(TAU * f * tm) for f in (261.63, 329.63, 392.0)) * np.clip((tm - 0.1) / 0.3, 0, 1) * np.exp(-np.maximum(tm - 0.4, 0) / 0.5)
+    x = 0.6 * stamp + 0.8 * unit(chime) + 0.12 * pad
+    return finish(reverb(x, size=1.4, fb=0.7, mix=0.3, damp=6000), fade_out=0.3)
+
+
+# ----------------------------------------------------------------------------- creatures (new)
+
+def borer_drill(v=0):
+    rng = np.random.default_rng(10600 + v)
+    T = 2.0
+    t = times(secs(T))
+    n = len(t)
+    pulse = (0.5 + 0.5 * np.cos(TAU * per(85, T) * t)) ** 2            # stridulation pulses
+    chirr = loop_noise(n, rng, band(3200, 0.5)) * pulse
+    mand = (0.5 + 0.5 * np.cos(TAU * per(11, T) * t + 0.6 * lfo(t, 1, 0.0, T))) ** 2
+    grind = loop_noise(n, rng, band(900, 0.7)) * mand * loop_rough(n, rng, 25)
+    scrape = loop_noise(n, rng, band(5200, 0.6)) * (0.4 + 0.6 * pulse) * loop_rough(n, rng, 60)
+    ticks = loop_grains(n, rng, 150, 1500, 6000, length=(0.001, 0.004))
+    tone = np.sin(TAU * per(4600, T) * t) * pulse * (0.7 + 0.3 * lfo(t, 5, 0.5, T))
+    gate = 0.75 + 0.25 * np.cos(TAU * per(6, T) * t)
+    x = (unit(chirr) + 0.7 * unit(grind) + 0.3 * unit(scrape) + 0.15 * unit(ticks) + 0.08 * tone) * gate
+    return finish_loop(np.tanh(1.8 * unit(x)), -14.0)           # squash the peaks: a dense, constant grind
+
+
+def borer_hiss(v=0):
+    rng = np.random.default_rng(10700 + v)
+    n = secs(0.8)
+    t = times(n)
+    amp = np.clip(t / 0.04, 0, 1) * np.exp(-np.maximum(t - 0.25, 0) / 0.3) * (0.75 + 0.25 * rough(n, rng, 20))
+    hiss = unit(formants(noise(n, rng), [(3200, 6, 1.0), (5200, 6, 0.8), (7500, 5, 0.5)])) * amp
+    rasp = unit(biquad(noise(n, rng) * rough(n, rng, 35), "bp", 1200, 1.0)) * amp
+    click = unit(modes(n, [1800, 3000, 4400], [0.01, 0.008, 0.005], [1.0, 0.6, 0.3])) + 0.5 * burst(n, rng, 0.0002, 0.002, "hp", 3500)
+    return finish(hiss + 0.3 * rasp + 0.3 * click, fade_out=0.12)
+
+
+def mite_skitter(v=0):
+    rng = np.random.default_rng(10800 + v)
+    n = secs(0.55)
+    p = 1 + 0.12 * (v - 1)
+    m = secs(0.012)
+    x = np.zeros(n)
+    scr = np.zeros(n)
+    tc = 0.01 + 0.03 * rng.random()
+    for _ in range(3):                                                  # a few darting bursts
+        dur, rate = rng.uniform(0.07, 0.14), rng.uniform(70, 115) * p
+        for k in range(int(dur * rate)):
+            tk = tc + k / rate * rng.uniform(0.9, 1.1)
+            f = rng.uniform(2500, 6500) * p
+            tap = burst(m, rng, 0.0002, rng.uniform(0.001, 0.002), "bp", f, 1.5)
+            tap = tap + 0.4 * unit(modes(m, [f * 1.3], [0.003], [1.0]))
+            x += np.sin(np.pi * k / max(int(dur * rate) - 1, 1)) ** 0.5 * rng.uniform(0.4, 1.0) * place(n, tk, tap)
+        mb = secs(dur)
+        scr += place(n, tc, noise(mb, rng) * np.sin(np.pi * np.arange(mb) / mb))
+        tc += dur + rng.uniform(0.04, 0.1)
+    scr = unit(biquad(scr * rough(n, rng, 90), "bp", 4500 * p, 0.8))
+    return finish(unit(x) + 0.3 * scr, fade_out=0.06)
+
+
+def brood_roar(v=0):
+    rng = np.random.default_rng(10900 + v)
+    n = secs(1.6)
+    t = times(n)
+    f0 = np.interp(t, [0, 0.2, 0.9, 1.6], [85, 175, 125, 55])
+    f0 = f0 * (1 + 0.05 * wobble(n, rng, 4) + 0.03 * wobble(n, rng, 55))
+    src = sum(a * harmonic(f0 * r, tilt=0.8, fmax=4500) for r, a in [(1.0, 1.0), (1.02, 0.6), (0.5, 0.6)])
+    src = src * (0.35 + 0.65 * rough(n, rng, 45))                      # rasp
+    voice = unit(formants(src, [(700 * (1 + 0.25 * wobble(n, rng, 3)), 4, 1.0),
+                                (1250 * (1 + 0.15 * wobble(n, rng, 3)), 5, 0.7), (2600, 6, 0.3)]))
+    breath = unit(biquad(noise(n, rng), "bp", 900, 0.6)) * rough(n, rng, 15)
+    gurgle = unit(bubbles(n, rng, 10, 0.1, 1.4, 90, 260))
+    amp = np.clip(t / 0.08, 0, 1) * np.clip((1.6 - t) / 0.5, 0, 1)
+    x = np.tanh(2.5 * voice) * amp + 0.25 * breath * amp + 0.25 * gurgle
+    return finish(reverb(x, size=1.8, fb=0.7, mix=0.3, damp=3000), fade_out=0.2)
+
+
+def brood_spit(v=0):
+    rng = np.random.default_rng(11000 + v)
+    n, spit_t = secs(0.7), 0.17
+    t = times(n)
+    gather = unit(bubbles(n, rng, 9, 0.0, 0.16, 120, 420)) * np.clip((spit_t - t) / 0.02, 0, 1)
+    wet = biquad(noise(n, rng), "lp", 2200) * env(n, 0.003, 0.05, delay=spit_t)
+    squelch = unit(svf(wet, np.interp(t, [0, spit_t, spit_t + 0.04, spit_t + 0.2], [300, 300, 1700, 400]), q=4))
+    jet = unit(svf(noise(n, rng) * env(n, 0.01, 0.09, delay=spit_t), glide(2800, 600, n, spit_t + 0.35), q=1.8)) * 0.5
+    pop = place(n, spit_t, osc(glide(220, 90, n - secs(spit_t), 0.03)) * env(n - secs(spit_t), 0.001, 0.03))
+    spatter = unit(grains(n, rng, 20, spit_t + 0.3, 0.68, 1200, 5000, length=(0.002, 0.006), decay=0.15, q=3, skew=1.0)) * 0.35
+    x = 0.45 * gather + 0.9 * squelch + 0.6 * jet + 0.5 * pop + spatter
+    return finish(x, fade_out=0.1)
+
+
+def brood_die(v=0):
+    rng = np.random.default_rng(11100 + v)
+    n = secs(2.3)
+    t = times(n)
+    f0 = glide(120, 26, n, 1.8) * (1 + 0.07 * wobble(n, rng, 4) + 0.03 * wobble(n, rng, 50))
+    src = harmonic(f0, tilt=0.8, fmax=3500) * (0.35 + 0.65 * rough(n, rng, 40))
+    voice = unit(formants(src, [(550 * (1 + 0.2 * wobble(n, rng, 3)), 4, 1.0), (1100, 5, 0.6), (2300, 6, 0.25)]))
+    moan = np.tanh(2.2 * voice) * np.clip(t / 0.05, 0, 1) * np.exp(-np.maximum(t - 0.3, 0) / 0.6)
+    wet = biquad(noise(n, rng), "lp", 1800) * env(n, 0.003, 0.08, delay=0.05)
+    squelch = unit(svf(wet, np.interp(t, [0, 0.05, 0.12, 0.35], [250, 250, 1400, 280]), q=3))
+    gurgle = unit(bubbles(n, rng, 14, 0.1, 1.6, 80, 280))
+    falls = sum(heavy_impact(n, rng, t0, a) for t0, a in [(0.9, 0.9), (1.35, 0.7), (1.75, 0.5)])
+    settle = unit(grains(n, rng, 30, 1.0, 2.1, 400, 3500, decay=0.5)) * 0.2
+    x = 0.8 * moan + 0.4 * squelch + 0.3 * gurgle + 0.8 * unit(falls) + settle
+    return finish(reverb(biquad(x, "lp", 3000), size=2.0, fb=0.7, mix=0.25, damp=1800), fade_out=0.35)
+
+
+# ----------------------------------------------------------------------------- ice / drones / ui (new)
+
+def ice_crack(v=0):
+    rng = np.random.default_rng(11200 + v)
+    n = secs(0.8)
+    p = 1 + 0.12 * (v - 0.5)
+    crack = burst(n, rng, 0.0002, 0.004, "hp", 2500) + 0.6 * burst(n, rng, 0.0005, 0.02, "bp", 3800 * p, 0.8)
+    m = secs(0.15)
+    pings = np.zeros(n)
+    for i in range(6):                                                  # downward "zip" of a fracture running
+        f = rng.uniform(2500, 6500) * p
+        zip_ = osc(glide(f, f * 0.35, m, 0.07)) * env(m, 0.0005, 0.025)
+        pings += rng.uniform(0.4, 1.0) * place(n, 0.01 + 0.03 * i * rng.uniform(0.6, 1.4), zip_)
+    ticks = np.zeros(n)
+    tc = 0.0
+    for k in range(9):                                                  # branches snapping, faster and fainter
+        f = rng.uniform(3200, 5800) * p
+        ticks += np.exp(-tc / 0.18) * (burst(n, rng, 0.0002, 0.002, "hp", 3000, delay=tc)
+                                       + unit(modes(n, [f, 1.55 * f], [0.02, 0.012], [1.0, 0.5], delay=tc)))
+        tc += 0.04 * 0.82 ** k * rng.uniform(0.8, 1.2) + 0.012
+    thump = osc(glide(115 * p, 55, n, 0.05)) * env(n, 0.001, 0.07)
+    clicks, tcc = np.zeros(n), 0.08                                    # the sheet groaning under strain
+    while tcc < 0.5:
+        clicks[secs(tcc)] += rng.uniform(0.4, 1.0)
+        tcc += 1 / ((40 + 80 * tcc / 0.5) * rng.uniform(0.6, 1.4))
+    creak = formants(clicks, [(900 * p, 12, 1.0), (2100 * p, 14, 0.6), (3600, 14, 0.3)])
+    x = 0.8 * crack + 0.5 * unit(pings) + 0.45 * unit(ticks) + 0.6 * thump + 0.25 * unit(creak)
+    return finish(reverb(x, size=1.4, fb=0.65, mix=0.25, damp=7000), fade_out=0.15)
+
+
+def drone_buzz(v=0):
+    rng = np.random.default_rng(11300 + v)
+    T = 1.0
+    t = times(secs(T))
+    n = len(t)
+    ph = TAU * per(190, T) * t + 1.6 * lfo(t, 3, 0.0, T) + 0.4 * lfo(t, 7, 1.0, T)   # warbling rotor pitch
+    buzz = sum(np.sin(k * ph) / k ** 0.9 for k in range(1, 15))
+    buzz = spectral(buzz * (0.75 + 0.25 * np.cos(TAU * per(24, T) * t)), lowband(4200))
+    blade = loop_noise(n, rng, band(2600, 0.6)) * (0.5 + 0.5 * np.cos(TAU * per(95, T) * t)) ** 3
+    whine = np.sin(TAU * per(1480, T) * t + 0.8 * lfo(t, 4, 0.0, T)) * (0.7 + 0.3 * lfo(t, 2, 1.0, T))
+    air = loop_noise(n, rng, band(1200, 0.9)) * (0.6 + 0.4 * loop_rough(n, rng, 12))
+    x = unit(buzz) + 0.35 * unit(blade) + 0.1 * whine + 0.15 * unit(air)
+    return finish_loop(x, -14.0)
+
+
+def pickup(v=0):
+    rng = np.random.default_rng(11400 + v)
+    n = secs(0.3)
+    plip = osc(glide(600, 1500, n, 0.03)) * env(n, 0.001, 0.035)
+    notes = np.zeros(n)
+    for t0, f, a in [(0.02, 880.0, 0.8), (0.07, 1318.5, 1.0)]:          # A5 E6, soft little bell
+        notes += a * modes(n, [f, 2 * f, 3 * f], [0.09, 0.04, 0.02], [1.0, 0.3, 0.1], delay=t0)
+    rustle = burst(n, rng, 0.003, 0.02, "bp", 3500, 0.7)
+    tick = burst(n, rng, 0.0002, 0.0015, "bp", 3000, 1.0)
+    return finish(biquad(0.6 * plip + 0.7 * unit(notes) + 0.2 * rustle + 0.25 * tick, "lp", 7000), fade_out=0.12)
+
+
+def ui_save(v=0):
+    return ui_soft(11500 + v, 0.4, [(0.0, 587.33), (0.07, 880.0)], (700, 2800))
+
+
 # ----------------------------------------------------------------------------- table / main
 
 def variants(name, fn, count):
@@ -1538,6 +1991,32 @@ SOUNDS = {
     "knock": knock,
     "music_boss": music_boss,
     "music_ending": music_ending,
+    "fire_crackle": fire_crackle,
+    "fire_ignite": fire_ignite,
+    "extinguish": extinguish,
+    "generator_hum": generator_hum,
+    **variants("spark", spark, 3),
+    "power_down": power_down,
+    "power_up": power_up,
+    "fuse": fuse,
+    "throw": throw,
+    "flare_burn": flare_burn,
+    "grapple_fire": grapple_fire,
+    "grapple_hit": grapple_hit,
+    "quake": quake,
+    "rubble": rubble,
+    "radio": radio,
+    "contract_done": contract_done,
+    "borer_drill": borer_drill,
+    "borer_hiss": borer_hiss,
+    **variants("mite_skitter", mite_skitter, 3),
+    "brood_roar": brood_roar,
+    "brood_spit": brood_spit,
+    "brood_die": brood_die,
+    **variants("ice_crack", ice_crack, 2),
+    "drone_buzz": drone_buzz,
+    "pickup": pickup,
+    "ui_save": ui_save,
 }
 
 
@@ -1550,9 +2029,11 @@ def write_wav(path, x):
         w.writeframes(data.tobytes())
 
 
-def main():
+def main(only=()):
     os.makedirs(OUT, exist_ok=True)
     for name, fn in SOUNDS.items():
+        if only and not any(name == o or name.startswith(o + "_v") for o in only):
+            continue
         x = np.asarray(fn(), float)
         assert np.all(np.isfinite(x)), f"{name}: non-finite samples"
         write_wav(os.path.join(OUT, name + ".wav"), x)
@@ -1561,4 +2042,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1:])        # optional names, e.g. quake spark: writes just those (spark = all its variants)

@@ -49,6 +49,22 @@
   "swim": {
    "row": 11,
    "frames": 6
+  },
+  "down": {
+   "row": 12,
+   "frames": 4
+  },
+  "carried": {
+   "row": 13,
+   "frames": 4
+  },
+  "carry": {
+   "row": 14,
+   "frames": 12
+  },
+  "throw": {
+   "row": 15,
+   "frames": 6
   }
  },
  "feet_below_center": 26.5,

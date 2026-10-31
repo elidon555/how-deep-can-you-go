@@ -10,6 +10,7 @@ signal ore_found(pos: Vector2, kind: int)   # kind: index into ORES
 signal boulder_shattered(pos: Vector2)
 signal opened(gx: int, gy: int)          # a cell just became open (dug out): liquids may flow in
 signal gas_released(pos: Vector2)        # a firedamp cell was dug open
+signal ore_ground(pos: Vector2, kind: int)   # ore broken without being collected (the drill's head)
 
 const CELL := 8
 const METER := 24.0
@@ -367,8 +368,11 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 			o[0].queue_free()
 			o[1].queue_free()
 			ores.erase(cell)
-			if _collect and not puppet:
-				ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
+			if not puppet:
+				if _collect:
+					ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
+				else:
+					ore_ground.emit(Vector2(gx * CELL + 4, gy * CELL + 4), o[2])
 		if decor.has(cell):
 			for n in decor[cell]:
 				if is_instance_valid(n):      # (a note may already have been picked up)

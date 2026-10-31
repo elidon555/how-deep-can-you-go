@@ -42,7 +42,7 @@ func update(dt: float) -> void:
 	if leaking > 0:
 		level = minf(level + LEAK * leaking * dt, 1.0)
 	else:
-		level = maxf(level - PUMP * dt, 0.0)
+		level = maxf(level - PUMP * drill.power.level("pump") * dt, 0.0)
 	if level > 0.0:
 		drill.thermal.cool(10.0 * level * dt)
 	update_sounds()

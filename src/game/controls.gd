@@ -4,25 +4,27 @@ class_name Controls
 const KEYS := {
 	"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT],
 	"up": [KEY_W, KEY_UP], "down": [KEY_S, KEY_DOWN],
-	"jump": [KEY_SPACE, KEY_W, KEY_UP],   # W / Up jump too (on a rope they climb instead)
+	"jump": [KEY_SPACE, KEY_W, KEY_UP],   # W / Up jump too
 	"dig": [KEY_J],
-	"rope": [KEY_Q],
+	"tool": [KEY_Q],                     # use the tool in hand (grapple, flare, dynamite ...)
+	"tool_next": [KEY_TAB],
 	"interact": [KEY_E],
 	"roll": [KEY_SHIFT],
 	"ping": [KEY_F],
 	"restart": [KEY_R],
 }
-const MOUSE := {"dig": MOUSE_BUTTON_LEFT, "rope": MOUSE_BUTTON_RIGHT, "ping": MOUSE_BUTTON_MIDDLE}
+const MOUSE := {"dig": MOUSE_BUTTON_LEFT, "tool": MOUSE_BUTTON_RIGHT, "ping": MOUSE_BUTTON_MIDDLE,
+	"tool_next": MOUSE_BUTTON_WHEEL_DOWN}
 const PAD := {
 	"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT,
 	"up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN,
-	"jump": JOY_BUTTON_A, "dig": JOY_BUTTON_X, "rope": JOY_BUTTON_Y,
+	"jump": JOY_BUTTON_A, "dig": JOY_BUTTON_X, "tool": JOY_BUTTON_Y, "tool_next": JOY_BUTTON_RIGHT_STICK,
 	"interact": JOY_BUTTON_B, "restart": JOY_BUTTON_BACK, "roll": JOY_BUTTON_RIGHT_SHOULDER,
 	"ping": JOY_BUTTON_LEFT_SHOULDER,
 }
 const STICK := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
-const HELP := "A/D move · W/Space jump · Shift roll · Left click dig (or J + W/A/S/D) · Q rope · E use · F ping · R restart"
+const HELP := "A/D move · W/Space jump · Shift roll · Left click dig (or J) · Right click / Q tool · Tab switch tool · E use · F ping"
 
 
 static func setup() -> void:

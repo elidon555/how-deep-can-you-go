@@ -19,7 +19,7 @@ func _ready() -> void:
 	style.set_corner_radius_all(6)
 	style.set_content_margin_all(22)
 	add_theme_stylebox_override("panel", style)
-	position = Vector2(340, 110)
+	position = Vector2(340, 40)
 	custom_minimum_size = Vector2(600, 0)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 12)
@@ -94,7 +94,8 @@ func _refresh() -> void:
 		row.add_theme_constant_override("separation", 14)
 		var name := Label.new()
 		var lvl := Progress.level(id)
-		name.text = "%d. %s  %s" % [i, u.name, "●".repeat(lvl) + "○".repeat(u.costs.size() - lvl)]
+		var pips: String = "" if u.get("module", false) else "●".repeat(lvl) + "○".repeat(u.costs.size() - lvl)
+		name.text = ("%d. " % i if i <= 9 else "    ") + "%s  %s" % [u.name, pips]
 		name.custom_minimum_size = Vector2(330, 0)
 		name.tooltip_text = u.desc
 		row.add_child(name)
@@ -106,7 +107,7 @@ func _refresh() -> void:
 		row.add_child(desc)
 		var b := Button.new()
 		var cost := Progress.cost(id)
-		b.text = "MAX" if cost < 0 else "$%d" % cost
+		b.text = ("BUILT" if u.get("module", false) else "MAX") if cost < 0 else "$%d" % cost
 		b.disabled = cost < 0 or not Progress.can_afford(cost)
 		b.custom_minimum_size = Vector2(80, 0)
 		b.focus_mode = Control.FOCUS_ALL        # a controller can move between the buttons

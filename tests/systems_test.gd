@@ -1,6 +1,6 @@
 extends Node
 ## Headless end-to-end check of the game systems: the drill (descending with the crew inside,
-## furnace, workbench + shop, breaches and repairs), rope climbing, a crawler fight and a
+## furnace, workbench + shop, breaches and repairs), the grapple, a crawler fight and a
 ## falling boulder. Prints PASS/FAIL per check.
 ##   godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 ## Uses the real save in memory only (never writes it).
@@ -24,25 +24,56 @@ func _ready() -> void:
 	var saved_money := Progress.money
 	var saved_levels := Progress.levels.duplicate()
 	await _drill_ride()
+	_calm()
 	await _furnace_and_workbench()
+	_calm()
 	await _breach()
+	_calm()
 	await _heat()
+	_calm()
 	await _flooding()
+	_calm()
+	await _ship_systems()
+	_calm()
+	await _gear()
+	_calm()
 	_layers()
 	await _sonar_and_worm()
+	_calm()
 	await _mouse_aim()
-	await _rope_climb()
+	_calm()
+	await _shaft_climb()
+	_calm()
 	await _camps()
+	_calm()
 	await _liquids()
+	_calm()
 	await _gas()
+	_calm()
 	await _crawler_fight()
+	_calm()
 	await _coop()
+	_calm()
 	await _the_bottom()
+	_calm()
 	await _boulder()
 	Progress.money = saved_money
 	Progress.levels = saved_levels
 	print("RESULT: ", "ALL PASS" if fails == 0 else "%d FAILED" % fails)
 	get_tree().quit()
+
+
+## Between sections: no fires burning, fuses whole, the drill cool and patched, so one
+## section's mishaps (a fire, a blown fuse) don't spill into the next.
+func _calm() -> void:
+	var d: Drill = main.drill
+	for f in d.fires.fires():
+		f.free()
+	d.power.blown = [false, false]
+	d.power.output = DrillPower.Output.NORMAL
+	d.thermal.heat = 0.0
+	d.thermal.overheated = false
+	d.hull = d.max_hull
 
 
 func _check(name: String, ok: bool, info := "") -> void:
@@ -84,7 +115,6 @@ func _drill_ride() -> void:
 		await get_tree().physics_frame
 		min_grip = minf(min_grip, d.grip)
 	_check("braces let go while it sinks", min_grip <= 0.0)
-	_check("ladders fold away with everyone aboard", d.ladders_out == 0.0)
 	var down := (d.global_position.y - y0) / World.METER
 	_check("drill bores down", down > 2.0, "%.1f m in 8 s" % down)
 	if Drill.infinite_fuel():
@@ -97,13 +127,18 @@ func _drill_ride() -> void:
 	await _frames(70)
 	_check("braces grip when it stops", d.grip >= 1.0)
 	var back := p.global_position
-	p.global_position = d.global_position + Vector2(Drill.HW + 20.0, Drill.FLOOR - 30.0)   # step outside
-	await _frames(70)
-	_check("ladders come down when someone is outside", d.ladders_out == 1.0)
+	p.global_position = d.global_position + Vector2(Drill.HW + 20.0, Drill.FLOOR + 30.0)   # outside, below the door
+	p.velocity = Vector2.ZERO
+	await _frames(40)
+	p.tools.index = PlayerTools.ALL.find("grapple")
+	p.aim_override = d.global_position + Vector2(Drill.HW - 2.0, Drill.FLOOR - 20.0)
+	await _hold(["tool"], 0.05)
+	await _frames(60)
+	p.aim_override = Vector2.INF
+	_check("grappling the hull climbs back in at the door", d.contains(p.global_position), str(p.global_position - d.global_position))
 	p.global_position = back
 	p.velocity = Vector2.ZERO
-	await _frames(70)
-	_check("and fold away again once they're back in", d.ladders_out == 0.0)
+	await _frames(10)
 	await _hatches()
 
 
@@ -217,6 +252,7 @@ func _sonar_and_worm() -> void:
 		if d.hull < h - 5.0:
 			break
 	_check("the worm burrows over and rams the drill", d.hull < h - 5.0, "hull %.0f -> %.0f" % [h, d.hull])
+	d.power.blown = [false, false]          # (its ram may have blown a fuse: the turrets need power)
 	_station(Stations.GunnerSeat).interact(p)
 	await _frames(20)
 	_check("gunner seat takes the turrets", d.guns.gunner == p and p.frozen)
@@ -225,6 +261,7 @@ func _sonar_and_worm() -> void:
 		if not is_instance_valid(w) or w.state == Worm.State.DEAD:
 			break
 		p.aim_override = w.body[0]
+		d.power.blown = [false, false]      # (the crew would be on the fuse box; here we're testing the guns)
 		await get_tree().physics_frame
 	Input.action_release("dig")
 	p.aim_override = Vector2.INF
@@ -261,48 +298,36 @@ func _mouse_aim() -> void:
 	p.pick.mouse_aim = false
 
 
-func _rope_climb() -> void:
+func _shaft_climb() -> void:
 	for b in get_tree().get_nodes_in_group("hittable"):   # a boulder dropping into the test shaft
 		if b is Boulder:                                   # would wedge above the miner (as it should)
 			b.queue_free()
 	p.global_position = Vector2(200, -40)       # well away from the drill
 	await _frames(60)
+	for i in 120:
+		if p.is_on_floor():
+			break
+		await get_tree().physics_frame
+	var ground := p.global_position.y
 	await _hold(["dig", "down"], 6.0)
 	var depth := p.global_position.y / World.METER
 	_check("dug down a shaft", depth > 3.0, "%.1f m" % depth)
-	var ropes: int = p.ropes
-	Input.action_press("rope")
-	await _frames(2)
-	Input.action_release("rope")
-	var used := 0 if GameConfig.infinite_resources() else 1
-	_check("threw a rope", p.ropes == ropes - used and get_tree().get_nodes_in_group("rope").size() > 2)
-	await _hold(["up"], 0.1)
-	_check("grabbed the rope", p.rope != null)
-	Input.action_press("up")
-	var why := ""
-	for i in 600:
-		await get_tree().physics_frame
-		if p.rope == null or p.global_position.y < -20:
-			why = "hp %d, on rope %s" % [p.health, p.rope != null]
+	p.tools.index = PlayerTools.ALL.find("grapple")
+	var hooks := 0
+	for i in 20:                                 # hook the shaft wall up high, again and again
+		var side := 1.0 if i % 2 == 0 else -1.0
+		p.aim_override = p.global_position + Vector2(side * 10.0, -120.0)
+		await _hold(["tool"], 0.05)
+		if p.tools.grapple_at != Vector2.INF:
+			hooks += 1
+		await get_tree().create_timer(PlayerTools.GRAPPLE_COOLDOWN + 0.2).timeout
+		if p.global_position.y < ground + 30.0:
 			break
-	Input.action_release("up")
-	var top := -1.0
-	for r in get_tree().get_nodes_in_group("rope"):
-		if not r is DrillLadder:
-			top = r.top_y()
-	var cols := []
-	for i in p.get_slide_collision_count():
-		var col := p.get_slide_collision(i)
-		cols.append("%s n%s at %s" % [col.get_collider().get_class() + ":" + str(col.get_collider().name), col.get_normal().round(), (col.get_position() - p.global_position).round()])
-	var above := ""
-	for dy in [-24, -32, -40]:
-		var c := w.cell_at(p.global_position + Vector2(0, dy))
-		above += "%.1f/%d " % [w.get_fill(c.x, c.y), w.get_mat(c.x, c.y)]
-	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, ceil %s, above %s, frozen %s, on rope %s, hp %d, vel %s" % [
-		p.global_position.y, top, why, p.is_on_ceiling(), above, p.frozen, p.rope != null, p.health, str(cols)])
-	await _hold(["right"], 0.5)
+	p.aim_override = Vector2.INF
+	_check("the grapple gets you out of the shaft", p.global_position.y < ground + 30.0 and hooks > 0,
+		"y=%.0f after %d hooks, ground was %.0f" % [p.global_position.y, hooks, ground])
 	await _frames(30)
-	_check("stepped off onto the surface", p.rope == null and p.is_on_floor(), "y=%.0f" % p.global_position.y)
+	_check("standing on the surface", p.is_on_floor(), "y=%.0f" % p.global_position.y)
 
 
 ## A flat arena deep down with a crawler next to the player.
@@ -521,6 +546,23 @@ func _coop() -> void:
 	await get_tree().create_timer(ReviveSpot.HOLD + 0.3).timeout
 	Input.action_release("interact")
 	_check("holding E helps them back up", not p2.downed and p2.health == 1)
+	p2._invuln_t = 0.0
+	p2.hurt(99, p2.global_position + Vector2(10, 0))
+	await _frames(3)
+	p.global_position = p2.global_position + Vector2(-12, 0)
+	await _frames(3)
+	await _hold(["interact"], 0.1)                # a tap, not a hold
+	await _frames(3)
+	_check("a tap hoists them onto your shoulders", p.carrying == p2 and p2.carried_by == p)
+	var med: Stations.Medkit = _station(Stations.Medkit)
+	p.global_position = d.global_position + Vector2(med.position.x + 4, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(5)
+	_check("they ride along", p2.global_position.distance_to(p.global_position) < 40.0)
+	_check("the medkit offers to patch them up", p.interactor.prompt_text().begins_with("E: patch up"),
+		p.interactor.prompt_text())
+	await _hold(["interact"], 0.1)
+	await _frames(3)
+	_check("and does", not p2.downed and p2.health == p2.max_health and p.carrying == null)
 	p2._invuln_t = 0.0                    # (just helped up: a moment's grace)
 	p2.hurt(99, p2.global_position + Vector2(10, 0))
 	await _frames(3)
@@ -531,6 +573,149 @@ func _coop() -> void:
 	_check("and come back in the drill", p2.health > 0 and d.contains(p2.global_position))
 	main.players.erase(p2)
 	p2.queue_free()
+
+
+## The ship: power (a blown fuse, a brownout, the generator), fire (beaten out, sprayed),
+## and the modules (cargo hold, sprinklers, the drone).
+func _ship_systems() -> void:
+	var d: Drill = main.drill
+	p.heal_full()
+	d.power.blow(1)
+	for f in d.fires.fires():           # (a sparking box can start a fire, which would come first)
+		f.free()
+	_check("a blown fuse cuts the helm", _station(Stations.Helm).prompt(p).begins_with("Helm: no power"))
+	p.global_position = d.global_position + Vector2(Junction.X[1] - 4, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(4)
+	_check("the crew is told to fix it", p.interactor.prompt_text().begins_with("Hold E: replace"),
+		p.interactor.prompt_text())
+	await _hold(["interact"], Junction.REPAIR_TIME + 0.4)
+	_check("holding E puts in a new fuse", not d.power.blown[1], "prompt \"%s\" at %s role %s" % [p.interactor.prompt_text(), p.global_position - d.global_position, p.role])
+	d.power.output = DrillPower.Output.LOW
+	d.speed = Drill.Speed.FULL
+	await _frames(10)
+	_check("full speed on low power browns out", d.power.ratio() < 1.0, "%.2f" % d.power.ratio())
+	d.speed = Drill.Speed.STOP
+	p.coal = 0
+	_station(Stations.Furnace).interact(p)
+	_check("the furnace turns the generator up", d.power.output == DrillPower.Output.NORMAL)
+	# fire
+	d.fires.ignite(-20.0, 0.5)
+	await _frames(5)
+	_check("a fire burns in the cabin", d.fires.fires().size() == 1)
+	var hull0 := d.hull
+	await _frames(60)
+	_check("fire eats the hull", d.hull < hull0, "%.1f -> %.1f" % [hull0, d.hull])
+	p.global_position = d.global_position + Vector2(-34, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(3)
+	_check("the crew can beat it out", p.interactor.prompt_text().begins_with("Hold E: beat"), p.interactor.prompt_text())
+	await _hold(["interact"], 3.5)
+	_check("beating it puts it out", d.fires.fires().is_empty())
+	d.fires.ignite(30.0, 0.9)
+	p.global_position = d.global_position + Vector2(-5, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	p.tools.index = PlayerTools.ALL.find("extinguisher")
+	p.aim_override = d.global_position + Vector2(30, Drill.FLOOR - 8)
+	await _hold(["tool"], 1.5)
+	p.aim_override = Vector2.INF
+	_check("the extinguisher sprays it out", d.fires.fires().is_empty())
+	p.tools.index = 0
+	# modules
+	Progress.levels["cargo"] = 1
+	Progress.levels["sprinklers"] = 1
+	Progress.levels["drone"] = 1
+	d.apply_upgrades()
+	w.ore_ground.emit(d.global_position + Vector2(0, 90), 2)
+	_check("the cargo hold keeps the ore the head grinds", d.cargo_value == World.ORES[2][1], str(d.cargo_value))
+	var money := Progress.money
+	_station(Stations.Workbench).interact(p)
+	main.shop.close()
+	_check("and it sells at the workbench", d.cargo_value == 0 and Progress.money > money)
+	d.fires.ignite(40.0, 0.5)
+	await get_tree().create_timer(2.5).timeout
+	_check("sprinklers douse a fire", d.fires.fires().is_empty())
+	await _frames(20)
+	var bat := Bat.new()
+	bat.world = w
+	bat.position = d.global_position + Vector2(60, Drill.TOP - 40)
+	main.add_child(bat)
+	bat.state = Bat.State.PEEL
+	bat._t = 99.0
+	await get_tree().create_timer(3.0).timeout
+	_check("the drone zaps a bat by the drill", not is_instance_valid(bat) or bat.state == Bat.State.DEAD)
+	for m in ["cargo", "sprinklers", "drone"]:
+		Progress.levels.erase(m)
+
+
+## Gear outside: switching tools, a flare that creatures shy from, dynamite, the grapple; and
+## the bag filling up.
+func _gear() -> void:
+	var d: Drill = main.drill
+	var spot := Vector2(d.global_position.x - 330.0, -40.0)
+	while w.is_air(spot + Vector2(0, Player.HALF_HEIGHT + 2.0)):
+		spot.y += 2.0
+	p.global_position = spot + Vector2(0, -2)
+	p.velocity = Vector2.ZERO
+	await _frames(20)
+	p.tools.index = 0
+	Input.action_press("tool_next")
+	await _frames(2)
+	Input.action_release("tool_next")
+	_check("Tab switches tools", p.tools.current() == "flare")
+	p.aim_override = p.global_position + Vector2(80, -10)
+	await _hold(["tool"], 0.05)
+	await get_tree().create_timer(1.5).timeout
+	var flares := get_tree().get_nodes_in_group("flare")
+	_check("a thrown flare lands and burns", flares.size() == 1 and flares[0].resting)
+	if flares.size() == 1:
+		var c := Crawler.new()
+		c.world = w
+		c.player = p
+		c.glow_parent = main.glow_layer
+		c.position = flares[0].global_position + Vector2(40, -10)
+		main.add_child(c)
+		var x0 := c.global_position.x
+		await get_tree().create_timer(1.0).timeout
+		_check("creatures back away from a flare", c.global_position.x > x0 + 10.0, "%.0f -> %.0f" % [x0, c.global_position.x])
+		c.queue_free()
+		flares[0].queue_free()
+	p.tools.index = PlayerTools.ALL.find("dynamite")
+	p.aim_override = p.global_position + Vector2(60, 10)
+	await _hold(["tool"], 0.05)
+	await _frames(30)
+	var sticks := get_tree().get_nodes_in_group("dynamite")
+	var at: Vector2 = sticks[0].global_position if sticks.size() > 0 else Vector2.ZERO
+	p.global_position = spot + Vector2(-140, -2)               # stand clear
+	await get_tree().create_timer(Thrown.FUSE + 0.3).timeout
+	_check("dynamite blows a crater", sticks.size() == 1 and w.is_air(at + Vector2(0, 16)), str(at))
+	# grapple: from the bottom of a shaft, at the rock up the side
+	var shaft := spot + Vector2(-60, 0)
+	w.dig(shaft, shaft + Vector2(0, 110), 12.0, 99.0)
+	p.global_position = shaft + Vector2(0, 100)
+	p.velocity = Vector2.ZERO
+	await _frames(20)
+	var y0 := p.global_position.y
+	p.tools.index = PlayerTools.ALL.find("grapple")
+	p.aim_override = p.global_position + Vector2(14, -55)
+	await _hold(["tool"], 0.05)
+	await _frames(25)
+	_check("the grapple hauls you up the shaft", p.global_position.y < y0 - 24.0, "%.0f -> %.0f" % [y0, p.global_position.y])
+	_check("and you hang there (no ledge)", p.tools.hanging or p.global_position.y < spot.y)
+	await _hold(["jump"], 0.05)
+	await _frames(5)
+	_check("jump lets go", not p.tools.hanging)
+	p.aim_override = Vector2.INF
+	p.tools.index = 0
+	# the bag holds so much (more for a miner, more with the sled)
+	p.ore_count = 0
+	p.coal = 0
+	p.role = "engineer"
+	var room := p.bag_space()
+	p.role = "miner"
+	_check("a miner carries more", p.bag_space() == room + 10)
+	p.ore_count = p.bag_space() + p.ore_count
+	_check("a full bag takes no more", not p.add_ore(0))
+	p.ore_count = 0
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(10)
 
 
 ## The bottom: the Floor can't be cut; the drill knocking on it wakes the Eye; veins shield it;

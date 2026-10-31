@@ -71,6 +71,14 @@ func _physics_process(dt: float) -> void:
 		Sfx.play("sizzle", global_position)
 	velocity.y = minf(velocity.y + GRAVITY * dt, 600.0)
 	var to_player := player.global_position - global_position
+	var flare := Thrown.scary_near(get_tree(), global_position)
+	if flare and state in [State.PATROL, State.CHASE]:      # a burning flare: back off from it
+		state = State.PATROL
+		dir = 1 if global_position.x > flare.global_position.x else -1
+		velocity.x = dir * CHASE_SPEED
+		move_and_slide()
+		_animate(dt)
+		return
 	match state:
 		State.PATROL:
 			velocity.x = dir * PATROL_SPEED

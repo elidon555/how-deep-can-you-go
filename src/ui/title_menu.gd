@@ -32,7 +32,7 @@ func _ready() -> void:
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 150)        # the drill shows through here
 	col.add_child(gap)
-	for b in [UiStyle.button("Start digging", func(): start_pressed.emit()),
+	for b in [UiStyle.button("Start digging", func(): start_pressed.emit()), UiStyle.role_button(),
 			UiStyle.button("Daily Dig (best today: %d m)" % Progress.daily.get(Progress.today(), 0),
 				func(): daily_pressed.emit()),
 			UiStyle.button("Play online", func(): online_pressed.emit()),

@@ -2,7 +2,8 @@
 renders flat + clay + normal passes for each sprite. tools/drill_sheet.py makes the pixel art.
 
 Run headless:
-  blender -b --factory-startup -P tools/drill_blender.py -- <out_dir>
+  blender -b --factory-startup -P tools/drill_blender.py -- <out_dir> [name,name,...]
+(the optional list renders only those sprites, e.g. generator,radio).
 
 Units: 1 Blender unit = 1 game px, in the drill's local space. Every helper takes game
 coordinates (x right, y DOWN, as in src/drill/drill.gd); Blender z is -y. The camera looks
@@ -20,7 +21,9 @@ from mathutils import Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
 
-OUT = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else "/tmp/drill"
+ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+OUT = ARGS[0] if ARGS else "/tmp/drill"
+ONLY = set(ARGS[1].split(",")) if len(ARGS) > 1 else None   # optional: render just these sprites
 os.makedirs(OUT, exist_ok=True)
 rng = random.Random(7)
 
@@ -43,11 +46,14 @@ COLORS = {
     "valve": "#c8322a", "frost": "#d8eef4",
     "bench_dark": "#4a3320", "iron": "#7d8591", "tool": "#9aa3b2", "handle": "#7a5636",
     "cabinet": "#d8d4cc", "cross": "#c8322a",
+    # generator, junction, radio, floodlight, drone, cargo
+    "core": "#7af0ff", "core_hot": "#f0ffff", "status": "#5aff7a", "dial": "#ffb84a", "flood": "#fff4d0",
+    "eye": "#7af0ff", "radio": "#4e5440", "sack": "#8a7450", "hemp_tie": "#5e4528", "strap": "#c0802a",
 }
 RUSTY = {"steel": ("rust", 0.63), "steel_dark": ("rust_dark", 0.62), "back_steel": ("back_rust", 0.68),
          "furnace": ("rust_dark", 0.66), "soot": ("rust_dark", 0.7)}
 STRIPES = {"hazard": ("hazard_y", "hazard_k", 6.0)}     # 45 degree stripes, period in px
-UNLIT = {"lamp", "fire", "fire_hot", "screen", "gauge_flat"}          # stay at full colour in the clay pass
+UNLIT = {"lamp", "fire", "fire_hot", "screen", "gauge_flat", "core", "core_hot", "status", "dial", "flood", "eye"}          # stay at full colour in the clay pass
 
 # ---------------------------------------------------------------- scene setup
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -654,6 +660,177 @@ for side in (-1, 1):
 MUZZLE_LEN = MUZZLE - TURRET_PIVOT[0]
 
 
+# ================================================================ more cabin stations
+# Standing ones: anchor bottom centre at (0, 0). Wall-mounted (junction, extinguisher rack, drone):
+# anchor at the sprite centre. Ceiling ones (floodlight, sprinkler): anchor top centre.
+def blob(cx, cy, r, mat, d=0.0, scale=(1, 1, 1)):
+    """Squashed sphere at game point (cx, cy) (sacks, domes)."""
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=8, radius=r, location=(cx, d, -cy))
+    o = bpy.context.active_object
+    o.scale = scale
+    return add(o, mat, smooth=True)
+
+
+def rod3(a, b, r, mat, verts=16, r2=None):
+    """Cylinder between two 3D game points (x, y, depth)."""
+    a, b = Vector((a[0], a[2], -a[1])), Vector((b[0], b[2], -b[1]))
+    bpy.ops.mesh.primitive_cone_add(vertices=verts, radius1=r, radius2=r if r2 is None else r2,
+                                    depth=(b - a).length, location=(a + b) / 2)
+    o = bpy.context.active_object
+    o.rotation_euler = (b - a).to_track_quat("Z", "Y").to_euler()
+    return add(o, mat, smooth=True)
+
+
+# generator: a squat reactor vessel with a window onto its glowing core, a dynamo wheel and a gauge
+rect(-13, -2, 13, 0, "hazard", -8, 8)                                 # striped skid
+rect(-12, -3, 12, -2, "steel_dark", -7, 7)
+rod(-5, -3, -5, -24, 6.4, "steel", d=0, verts=20)                     # vessel
+for y in (-22, -5):
+    rod(-5, y - 0.9, -5, y + 0.9, 6.9, "steel_dark", d=0, verts=20)   # bands
+blob(-5, -24, 6.4, "steel", scale=(1, 1, 0.4))                        # domed lid
+rod(-5, -26, -5, -28.5, 1.5, "steel_dark", d=0)                       # vent stack
+rod(-5, -28.5, -5, -29.2, 2.1, "steel", d=0)
+rect(-9, -19, -1, -8, "steel_dark", -7.3, -5.4, 0.3)                  # core window
+rect(-8, -18, -2, -9, "core", -7.7, -6.9)
+rect(-5.5, -17.5, -4.5, -9.5, "core_hot", -8.0, -7.7)                 # the hot rod
+for y in (-15, -12):
+    rect(-8, y, -2, y + 0.6, "steel_dark", -8.2, -7.8)                # window bars
+disc(7, -10, 4.8, "steel", -5, 3, 20)                                 # dynamo housing
+disc(7, -10, 3.4, "steel_dark", -5.4, -5, 16)
+for k in range(3):
+    a = k * math.pi / 3
+    rod(7 - 3.2 * math.cos(a), -10 - 3.2 * math.sin(a), 7 + 3.2 * math.cos(a), -10 + 3.2 * math.sin(a),
+        0.45, "steel_lit", d=-5.5, verts=6)                           # wheel spokes
+disc(7, -10, 1.1, "bolt", -6, -5.4, 10)
+rect(3, -5.5, 11, -3, "steel_dark", -4, 4, 0.3)                       # dynamo feet
+rod(7, -15, 7, -17.5, 0.8, "steel_dark", d=-1)                        # gauge stalk
+disc(7, -20.5, 3.6, "brass", -3, 0, 18)
+disc(7, -20.5, 2.9, "gauge_flat", -3.5, -2.8, 18)
+rod(6.6, -20.1, 8.8, -22.2, 0.5, "needle", d=-3.8, verts=6)
+curve([(1.2, -14), (2.4, -16), (4.2, -15.5), (5.2, -13.5)], 0.7, "cable", d=-2)
+for x in (-10, 10):
+    stud(x, -2.5, 0.6, "bolt", -7.2)
+sprite("generator", -13, -30, 26, 30)
+
+# junction box: wall-mounted fuse cabinet with a status lamp, a breaker lever and conduits
+rect(-4.5, -6, 4.5, 6, "console", -2, 2, 0.4)
+rect(-3.6, -5.1, 3.6, 5.1, "steel", -2.4, -2.0, 0.2)                  # door
+rect(-3.6, 1.0, 3.6, 1.5, "steel_dark", -2.6, -2.3)
+rect(-2.5, -4.2, 0.5, -1.8, "hazard_y", -2.6, -2.3)                  # warning label
+rect(-1.6, -3.6, -0.6, -2.4, "hazard_k", -2.75, -2.55)
+disc(2.2, -3.0, 1.3, "steel_dark", -2.6, -2.2, 10)
+disc(2.2, -3.0, 0.85, "status", -2.9, -2.5, 10)                     # status lamp
+rect(-2.8, 2.4, 2.8, 4.2, "steel_dark", -2.6, -2.3)                   # breaker slot
+rect(0.4, 2.0, 1.6, 4.6, "knob_r", -3.2, -2.4)                        # breaker lever
+rod(0, -6, 0, -7.6, 1.1, "steel_dark", d=0)                           # conduits
+for x in (-2.5, 2.5):
+    rod(x, 6, x, 7.6, 0.9, "steel_dark", d=0)
+for x, y in ((-3.9, -5.4), (3.9, -5.4), (-3.9, 5.4), (3.9, 5.4)):
+    stud(x, y, 0.45, "bolt", -2.3)
+sprite("junction", -6, -8, 12, 16)
+
+# radio: a surface radio set on a small wall shelf: dial window, knobs, speaker, telescopic antenna
+rect(-8, -5, 8, -3.5, "bench", -6, 4, 0.3)                            # shelf
+for s in (-1, 1):
+    rect(s * 6 - 0.5, -3.5, s * 6 + 0.5, -0.4, "steel_dark", 2.5, 4)  # wall brackets
+    rod(s * 6, -0.8, s * 3.2, -3.5, 0.4, "steel_dark", d=3.2, verts=6)
+rect(-7.5, -14, 5.5, -5, "radio", -4, 3, 0.5)                         # the set
+rect(-6.5, -12.8, -0.5, -9.4, "steel_dark", -4.3, -4.0)               # dial bezel
+rect(-6, -12.3, -1, -9.9, "dial", -4.5, -4.2)                         # glowing dial
+rect(-3.8, -12.3, -3.3, -9.9, "needle", -4.7, -4.5)
+for x in (-5, -2):
+    disc(x, -7, 1.15, "bolt", -5.0, -4.0, 10)                         # knobs
+    rect(x - 0.15, -8.0, x + 0.15, -7.0, "steel_dark", -5.2, -5.0)
+rect(1, -12.8, 4.6, -6, "steel_dark", -4.3, -4.0)                     # speaker grille
+for k in range(3):
+    rect(1.5, -12 + k * 2.1, 4.1, -11.2 + k * 2.1, "hole", -4.5, -4.2)
+curve([(-5, -14), (-5, -15.4), (0.5, -15.4), (0.5, -14)], 0.4, "steel_dark", d=-1)   # carry handle
+stud(4.6, -14.2, 0.9, "steel_dark", 0)                                # antenna
+rod(4.6, -14.2, 7.0, -19.0, 0.35, "chrome", d=0, verts=6)
+stud(7.0, -19.0, 0.55, "bolt", 0)
+sprite("radio", -9, -20, 18, 20)
+
+# floodlight: roof-mounted lamp on a yoke, tipped down toward the viewer (anchor: top centre)
+rect(-4, 0, 4, 1.2, "steel_dark", -4, 4)                              # roof plate
+rod(0, 1.2, 0, 2.6, 0.8, "steel_dark", d=0)
+rect(-4.2, 2.4, 4.2, 3.2, "steel", -1, 1, 0.2)                        # yoke
+for s in (-1, 1):
+    rect(s * 4.2 - 0.4, 2.4, s * 4.2 + 0.4, 6.4, "steel", -1, 1)
+axis_a, axis_b = Vector((-2.0, 3.6, 1.2)), Vector((1.4, 6.0, -1.4))   # (x, y, depth): back -> lens
+rod3(axis_a, axis_b, 3.2, "steel_dark", verts=18)
+rod3(axis_b - (axis_b - axis_a) * 0.12, axis_b + (axis_b - axis_a) * 0.05, 3.5, "steel", verts=18)   # rim
+rod3(axis_b, axis_b + (axis_b - axis_a) * 0.08, 2.8, "flood", verts=18)                             # lens
+for s in (-1, 1):
+    stud(s * 4.2, 5.4, 0.55, "bolt", -1.2)
+sprite("floodlight", -7, 0, 14, 10)
+
+# sprinkler: a ceiling pipe run with a drop nozzle, red heat bulb and deflector (anchor: top centre)
+rod(-4.4, 1.6, 4.4, 1.6, 1.4, "steel", d=0, verts=12)
+for x in (-4.4, 3.4):
+    rod(x, 1.6, x + 1.0, 1.6, 1.7, "steel_dark", d=0, verts=12)      # couplings
+rect(-2.6, 0, -1.6, 0.6, "steel_dark", -1, 1)                         # hanger
+rod(0, 2.6, 0, 3.6, 0.8, "brass", d=0, verts=8)
+rod(0, 3.4, 0, 4.4, 0.4, "glass_red", d=-0.6, verts=6)                # heat bulb
+for s in (-1, 1):
+    rod(s * 0.7, 3.4, s * 0.7, 4.6, 0.25, "brass", d=0, verts=5)      # frame arms
+rect(-2.0, 4.5, 2.0, 5.0, "brass", -2, 2)                             # deflector
+sprite("sprinkler", -5, 0, 10, 6)
+
+# cargo hold rack: crates and sacks strapped onto a steel rack
+for x0, x1 in ((-14, -12.5), (12.5, 14)):
+    rect(x0, -21, x1, 0, "steel_dark", -6, 6)                         # posts
+rect(-14, -21.5, 14, -20, "steel", -6, 6, 0.3)                        # top rail
+rect(-13.5, -1.5, 13.5, 0, "bench_dark", -6, 6)                       # pallet
+rect(-12, -11.5, -1, -1.5, "bench", -5, 4, 0.4)                       # big crate
+for y in (-10.6, -3.4):
+    rect(-12, y - 0.6, -1, y + 0.6, "bench_dark", -5.2, 4.2)
+rod(-11.4, -2.6, -1.6, -10.4, 0.45, "bench_dark", d=-5.2, verts=6)
+rect(-11, -18, -4, -11.5, "bench", -4, 3, 0.4)                        # small crate on top
+rect(-11, -15.3, -4, -14.3, "bench_dark", -4.2, 3.2)
+for cx, cy, rx, ry in ((5.0, -6.0, 5.0, 4.6), (10.2, -4.6, 2.6, 3.4), (5.8, -13.4, 4.6, 3.6), (-1.2, -14.8, 2.4, 3.0)):
+    blob(cx, cy, 1, "sack", d=-0.5, scale=(rx, 4, ry))                # sacks
+    rod(cx, cy - ry + 0.3, cx, cy - ry - 0.6, 0.6, "hemp_tie", d=-0.5, verts=6)
+for x0, y0, x1, y1 in ((-13.2, -19.5, 13.2, -3.5), (-13.2, -4.5, 13.2, -17.5)):
+    rod(x0, y0, x1, y1, 0.55, "strap", d=-6.6, verts=6)              # cargo straps
+disc(0, -11.5, 1.1, "bolt", -7.4, -6.6, 8)                            # buckle
+for x in (-13.25, 13.25):
+    for y in (-18, -3):
+        stud(x, y, 0.5, "bolt", -6.2)
+sprite("cargo", -15, -22, 30, 22)
+
+# scout drone: a small pod with two rotors on arms, a glowing eye up front and landing skids (anchor: centre)
+rod(-3.6, 0.4, 3.0, 0.4, 2.4, "steel", d=0, verts=16)                 # body
+blob(3.0, 0.4, 2.4, "steel", scale=(0.9, 1, 1))                       # nose
+blob(-3.6, 0.4, 2.4, "steel_dark", scale=(0.6, 1, 1))                 # tail cap
+rect(-2.6, -2.3, 1.6, -1.5, "steel_dark", -1.5, 1.5)                  # spine plate
+disc(3.2, 0.5, 1.8, "steel_dark", -2.6, -1.6, 12)                     # eye bezel
+disc(3.2, 0.5, 1.3, "eye", -2.9, -2.4, 12)                            # glowing eye
+for s in (-1, 1):
+    rod(s * 1.4, -1.6, s * 4.9, -2.8, 0.45, "steel_dark", d=0, verts=6)   # rotor arms
+    rod(s * 4.9, -2.6, s * 4.9, -3.6, 0.6, "steel_dark", d=0, verts=8)    # hubs
+    rect(s * 4.9 - 1.9, -3.9, s * 4.9 + 1.9, -3.4, "rubber", -0.6, 0.6)   # blades, edge on
+    rod(s * 1.8, 2.4, s * 2.6, 3.6, 0.3, "steel_dark", d=0, verts=5)      # skid legs
+rect(-3.4, 3.4, 3.4, 3.9, "steel_dark", -1, 1)                        # skid
+sprite("drone", -8, -5, 16, 10)
+
+# extinguisher rack: wall bracket with a clamp band holding a red extinguisher (anchor: centre)
+rect(-1.6, -7, 1.6, 7, "steel_dark", 2.6, 3.6)                       # wall strap
+rect(-1.2, 6.2, 1.2, 7, "steel_dark", -3, 3.6)                       # foot cradle
+rod(0, -3.2, 0, 6.2, 2.7, "valve", d=0, verts=16)                    # bottle
+blob(0, -3.2, 2.7, "valve", scale=(1, 1, 0.42))
+rod(0, 5.4, 0, 6.3, 2.85, "steel_dark", d=0, verts=16)
+rect(-1.9, 0.4, 1.5, 3.4, "cabinet", -3.0, -2.6)                     # label
+rect(-1.9, 1.5, 1.5, 2.1, "valve", -3.1, -2.95)
+rod(-3.0, -1.6, 3.0, -1.6, 0.55, "steel", d=-1.5, verts=6)           # clamp band
+rect(-3.2, -2.2, 3.2, -1.0, "steel", -3.1, 3.0)
+rod(0, -4.4, 0, -5.4, 0.8, "steel", d=0)                             # neck
+rect(-1.3, -6.4, 1.6, -5.3, "steel_dark", -1.2, 1.2)                  # valve head
+rod(-0.5, -6.7, 2.8, -6.4, 0.32, "chrome", d=0, verts=5)              # lever
+curve([(1.2, -5.8), (3.0, -5.2), (3.6, -2.6), (3.3, 1.6)], 0.42, "rubber", d=-1.6)
+rod(3.3, 1.6, 3.2, 2.9, 0.55, "steel_dark", d=-1.6)
+sprite("extinguisher_rack", -5, -8, 10, 16)
+
+
 # ---------------------------------------------------------------- render each sprite alone
 def render(name, left, top, w, h):
     scene.render.resolution_x = w
@@ -668,6 +845,8 @@ def render(name, left, top, w, h):
 
 all_objs = [o for objs, *_ in SPRITES.values() for o in objs]
 for name, (objs, left, top, w, h) in SPRITES.items():
+    if ONLY and name not in ONLY:
+        continue
     for o in all_objs:
         o.hide_render = o not in objs
     if name == "drill_head":
@@ -689,4 +868,4 @@ for name, (objs, left, top, w, h) in SPRITES.items():
         slide_e.location = rest
     else:
         render(name, left, top, w, h)
-print("DRILL_DONE", list(SPRITES), "MUZZLE_LEN", MUZZLE_LEN)
+print("DRILL_DONE", [n for n in SPRITES if not ONLY or n in ONLY], "MUZZLE_LEN", MUZZLE_LEN)

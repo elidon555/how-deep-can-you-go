@@ -66,7 +66,12 @@ func _physics_process(dt: float) -> void:
 				velocity = Vector2(randf_range(-40, 40), 60)
 				Sfx.play("bat_screech", global_position, -4.0)
 		State.FLY:
-			if not is_instance_valid(_target):
+			var flare := Thrown.scary_near(get_tree(), global_position)
+			if flare:                                   # a burning flare: it veers off
+				state = State.PEEL
+				_t = 1.2
+				velocity = (global_position - flare.global_position).normalized() * SPEED + Vector2(0, -40)
+			elif not is_instance_valid(_target):
 				state = State.PEEL
 			else:
 				var to := _target.global_position + Vector2(0, -6) - global_position

@@ -15,11 +15,18 @@ func _ready() -> void:
 func prompt(p: Player) -> String:
 	if p == downed or not downed.downed or p.downed:
 		return ""
-	return "Hold E: help %s up" % downed.tag_name()
+	if downed.carried_by:
+		return ""
+	return "Hold E: help %s up · tap E: carry" % downed.tag_name()
 
 
-func interact(_p: Player) -> void:
-	downed.revive()
+func interact(p: Player) -> void:
+	downed.revive(p)
+
+
+## A quick tap (not a hold): hoist them onto your shoulders instead.
+func tap(p: Player) -> void:
+	p.carry(downed)
 
 
 func hold_time() -> float:

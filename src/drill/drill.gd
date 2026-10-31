@@ -1,13 +1,16 @@
 extends AnimatableBody2D
 class_name Drill
 ## The crew's drilling machine: hull, fuel, speed, damage and breaches, the stations inside,
-## the braces and the ladders. Its systems are components (children):
+## the braces. Its systems are components (children):
 ##   cutter (drill_cutter.gd)  how it bores down, falls into caves and crashes
 ##   thermal (drill_heat.gd)   heat, overheating, the coolant flush
 ##   flooding (drill_flood.gd) water through breaches, the bilge pump
 ##   guns (drill_guns.gd)      the hull turrets and the gunner's seat
-## Carries whoever is inside. Braces grip the walls while it's still; the ladders fold away
-## when everyone is aboard and telescope down when anyone is outside. The side doors are hatches
+##   power (drill_power.gd)    the generator, brownouts, the fuse boxes
+##   fires (drill_fires.gd)    fire in the cabin
+##   modules (drill_modules.gd) what's been built onto it (cargo hold, floodlights ...)
+## Carries whoever is inside. Braces grip the walls while it's still. The crew gets back in by
+## grappling the hull (PlayerTools hooks it and climbs in at a door). The side doors are hatches
 ## that open for the crew (anyone near the doorway, inside or out) and are shut otherwise, so
 ## creatures (and water) only get in while one is open. Damage (boulders,
 ## crawlers, worms, crashes) opens hull breaches that leak hull until repaired. All of the
@@ -42,7 +45,6 @@ const BRACE_TIME := 0.35       # seconds for the braces to grip / let go
 const BRACE_HOLD := 0.6        # it has to stay still this long before the braces grip again
 const HATCH_TIME := 0.35       # seconds for a hatch to slide open / shut
 const HATCH_REACH := 44.0      # crew this close to a doorway opens its hatch
-const LADDER_TIME := 0.9       # seconds for the ladders to fold away / come down
 const MAX_BREACHES := 4
 const BREACH_LEAK := 0.35      # hull per second per open breach
 
@@ -54,15 +56,18 @@ var hull := 100.0
 var max_hull := 100.0
 var is_wrecked := false
 var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls
-var ladders_out := 1.0         # 0 = folded away, 1 = all the way down
 var hatches := [0.0, 0.0]      # left, right: 0 = shut, 1 = open
 var _hatch_shapes: Array[CollisionShape2D] = []
 var _still_t := 0.0
-var _ladders: Array[DrillLadder] = []
 var cutter := DrillCutter.new()
 var thermal := DrillHeat.new()
 var flooding := DrillFlood.new()
 var guns := DrillGuns.new()
+var power := DrillPower.new()
+var fires := DrillFires.new()
+var modules := DrillModules.new()
+var cargo_count := 0           # ore the head ground through, kept in the cargo hold (module)
+var cargo_value := 0
 var art := DrillArt.new()
 var puppet := false            # online client: shows the host's drill, doesn't run it
 var running := false           # the head is turning (engine on, not stalled)
@@ -94,7 +99,7 @@ func _ready() -> void:
 	poly.points = PackedVector2Array(HEAD)
 	head.shape = poly
 	add_child(head)
-	for c in [cutter, thermal, flooding, guns]:
+	for c in [cutter, thermal, flooding, guns, power, fires, modules]:
 		c.drill = self
 		add_child(c)
 	art.drill = self
@@ -106,13 +111,11 @@ func _ready() -> void:
 	_add_station(Stations.GunnerSeat.new(), Vector2(18, FLOOR))
 	_add_station(Stations.Coolant.new(), Vector2(42, FLOOR))
 	_add_station(Stations.Helm.new(), Vector2(68, FLOOR))
+	for i in 2:
+		var j := Junction.new()
+		j.index = i
+		_add_station(j, Vector2(Junction.X[i], Junction.Y))
 	guns.mount()
-	for side in [-1, 1]:          # ladders outside, next to each door
-		var l := DrillLadder.new()
-		l.position = Vector2(side * (HW + 9.0), 0)
-		l.top = DOOR_TOP
-		add_child(l)
-		_ladders.append(l)
 	for n in ["drill_loop", "drill_idle"]:
 		_sounds[n] = Sfx.looping(n)
 	_engine.max_distance = 1200.0
@@ -134,6 +137,7 @@ func place(at_x: float) -> void:
 func apply_upgrades() -> void:
 	max_fuel = Progress.drill_fuel()
 	max_hull = Progress.drill_hull()
+	modules.build()
 	fuel = minf(fuel, max_fuel)
 	changed.emit()
 
@@ -142,19 +146,23 @@ func _physics_process(dt: float) -> void:
 	if puppet:
 		_engine_sound(running and not is_wrecked)
 		flooding.update_sounds()
+		power.update_sounds()
 		return
 	if is_wrecked:
 		return
 	thermal.update(dt)
 	flooding.update(dt)
-	running = speed != Speed.STOP and fuel > 0.0 and not thermal.overheated and not flooding.drowned()
+	running = speed != Speed.STOP and fuel > 0.0 and not thermal.overheated and not flooding.drowned() \
+		and power.powered("helm")
+	power.update(dt)
+	fires.update(dt)
 	if running and not infinite_fuel():
 		fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
 		if fuel == 0.0:
 			Sfx.play("drill_stall", global_position)
 			changed.emit()
 	cutter.update(dt, running)
-	_update_braces_and_ladders(dt)
+	_update_braces(dt)
 	_update_hatches(dt)
 	guns.update()
 	_engine_sound(running)
@@ -176,18 +184,11 @@ func _engine_sound(running: bool) -> void:
 		_engine.stop()
 
 
-## Braces let go while it sinks and grip when it holds still. Ladders come down whenever a
-## crew member is outside (so nobody gets locked out) and fold away once everyone is aboard.
-func _update_braces_and_ladders(dt: float) -> void:
+## Braces let go while it sinks and grip when it holds still.
+func _update_braces(dt: float) -> void:
 	# (it sinks in little steps, so "still" means still for a moment, or the braces flutter)
 	_still_t = 0.0 if cutter.moving else _still_t + dt
 	grip = move_toward(grip, 1.0 if _still_t > BRACE_HOLD else 0.0, dt / BRACE_TIME)
-	var want := 1.0 if _anyone_outside() else 0.0
-	if want != ladders_out and (ladders_out == 0.0 or ladders_out == 1.0):
-		Sfx.play("lever", global_position, -8.0)          # the fold / unfold starts
-	ladders_out = move_toward(ladders_out, want, dt / LADDER_TIME)
-	for l in _ladders:
-		l.extend = ladders_out
 
 
 ## A hatch slides open while any crew member is near its doorway (inside or out) and shuts
@@ -223,13 +224,6 @@ func blocks(p: Vector2, from_inside: bool) -> bool:
 	return true                                                        # walls, roof, floor, head
 
 
-func _anyone_outside() -> bool:
-	for p: Player in get_tree().get_nodes_in_group("player"):
-		if not contains(p.global_position) or p.rope in _ladders:
-			return true
-	return false
-
-
 # ---------------------------------------------------------------- crew actions (stations)
 
 func cycle_speed() -> void:
@@ -238,6 +232,15 @@ func cycle_speed() -> void:
 	if speed != Speed.STOP and fuel > 0.0:
 		Sfx.play("drill_start", global_position)
 	changed.emit()
+
+
+## The cargo hold's ore, sold at the workbench: its value (the hold empties).
+func take_cargo() -> int:
+	var v := cargo_value
+	cargo_count = 0
+	cargo_value = 0
+	changed.emit()
+	return v
 
 
 func add_fuel(amount: float) -> void:
@@ -259,6 +262,7 @@ func damage(amount: float, at: Vector2) -> void:
 		return
 	damage_quietly(amount)
 	damaged.emit(amount)
+	power.knock(amount)
 	Sfx.play("hull_hit", at)
 	if get_breaches().size() < MAX_BREACHES and amount >= 3.0:
 		var b := Stations.Breach.new()
@@ -326,10 +330,10 @@ func net_state() -> Array:
 	for t in guns.turrets:
 		aims.append_array([t.target_aim(), t.recoil()])
 	var gunner_id: int = guns.gunner.get_meta("net_id", 0) if guns.gunner else 0
-	return [speed, fuel, max_fuel, hull, max_hull, is_wrecked, grip, ladders_out, hatches[0], hatches[1],
+	return [speed, fuel, max_fuel, hull, max_hull, is_wrecked, grip, hatches[0], hatches[1],
 		running, cutter.drilling, cutter.moving, cutter.chew_mat, cutter.judder, thermal.heat,
 		thermal.overheated, thermal.vent_wait(), flooding.level, flooding.leaking, gunner_id, aims,
-		breaches, _medkit.wait()]
+		breaches, _medkit.wait(), power.net_state(), fires.net_state(), cargo_count, cargo_value]
 
 
 func net_apply(s: Array) -> void:
@@ -341,27 +345,28 @@ func net_apply(s: Array) -> void:
 	max_hull = s[4]
 	is_wrecked = s[5]
 	grip = s[6]
-	ladders_out = s[7]
-	for l in _ladders:
-		l.extend = ladders_out
-	hatches = [s[8], s[9]]
-	running = s[10]
-	cutter.drilling = s[11]
-	cutter.moving = s[12]
-	cutter.chew_mat = s[13]
-	cutter.judder = s[14]
-	thermal.heat = s[15]
-	thermal.overheated = s[16]
-	thermal.show_vent_wait(s[17])
-	flooding.level = s[18]
-	flooding.leaking = s[19]
-	var g: Node = Net.session.entities.node(s[20]) if s[20] != 0 and Net.session else null
+	hatches = [s[7], s[8]]
+	running = s[9]
+	cutter.drilling = s[10]
+	cutter.moving = s[11]
+	cutter.chew_mat = s[12]
+	cutter.judder = s[13]
+	thermal.heat = s[14]
+	thermal.overheated = s[15]
+	thermal.show_vent_wait(s[16])
+	flooding.level = s[17]
+	flooding.leaking = s[18]
+	var g: Node = Net.session.entities.node(s[19]) if s[19] != 0 and Net.session else null
 	guns.gunner = g as Player
-	var aims: Array = s[21]
+	var aims: Array = s[20]
 	for i in mini(guns.turrets.size(), aims.size() / 2):
 		guns.turrets[i].show_aim(aims[i * 2], aims[i * 2 + 1])
-	_show_breaches(s[22])
-	_medkit.show_wait(s[23])
+	_show_breaches(s[21])
+	_medkit.show_wait(s[22])
+	power.net_apply(s[23])
+	fires.show_fires(s[24])
+	cargo_count = s[25]
+	cargo_value = s[26]
 	if before != [speed, fuel, hull, is_wrecked, thermal.overheated, flooding.level >= DrillFlood.STALL]:
 		changed.emit()
 

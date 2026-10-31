@@ -51,10 +51,11 @@ func aim_at(p: Vector2) -> void:
 	_want = clampf(atan2(d.y, d.x * side), -PI / 2.0, PI / 2.0)
 
 
-func fire() -> void:
+## rate < 1 in a brownout: it reloads slower.
+func fire(rate := 1.0) -> void:
 	if _cool > 0.0:
 		return
-	_cool = COOLDOWN
+	_cool = COOLDOWN / maxf(rate, 0.25)
 	_recoil = 1.0
 	var dir := _dir()
 	var b := Bolt.new()

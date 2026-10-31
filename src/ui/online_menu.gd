@@ -29,6 +29,7 @@ func _ready() -> void:
 	_name.add_theme_font_size_override("font_size", 22)
 	_name.text_changed.connect(func(t): Settings.player_name = t.strip_edges())
 	box.add_child(_name)
+	box.add_child(UiStyle.role_button())
 	box.add_child(UiStyle.button("Host a game", func(): host_pressed.emit(int(_port.value))))
 	box.add_child(UiStyle.label("— or join one —", 18, UiStyle.DIM))
 	_address.placeholder_text = "host's address (e.g. 192.168.1.20)"

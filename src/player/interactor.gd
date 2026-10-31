@@ -7,6 +7,7 @@ class_name Interactor
 signal prompt_changed(text: String)
 
 const REACH := 40.0
+const TAP := 0.25              # shorter than this on a hold-E target counts as a tap
 
 var player: Player
 var target: Node2D = null
@@ -28,14 +29,25 @@ func _physics_process(dt: float) -> void:
 		_set_prompt("")
 		return
 	target = _nearest()
+	if player.carrying and (target == null or not target.has_method("takes_carried")):
+		_set_prompt("E: put %s down" % player.carrying.tag_name())     # hands full
+		if player.input.just_pressed("interact"):
+			player.drop_carried()
+		return
 	if target == null:
 		_hold = 0.0
 		_set_prompt("")
 		return
 	var text: String = target.prompt(player)
-	var need: float = target.hold_time()
+	var need: float = target.hold_time() / Roles.work_rate(player.role, target)
 	if need > 0.0:
-		_hold = _hold + dt if player.input.pressed("interact") else 0.0
+		if player.input.pressed("interact"):
+			_hold += dt
+		elif _hold > 0.0 and _hold < TAP and target.has_method("tap"):
+			target.tap(player)             # a quick tap does something else (carry)
+			_hold = 0.0
+		else:
+			_hold = 0.0
 		if _hold > 0.0:
 			text += "  " + "▮".repeat(int(_hold / need * 10.0)) + "▯".repeat(10 - int(_hold / need * 10.0))
 		if _hold >= need:
@@ -50,6 +62,8 @@ func _nearest() -> Node2D:
 	var best: Node2D = null
 	var best_score := INF
 	for n: Node2D in get_tree().get_nodes_in_group("interactable"):
+		if player.carrying and not n.has_method("takes_carried"):
+			continue                    # hands full: only somewhere to set them down counts
 		var d := n.global_position.distance_to(player.global_position)
 		var score: float = d - n.priority() * 100.0       # urgent things first, then the closest
 		if d < REACH and score < best_score and n.prompt(player) != "":

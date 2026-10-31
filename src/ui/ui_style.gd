@@ -63,3 +63,16 @@ static func centered_box(parent: Control, width := 420.0) -> VBoxContainer:
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	pc.add_child(box)
 	return box
+
+
+## A button that cycles your crew role (Roles, saved in Settings) and shows its perk.
+static func role_button() -> Button:
+	var b := button("", func(): pass)
+	b.custom_minimum_size = Vector2(380, 46)
+	var show := func(): b.text = "Role: %s — %s" % [Roles.NAMES[Settings.role], Roles.PERKS[Settings.role]]
+	show.call()
+	b.pressed.connect(func():
+		Settings.role = Roles.next(Settings.role)
+		Settings.save()
+		show.call())
+	return b

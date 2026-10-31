@@ -925,6 +925,125 @@ def floor(name, S, rng):
     save_glow(name, glow)
 
 
+def bubble(img, height, glow, rng, cy, cx, r, pal, gcol):
+    """A gas bubble trapped in the ice: a dark pressure rim, a pale bright inside, a hot
+    highlight on the lit side. Slightly dimpled in the height field."""
+    S = img.shape[0]
+    ry = r * rng.uniform(0.9, 1.5)
+    R = int(np.ceil(max(r, ry))) + 2
+
+    def inside(dy, dx):
+        return (dx / (r + 0.4)) ** 2 + (dy / (ry + 0.4)) ** 2 <= 1.0
+    ys, xs, dy, dx = stamp_mask(S, cy, cx, R, inside)
+    if len(ys) == 0:
+        return
+    occ = np.zeros((S, S), bool)
+    occ[ys, xs] = True
+    rim = occ & ~(np.roll(occ, 1, 0) & np.roll(occ, -1, 0) & np.roll(occ, 1, 1) & np.roll(occ, -1, 1))
+    inner = occ & ~rim
+    tl = inner & (~np.roll(inner, 1, 0) | ~np.roll(inner, 1, 1))         # lit inner edge, top-left
+    br = inner & (~np.roll(inner, -1, 0) | ~np.roll(inner, -1, 1)) & ~tl  # shaded inner edge
+    img[occ] = pal[2]                                                    # dark pressure ring
+    img[inner] = pal[8]
+    img[tl] = pal[9]
+    img[br] = pal[6]
+    hi = tl & ~np.roll(tl, 1, 0) & ~np.roll(tl, 1, 1)
+    img[hi] = pal[9]
+    ring_tl = rim & (~np.roll(occ, 1, 0) | ~np.roll(occ, 1, 1))
+    img[ring_tl] = pal[3]
+    height[occ] = np.minimum(height[occ], 0.55)
+    height[rim] -= 0.25
+    core = inner
+    glow[core] = np.maximum(glow[core], gcol * 0.5)
+    glow[hi] = np.maximum(glow[hi], gcol * 0.9)
+
+
+def ice(name, S, rng):
+    """Frozen layer: pale cyan slabs of glacier ice split by deep blue cracks, cloudy frost
+    patches, strings of trapped gas bubbles. The glow map is a faint cold light coming from
+    inside: crack cores, bubbles and a few veins."""
+    pal = palette("#0a1a2b", "#10283f", "#173955", "#20506f", "#2d6b8b", "#3f87a6", "#5ca6c2",
+                  "#82c4d9", "#aee0ee", "#d9f4fa")
+    yy, xx = np.mgrid[0:S, 0:S]
+    idx = voronoi(S, rng.random((9, 2)) * S, 0.8, ((fractal(S, 4, 3, rng) - 0.5) * 14,
+                                                   (fractal(S, 4, 3, rng) - 0.5) * 14))
+    gap = borders(idx)
+    gap = chip_corners(gap, idx, rng, 8, S)
+    d = dist_to(~gap, 6)
+    height = np.clip(d / 2.2, 0, 1) ** 0.8
+    rough = fractal(S, 10, 3, rng)
+    height += (rough - 0.5) * 0.14
+    # slow diagonal sheen across each slab (whole cycles, so it wraps), warped by noise
+    warp = (fractal(S, 5, 2, rng) - 0.5) * 2.5
+    sheen = np.sin(2 * np.pi * (3 * xx / S + 2 * yy / S) + warp * 2)
+    face = rng.choice([5.4, 6.0, 6.5], idx.max() + 1)
+    cloud = fractal(S, 6, 3, rng)
+    clear = fractal(S, 4, 2, rng)
+    shade = face[idx] + baked_light(height, 2.4) * 4.2 + (rough - 0.5) * 1.4 + sheen * 0.45
+    shade = np.where(cloud > 0.6, shade + 1.4, shade)                   # frosted, milky patches
+    shade = np.where(clear < 0.36, shade - 1.3, shade)                  # clear deep ice
+    shade = np.where(gap, 1.2, shade)
+    lip = ~gap & (np.roll(gap, 1, 0) | np.roll(gap, 1, 1))              # lit far wall of a seam
+    shade = np.where(lip, shade + 1.5, shade)
+    img = pal[np.clip(np.round(shade), 0, len(pal) - 1).astype(int)]
+    glow = np.zeros((S, S, 3))
+    gcol = np.array([70.0, 190.0, 235.0])
+    # fine cracks wandering through the slabs: dark groove, bright lit lip, faint light inside
+    for _ in range(7):
+        y, x = rng.uniform(0, S), rng.uniform(0, S)
+        pts, _ = walk(rng, y, x, int(rng.integers(30, 80)), rng.uniform(0, 6.28), 0.28)
+        for k, (py, px) in enumerate(pts):
+            iy, ix = int(py) % S, int(px) % S
+            img[iy, ix] = pal[0]
+            height[iy, ix] -= 0.5
+            below, right = (iy + 1) % S, (ix + 1) % S
+            if not gap[below, ix]:
+                img[below, ix] = pal[8]
+            if not gap[iy, right] and k % 2 == 0:
+                img[iy, right] = pal[7]
+            glow[iy, ix] = np.maximum(glow[iy, ix], gcol * (0.32 + 0.2 * (k % 5 == 0)))
+    # the seams between slabs are open crevasses: a thin cold light deep inside the long ones
+    core = gap & np.roll(gap, 1, 0) & np.roll(gap, -1, 0) | gap & np.roll(gap, 1, 1) & np.roll(gap, -1, 1)
+    glow = np.where(core[..., None], np.maximum(glow, gcol * 0.24), glow)
+    # strings of bubbles that rose and froze in place: big at the bottom, thinning upward
+    for _ in range(6):
+        x, y = rng.uniform(0, S), rng.uniform(0, S)
+        for k in range(int(rng.integers(3, 7))):
+            r = max(0.8, rng.uniform(2.0, 3.2) - 0.35 * k)
+            bubble(img, height, glow, rng, int(y) % S, int(x) % S, r, pal, gcol)
+            y -= r * 2 + rng.uniform(2, 6)
+            x += rng.uniform(-2.5, 2.5)
+    for _ in range(26):                                                  # stray micro bubbles
+        iy, ix = int(rng.integers(0, S)), int(rng.integers(0, S))
+        if not gap[iy, ix]:
+            img[iy, ix] = pal[9]
+            img[(iy + 1) % S, (ix + 1) % S] = pal[2]
+            glow[iy, ix] = gcol * 0.4
+    # frost: tiny white ferns and dust along the seams, a few drifting in the faces
+    ys, xs = np.nonzero(gap)
+    for _ in range(46):
+        i = rng.integers(len(ys))
+        sy, sx = rng.choice([-1, 1]), rng.choice([-1, 1])
+        for k in range(int(rng.integers(2, 6))):
+            iy, ix = (ys[i] + sy * k) % S, (xs[i] + sx * (k + 1) // 2 * 2) % S
+            if not gap[iy, ix]:
+                img[iy, ix] = pal[9] if k % 2 == 0 else pal[8]
+    for _ in range(70):
+        iy, ix = int(rng.integers(0, S)), int(rng.integers(0, S))
+        if not gap[iy, ix]:
+            img[iy, ix] = pal[8]
+    # faint inner veins: a few light-scattering streaks drawn diagonally across the clear ice
+    for _ in range(4):
+        y, x = rng.uniform(0, S), rng.uniform(0, S)
+        pts, _ = walk(rng, y, x, int(rng.integers(14, 30)), -0.7 + rng.normal(0, 0.2), 0.08)
+        for py, px in pts:
+            iy, ix = int(py) % S, int(px) % S
+            if not gap[iy, ix]:
+                glow[iy, ix] = np.maximum(glow[iy, ix], gcol * 0.2)
+    save(name, img, height, 2.4)
+    save_glow(name, glow)
+
+
 def mask(name, size, rng):
     """Tileable low-frequency noise used to cut holes in the back wall."""
     m = fractal(size, 4, 4, rng)
@@ -935,19 +1054,35 @@ def mask(name, size, rng):
 
 
 if __name__ == "__main__":
+    import sys
+    only = sys.argv[1:]          # e.g. `gen_textures.py ice` regenerates just that material
+
+    def want(n):
+        return not only or n in only
     S = 128
-    dirt("dirt", S, np.random.default_rng(1337))
-    stone("stone", S, np.random.default_rng(1338))
-    hard("hard", S, np.random.default_rng(1339))
-    bedrock("bedrock", S, np.random.default_rng(1340))
-    wall("wall", 256, np.random.default_rng(1341))
-    crystal("crystal", S, np.random.default_rng(1342))
-    magma("magma", S, np.random.default_rng(1343))
-    floor("floor", S, np.random.default_rng(1344))
-    # the wall holes keep their old layout: this is the generator state the first version of
-    # this script had reached by the time it made the mask
-    rng = np.random.default_rng()
-    rng.bit_generator.state = {"bit_generator": "PCG64", "state": {
-        "state": 220857099274669642158752682641119722502, "inc": 57444059933479602987059412884031907751},
-        "has_uint32": 1, "uinteger": 3763446967}
-    mask("wall_mask", 512, rng)
+    if want("dirt"):
+        dirt("dirt", S, np.random.default_rng(1337))
+    if want("stone"):
+        stone("stone", S, np.random.default_rng(1338))
+    if want("hard"):
+        hard("hard", S, np.random.default_rng(1339))
+    if want("bedrock"):
+        bedrock("bedrock", S, np.random.default_rng(1340))
+    if want("wall"):
+        wall("wall", 256, np.random.default_rng(1341))
+    if want("crystal"):
+        crystal("crystal", S, np.random.default_rng(1342))
+    if want("magma"):
+        magma("magma", S, np.random.default_rng(1343))
+    if want("floor"):
+        floor("floor", S, np.random.default_rng(1344))
+    if want("ice"):
+        ice("ice", S, np.random.default_rng(1345))
+    if want("wall_mask"):
+        # the wall holes keep their old layout: this is the generator state the first version of
+        # this script had reached by the time it made the mask
+        rng = np.random.default_rng()
+        rng.bit_generator.state = {"bit_generator": "PCG64", "state": {
+            "state": 220857099274669642158752682641119722502, "inc": 57444059933479602987059412884031907751},
+            "has_uint32": 1, "uinteger": 3763446967}
+        mask("wall_mask", 512, rng)

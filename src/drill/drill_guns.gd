@@ -44,5 +44,5 @@ func update() -> void:
 	var aim := gunner.aim_point()
 	var t: Turret = turrets[1] if aim.x >= drill.global_position.x else turrets[0]
 	t.aim_at(aim)
-	if gunner.wants_fire():
-		t.fire()
+	if gunner.wants_fire() and drill.power.powered("guns"):
+		t.fire(drill.power.ratio() * Roles.reload_mult(gunner.role))

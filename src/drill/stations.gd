@@ -18,12 +18,15 @@ class Helm extends Station:
 
 	func prompt(_p: Player) -> String:
 		var next: String = Drill.SPEED_NAMES[(drill.speed + 1) % 3]
+		if not drill.power.powered("helm"):
+			return "Helm: no power! Fix the right fuse box"
 		if drill.fuel <= 0.0:
 			return "Helm: no fuel! Shovel coal into the furnace"
 		return "E: drill speed → %s" % next
 
 	func interact(_p: Player) -> void:
-		drill.cycle_speed()
+		if drill.power.powered("helm"):
+			drill.cycle_speed()
 		queue_redraw()
 
 	func _process(_dt: float) -> void:
@@ -40,7 +43,8 @@ class Helm extends Station:
 		draw_circle(Vector2(8, -2) + Vector2(sin(ang), -cos(ang)) * 12.0, 2.5, Color("c8322a"))
 
 
-## Coal goes in here; the mouth glows while the head is turning.
+## Coal goes in here; the mouth glows while the head is turning. It drives the generator, and
+## its output (Low / Normal / Boost, DrillPower) is set here.
 class Furnace extends Station:
 	var _tex: Texture2D = Art.lit(Stations.DIR + "furnace.png")
 	var _fire := Sprite2D.new()
@@ -75,15 +79,17 @@ class Furnace extends Station:
 	func prompt(p: Player) -> String:
 		if p.coal > 0:
 			return "E: shovel in %d coal (+%d fuel)" % [p.coal, int(p.coal * Drill.FUEL_PER_COAL)]
-		if Drill.infinite_fuel():
-			return ""
-		return "Furnace: dig up coal to fuel the drill" if drill.fuel < drill.max_fuel * 0.5 else ""
+		var pw := drill.power
+		var next: String = DrillPower.OUTPUT_NAMES[(pw.output + 1) % 3]
+		return "E: generator → %s   (power %d / %d needed)" % [next, int(pw.supply()), int(pw.demand)]
 
 	func interact(p: Player) -> void:
-		var c := p.take_coal()
-		if c > 0:
+		if p.coal > 0:
+			var c := p.take_coal()
 			drill.add_fuel(c * Drill.FUEL_PER_COAL)
 			Sfx.play("furnace", global_position)
+			return
+		drill.power.cycle_output()
 
 	func _process(_dt: float) -> void:
 		queue_redraw()
@@ -91,26 +97,27 @@ class Furnace extends Station:
 	func _draw() -> void:
 		Stations.stand(self, _tex)
 		# the fire burns brighter while the head is cutting rock, and flickers
-		var heat := 0.5 + (0.9 if drill.cutter.drilling else 0.0) + 0.15 * sin(Time.get_ticks_msec() * 0.02)
+		var heat := 0.3 + 0.45 * drill.power.output + (0.5 if drill.cutter.drilling else 0.0) \
+			+ 0.15 * sin(Time.get_ticks_msec() * 0.02)
 		_fire.modulate = Color(heat, heat, heat) if drill.fuel > 0.0 else Color(0.2, 0.2, 0.2)
 		_embers.emitting = drill.fuel > 0.0
 
 
-## Sells the metal ore you carry, restocks ropes and opens the upgrades.
+## Sells the ore you carry (and the cargo hold's), restocks flares and dynamite, opens the upgrades.
 class Workbench extends Station:
 	var _tex: Texture2D = Art.lit(Stations.DIR + "workbench.png")
 
 	func prompt(p: Player) -> String:
-		if p.ore_value > 0:
-			return "E: sell %d ore ($%d) and upgrade" % [p.ore_count, p.ore_value]
-		return "E: workbench (upgrades, ropes)"
+		if p.ore_value + drill.cargo_value > 0:
+			return "E: sell %d ore ($%d) and upgrade" % [p.ore_count + drill.cargo_count, p.ore_value + drill.cargo_value]
+		return "E: workbench (upgrades, restock)"
 
 	func interact(p: Player) -> void:
-		var v := p.take_ore_value()
+		var v := p.take_ore_value() + drill.take_cargo()
 		if v > 0:
 			Progress.add_money(v)
 			Sfx.play("coins", global_position)
-		p.refill_ropes()
+		p.restock()
 		drill.workbench_used.emit(p)
 
 	func _draw() -> void:
@@ -123,17 +130,34 @@ class Medkit extends Station:
 	var _ready_at := 0.0
 	var _tex: Texture2D = Art.lit(Stations.DIR + "medkit.png")
 
+	## Bring a downed crewmate here (carried) and the medkit patches them up.
+	func takes_carried() -> bool:
+		return true
+
 	func prompt(p: Player) -> String:
+		if p.carrying:
+			return "E: patch up %s" % p.carrying.tag_name() if drill.power.powered("medkit") else "Medkit: no power!"
 		if not p.is_hurt():
 			return ""
+		if not drill.power.powered("medkit"):
+			return "Medkit: no power! Fix the left fuse box"
 		var wait := _ready_at - Time.get_ticks_msec() / 1000.0
 		return "E: patch yourself up" if wait <= 0.0 else "Medkit recharging (%ds)" % ceili(wait)
 
 	func interact(p: Player) -> void:
+		if not drill.power.powered("medkit"):
+			return
+		if p.carrying:                       # the downed are patched up right away
+			var hurt := p.carrying
+			p.drop_carried()
+			hurt.revive(p)
+			hurt.heal_full()
+			Sfx.play("repair", global_position)
+			return
 		if Time.get_ticks_msec() / 1000.0 < _ready_at:
 			return
 		p.heal_full()
-		_ready_at = Time.get_ticks_msec() / 1000.0 + RECHARGE
+		_ready_at = Time.get_ticks_msec() / 1000.0 + RECHARGE * (0.5 if p.role == "medic" else 1.0)
 		Sfx.play("repair", global_position)
 		queue_redraw()
 
@@ -204,10 +228,11 @@ class Sonar extends Station:
 	var _t := 0.0
 
 	func prompt(_p: Player) -> String:
-		return "E: sonar"
+		return "E: sonar" if drill.power.powered("sonar") else "Sonar: no power! Fix the left fuse box"
 
 	func interact(p: Player) -> void:
-		drill.sonar_used.emit(p)
+		if drill.power.powered("sonar"):
+			drill.sonar_used.emit(p)
 
 	func _process(dt: float) -> void:
 		_t += dt
@@ -230,7 +255,9 @@ class GunnerSeat extends Station:
 	var _tex: Texture2D = Art.lit(Stations.DIR + "gunner.png") if ResourceLoader.exists(Stations.DIR + "gunner.png") else null
 
 	func prompt(_p: Player) -> String:
-		return "" if drill.guns.gunner else "E: man the turrets"
+		if drill.guns.gunner:
+			return ""
+		return "E: man the turrets" if drill.power.powered("guns") else "Turrets: no power! Fix the right fuse box"
 
 	func interact(p: Player) -> void:
 		drill.guns.take(p)
@@ -251,12 +278,15 @@ class Coolant extends Station:
 
 	func prompt(_p: Player) -> String:
 		var wait := drill.thermal.vent_ready_at - Time.get_ticks_msec() / 1000.0
+		if not drill.power.powered("coolant"):
+			return "Coolant: no power! Fix the right fuse box"
 		if wait > 0.0:
 			return "Coolant recharging (%ds)" % ceili(wait)
 		return "E: vent coolant (heat %d%%)" % int(drill.thermal.heat)
 
 	func interact(_p: Player) -> void:
-		drill.thermal.vent()
+		if drill.power.powered("coolant"):
+			drill.thermal.vent()
 
 	func _process(_dt: float) -> void:
 		queue_redraw()

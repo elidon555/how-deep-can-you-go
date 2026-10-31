@@ -2,7 +2,7 @@ class_name CampItems
 ## Things in ruined camps you can use (E): crates to search and notes to read.
 
 
-## An old supply crate: search it once for whatever the last crew left (ore, coal, rope).
+## An old supply crate: search it once for whatever the last crew left (ore, coal, flares).
 class LootCrate extends Station:
 	signal searched(pos: Vector2, text: String)
 	var seed_value := 0
@@ -43,9 +43,9 @@ class LootCrate extends Station:
 		if coal > 0:
 			found.append("%d coal" % coal)
 		if r.randf() < 0.4:
-			p.ropes += 2
+			p.tools.flares += 2
 			p.bag_changed.emit()
-			found.append("2 ropes")
+			found.append("2 flares")
 		Sfx.play("crate_open", global_position)
 		get_tree().call_group("hud", "toast", "Found " + ", ".join(found), 1.6)
 		queue_redraw()

@@ -589,6 +589,201 @@ def cave_far_bottom(name, S, rng):
     print("wrote", name, f"{(a > 0.99).mean():.0%} solid")
 
 
+def ice_spire(lit, dark, x, base, hgt, width, rng, up=True):
+    """A faceted ice spire (a bundle of angular crystals): the left half goes to `lit`, the
+    right half to `dark`, so the two planes read as facets catching the cold light."""
+    s = -1 if up else 1
+    tip = (x + rng.uniform(-0.12, 0.12) * width, base + s * hgt)
+    kink_y = base + s * hgt * rng.uniform(0.45, 0.65)
+    kl = (x - width * rng.uniform(0.4, 0.55), kink_y)
+    kr = (x + width * rng.uniform(0.4, 0.55), kink_y)
+    foot_l, foot_r = (x - width / 2 - 2, base - s * 5), (x + width / 2 + 2, base - s * 5)
+    mid = (tip[0] + rng.uniform(-0.1, 0.1) * width, base - s * 5)
+    lit.poly([foot_l, kl, tip, mid])
+    dark.poly([mid, tip, kr, foot_r])
+
+
+def cave_far_ice(name, S, rng):
+    """The frozen layer's backdrop: a rime-crusted cavern with towers of faceted ice rising
+    from the floor, long icicles hanging from the roof, two frozen waterfalls and drifting
+    snow. Value only (tinted per zone): ice is light, the crust beneath it a darker grey."""
+    sh, top, bot = shelf(S, S, 476, 26, rng, cells=8)
+    rock = Canvas(S, S)
+    rock.img = Image.fromarray(np.where(sh, 255, 0).astype(np.uint8), "L")
+    rock.dr = ImageDraw.Draw(rock.img)
+    ceil = lambda x: bot[int(x) % S] - S - 2
+    floor = lambda x: top[int(x) % S] + 2
+    lit, dark = Canvas(S, S), Canvas(S, S)
+    c1 = rng.uniform(0, S)
+    for x in place(rng, S, [c1, c1 + 250], 8, 55):                 # towers growing from the floor
+        h = rng.uniform(70, 280)
+        w = 14 + h * rng.uniform(0.1, 0.2)
+        ice_spire(lit, dark, x, floor(x), h, w, rng, True)
+        for _ in range(int(rng.integers(1, 3))):                    # daughter crystals at the foot
+            dx = rng.uniform(-0.9, 0.9) * w
+            ice_spire(lit, dark, x + dx, floor(x + dx), h * rng.uniform(0.2, 0.5), w * 0.5, rng, True)
+    for x in place(rng, S, [c1 + 120, c1 + 380], 11, 70):          # icicles from the roof
+        spike_cluster(rock, x, ceil(x), rng.uniform(40, 190), rng.uniform(6, 15), rng, True, 2)
+    for x in place(rng, S, [c1 + 60, c1 + 300], 5, 60):            # a few downward ice crystals too
+        ice_spire(lit, dark, x, ceil(x), rng.uniform(30, 110), rng.uniform(10, 20), rng, False)
+    # frozen waterfalls: a ridged curtain of ice from a hanging mass down to a drift of snow
+    falls = [(c1 + 190) % S, (c1 + 450) % S]
+    curtain = Canvas(S, S)
+    for fx in falls:
+        y0, y1 = rng.uniform(120, 190), floor(fx)
+        rock.poly(spike_pts(fx + 4, ceil(fx), y0 - ceil(fx) + 6, rng.uniform(70, 95), rng, True,
+                            rng.uniform(-6, 6), 0.3, 12))
+        wd = rng.uniform(15, 22)
+        left, right = [], []
+        for k in range(int(y1 - y0) + 1):
+            t = k / max(y1 - y0, 1)
+            w = wd * (0.55 + 0.45 * np.sin(np.pi * min(t * 1.2 + 0.1, 1)) + 0.5 * t ** 3) * (1 + 0.08 * np.sin(k * 0.21 + fx))
+            cx = fx + 1.5 * np.sin(k * 0.05) + t * t * 3
+            left.append((cx - w / 2, y0 + k))
+            right.append((cx + w / 2, y0 + k))
+        curtain.poly(left + right[::-1])
+        curtain.ellipse(fx - 38, y1 - 9, fx + 42, y1 + 7, fill=255)    # the snow drift it lands in
+    # value
+    cm = curtain.mask()
+    lm, dm = lit.mask(), dark.mask()
+    m = rock.mask() | lm | dm | cm
+    v = shade_rock(m, rng, 0.62, 0.9, 0.22, maxd=20)
+    v = np.where(lm & ~cm, np.minimum(v + 0.2, 0.98), v)
+    v = np.where(dm & ~lm & ~cm, v - 0.14, v)
+    yy, xx = np.mgrid[0:S, 0:S].astype(float)
+    ridge = cm & (((xx.astype(int) + (yy * 0.04).astype(int)) % 4) == 0)         # vertical flutes
+    v = np.where(cm, np.where(ridge, 0.82, 0.96), v)
+    v = np.where(cm & ~np.roll(cm, 1, 1), 1.0, v)
+    # glints: thin bright cracks and facet lines running through the ice
+    gl = Canvas(S, S)
+    ys, xs = np.nonzero(dist_to(lm | dm, 6) > 3)
+    for _ in range(18):
+        i = rng.integers(len(ys))
+        pts, _ = walk(rng, ys[i], xs[i], int(rng.integers(8, 26)), -1.1 + rng.normal(0, 0.5), 0.12)
+        gl.line([(px, py) for py, px in pts], 255, 1)
+    v = np.where(gl.mask() & (lm | dm), 1.0, v)
+    # the rock crust under the ice stays darker and cooler
+    crust = rock.mask() & ~lm & ~dm & ~cm
+    v = np.where(crust, v * 0.78, v)
+    # cold mist low down, snow drifting through the cavern
+    haze = fog_band(S, S, [450, 300], 55, rng, 0.6) * 0.7
+    v = v + (1 - v) * haze * 0.35 * m
+    snow = np.zeros((S, S))
+    flakes = rng.random((S, S)) < 0.0035
+    snow = np.where(flakes, 1.0, 0.0)
+    snow = np.maximum(snow, np.roll(snow, 1, 1) * 0.5)
+    snow = np.maximum(snow, np.roll(snow, 1, 0) * 0.5)
+    alpha = np.where(m, 1.0, steps(0.08 + haze * 0.4, 16))
+    v = np.where(m, v, 1.0)
+    v = np.where(~m & (snow > 0), 1.0, v)
+    alpha = np.where(~m & (snow > 0), np.maximum(alpha, 0.35 + 0.5 * snow), alpha)
+    to_rgba(v, alpha).save(os.path.join(OUT, name + ".png"))
+    print("wrote", name, f"{m.mean():.0%} solid")
+
+
+def mushroom(stem, cap, gill, spots, x, base, hgt, capw, rng, lean=0.0):
+    """A big cave mushroom silhouette: curved tapering stem, domed cap with a glowing
+    underside rim and a few glowing spots. Draws into the four canvases."""
+    caph = capw * rng.uniform(0.28, 0.4)
+    ycap = base - hgt
+    wb, wt = capw * rng.uniform(0.16, 0.24), capw * rng.uniform(0.09, 0.14)
+    left, right = [], []
+    for i in range(13):
+        t = i / 12
+        w = wb + (wt - wb) * t ** 0.7
+        cx = x + lean * t * t
+        left.append((cx - w / 2, base + 4 - (hgt + 4) * t))
+        right.append((cx + w / 2, base + 4 - (hgt + 4) * t))
+    stem.poly(left + right[::-1])
+    cx = x + lean
+    dome = [(cx + capw / 2 * np.cos(a) * (1 + 0.04 * np.sin(5 * a)), ycap + caph * np.sin(a)) for a in np.linspace(np.pi, 2 * np.pi, 28)]
+    under = [(cx + capw / 2 * t, ycap - 0.22 * caph * (1 - t * t)) for t in np.linspace(1, -1, 14)]
+    cap.poly(dome + under)
+    gill.line(under, 255, 2)
+    for _ in range(int(rng.integers(5, 10))):                   # spots on the dome
+        a = rng.uniform(0.15, 0.85)
+        sx = cx + capw / 2 * (2 * a - 1) * 0.8
+        sy = ycap - caph * 0.8 * np.sqrt(max(1 - (2 * a - 1) ** 2, 0)) * rng.uniform(0.3, 0.9)
+        r = rng.uniform(2.5, 6.5) * capw / 100 + 1.2
+        spots.ellipse(sx - r, sy - r * 0.7, sx + r, sy + r * 0.7, fill=255)
+
+
+def cave_far_fungal(name, S, rng):
+    """The fungal layer's backdrop: a dark, damp cavern with towering mushrooms whose caps and
+    gills glow, clusters of small ones on the floor, glowing threads hanging from the roof and
+    spores drifting in the haze. Value only (tinted dark teal in game): the rock is dark, the
+    glowing mushroom parts are full white and throw a soft halo."""
+    sh, top, bot = shelf(S, S, 478, 30, rng, cells=7)
+    rock = Canvas(S, S)
+    rock.img = Image.fromarray(np.where(sh, 255, 0).astype(np.uint8), "L")
+    rock.dr = ImageDraw.Draw(rock.img)
+    ceil = lambda x: bot[int(x) % S] - S - 2
+    floor = lambda x: top[int(x) % S] + 2
+    c1 = rng.uniform(0, S)
+    for x in place(rng, S, [c1 + 40, c1 + 300], 10, 80):           # stalactites
+        spike_cluster(rock, x, ceil(x), rng.uniform(20, 120), rng.uniform(8, 20), rng, True, 2)
+    for x in place(rng, S, [c1 + 150, c1 + 400], 5, 60):           # a few rock columns
+        rock.poly(column_pts(x, ceil(x) - 4, floor(x) + 4, rng.uniform(34, 60), rng.uniform(16, 26), rng.uniform(40, 70), rng))
+    for x in place(rng, S, [c1, c1 + 230], 6, 60):                 # mounds on the floor
+        w, h = rng.uniform(60, 150), rng.uniform(20, 70)
+        pts = [(x - w / 2 + w * k / 16, floor(x) + 6 - h * np.sin(np.pi * k / 16) ** 1.3 * (1 + 0.15 * np.sin(k * 2.3 + x)))
+               for k in range(17)]
+        rock.poly(pts)
+    stem, cap, gill, spots = Canvas(S, S), Canvas(S, S), Canvas(S, S), Canvas(S, S)
+    big = [(c1 + 20, 270, 150), (c1 + 140, 190, 120), (c1 + 235, 300, 180), (c1 + 330, 150, 100),
+           (c1 + 430, 230, 140)]
+    for bx, h, cw in big:                                           # the towering ones
+        bx %= S
+        mushroom(stem, cap, gill, spots, bx, floor(bx) + 2, h * rng.uniform(0.85, 1.1), cw * rng.uniform(0.9, 1.15), rng,
+                 rng.uniform(-20, 20))
+    for bx, _, _ in big:                                            # little ones crowding round each
+        for _ in range(int(rng.integers(3, 7))):
+            sx = (bx + rng.normal(0, 55)) % S
+            hh = rng.uniform(14, 52)
+            mushroom(stem, cap, gill, spots, sx, floor(sx) + 2, hh, hh * rng.uniform(0.8, 1.5), rng, rng.uniform(-4, 4))
+    threads = Canvas(S, S)                                          # glow-worm threads from the roof
+    beads = Canvas(S, S)
+    for x in place(rng, S, [c1 + 90, c1 + 360], 12, 90):
+        y0, L = ceil(x), rng.uniform(30, 120)
+        pts = [(x + 2 * np.sin(k * 0.15 + x), y0 + k) for k in range(int(L))]
+        threads.line(pts, 255, 1)
+        for k in range(8, int(L), int(rng.integers(8, 14))):
+            bx, by = pts[k]
+            beads.ellipse(bx - 1.2, by - 1.2, bx + 1.2, by + 1.2, fill=255)
+    rm, sm, cm, gm, pm = rock.mask(), stem.mask(), cap.mask(), gill.mask(), spots.mask()
+    yy, xx = np.mgrid[0:S, 0:S].astype(float)
+    v = shade_rock(rm, rng, 0.3, 0.5, 0.1, maxd=18)
+    vs = shade_rock(sm, rng, 0.46, 0.66, 0.16, maxd=8)
+    right_edge = sm & ~np.roll(sm, -1, 1)
+    vs = np.where(right_edge, vs - 0.1, vs)
+    vc = shade_rock(cm, rng, 0.5, 0.72, 0.16, maxd=10)
+    m = rm | sm | cm
+    v = np.where(sm, vs, v)
+    v = np.where(cm, vc, v)
+    v = np.where(gm & cm, 1.0, v)                                   # glowing gills under the cap
+    v = np.where(pm & cm, 1.0, v)                                   # glowing spots
+    tm = threads.mask() & ~m
+    v = np.where(tm, 0.7, v)
+    bm = beads.mask()
+    v = np.where(bm, 1.0, v)
+    m = m | tm | bm
+    # soft halo round everything that glows
+    glow_src = (gm & cm) | (pm & cm) | bm
+    halo = np.clip(1 - dist_to(~glow_src, 16) / 16.0, 0, 1) ** 2        # distance to the nearest glowing pixel
+    cap_halo = np.clip(1 - dist_to(~cm, 14) / 14.0, 0, 1) ** 2 * 0.5
+    haze = np.maximum(halo * 0.5, cap_halo)
+    mist = fog_band(S, S, [455, 330], 50, rng, 0.6) * 0.35
+    haze = np.maximum(haze, mist)
+    alpha = np.where(m, 1.0, steps(0.06 + haze * 0.6, 16))
+    v = np.where(m, v, 1.0)
+    spores = rng.random((S, S)) < 0.003
+    sp = np.where(spores, 1.0, 0.0)
+    sp = np.maximum(sp, np.roll(sp, 1, 1) * 0.5)
+    alpha = np.where(~m & (sp > 0), np.maximum(alpha, 0.3 + 0.5 * sp), alpha)
+    to_rgba(v, alpha).save(os.path.join(OUT, name + ".png"))
+    print("wrote", name, f"{m.mean():.0%} solid")
+
+
 # ---------------------------------------------------------------- surface layers
 def shade_flat(mask, base, rim, n=None, tex=0.0):
     """Surface silhouettes: flat value, lit top rim, half-lit left edge."""
@@ -812,6 +1007,13 @@ def dead_forest(name, W, H, rng):
 
 if __name__ == "__main__":
     # far -> near. Brighter value = more fog (tinted per depth in game)
+    import sys
+    if sys.argv[1:]:             # e.g. `gen_backgrounds.py cave_far_ice` regenerates just those
+        extra = {"cave_far_ice": lambda: cave_far_ice("cave_far_ice", 512, np.random.default_rng(2032)),
+                 "cave_far_fungal": lambda: cave_far_fungal("cave_far_fungal", 512, np.random.default_rng(2033))}
+        for a in sys.argv[1:]:
+            extra[a]()
+        sys.exit(0)
     cave_far("cave_far", 512, np.random.default_rng(2024))
     cave_mid("cave_mid", 512, np.random.default_rng(2025))
     cave_near("cave_near", 512, np.random.default_rng(2026))
@@ -820,3 +1022,5 @@ if __name__ == "__main__":
     hills_far("hills_far", 1024, 160, np.random.default_rng(2027))
     hills_near("hills_near", 1024, 160, np.random.default_rng(2028))
     dead_forest("forest", 1024, 160, np.random.default_rng(2029))
+    cave_far_ice("cave_far_ice", 512, np.random.default_rng(2032))
+    cave_far_fungal("cave_far_fungal", 512, np.random.default_rng(2033))

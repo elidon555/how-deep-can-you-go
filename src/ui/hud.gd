@@ -107,7 +107,7 @@ func set_crew(others: Array) -> void:
 func _crew_label() -> Label:
 	var l := Label.new()
 	l.visible = false
-	l.position = Vector2(1280 - 20 - 360, 176)
+	l.position = Vector2(1280 - 20 - 360, 200)
 	l.size = Vector2(360, 0)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	l.add_theme_font_size_override("font_size", 20)
@@ -133,9 +133,12 @@ func set_breath(left: float) -> void:
 
 
 func set_bag(p: Player) -> void:
+	var cap := p.bag_space() + p.ore_count + p.coal
 	_ore.text = ("Ore: %d ($%d)" % [p.ore_count, p.ore_value] if p.ore_count > 0 else "Ore: 0") \
-		+ "   Coal: %d" % p.coal
-	_ropes.text = "Ropes: unlimited" if GameConfig.infinite_resources() else "Ropes: %d" % p.ropes
+		+ "   Coal: %d   Bag %d/%d" % [p.coal, p.ore_count + p.coal, cap]
+	var t := p.tools.current()
+	var n := p.tools.count(t)
+	_ropes.text = "%s%s   [Tab]" % [PlayerTools.NAMES[t], "" if n < 0 else " ×%d" % n]
 
 
 func set_drill(d: Drill, player_depth: float) -> void:
@@ -182,8 +185,8 @@ class DrillPanel extends Control:
 		if drill == null:
 			return
 		var font := get_theme_default_font()
-		draw_rect(Rect2(0, 0, 280, 146), Color(0.04, 0.035, 0.05, 0.75))
-		draw_rect(Rect2(0, 0, 280, 146), Color("8a6a42"), false, 2.0)
+		draw_rect(Rect2(0, 0, 280, 168), Color(0.04, 0.035, 0.05, 0.75))
+		draw_rect(Rect2(0, 0, 280, 168), Color("8a6a42"), false, 2.0)
 		var depth := maxi(0, int(drill.global_position.y / World.METER))
 		draw_string(font, Vector2(12, 26), "DRILL  %d m" % depth, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f4e3c1"))
 		var sp: String = Drill.SPEED_NAMES[drill.speed]
@@ -201,16 +204,30 @@ class DrillPanel extends Control:
 			_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
 		_bar(Vector2(12, 66), "Hull", drill.hull / drill.max_hull, Color("c8c8d0"))
 		_bar(Vector2(12, 88), "Heat", drill.thermal.heat / DrillHeat.MAX, Color("e05a3a"), true)
+		var pw := drill.power
+		var short := pw.demand > pw.supply()
+		_bar(Vector2(12, 110), "Power", minf(pw.demand / pw.supply(), 1.0), Color("e0d050") if not short else Color("d04a3f"))
+		draw_string(font, Vector2(196, 124), "%s%s" % [DrillPower.OUTPUT_NAMES[pw.output], " !" if short else ""],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("d9c9b0"))
+		if drill.cargo_value > 0:
+			draw_string(font, Vector2(150, 56), "Cargo $%d" % drill.cargo_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("9fd88a"))
 		var leaks := drill.get_breaches().size()
-		if drill.flooding.leaking > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
-			draw_string(font, Vector2(12, 132), "FLOODING %d%% — patch the breaches!" % int(drill.flooding.level * 100.0),
+		var blink := fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55
+		if not drill.fires.fires().is_empty() and blink:
+			draw_string(font, Vector2(12, 156), "FIRE! Beat it out (hold E) or spray it",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff8a3a"))
+		elif (pw.blown[0] or pw.blown[1]) and blink:
+			draw_string(font, Vector2(12, 156), "FUSE BLOWN — hold E on the %s fuse box" % ("left" if pw.blown[0] else "right"),
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ffd04a"))
+		elif drill.flooding.leaking > 0 and blink:
+			draw_string(font, Vector2(12, 156), "FLOODING %d%% — patch the breaches!" % int(drill.flooding.level * 100.0),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("5ab0ff"))
-		elif leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
-			draw_string(font, Vector2(12, 132), "BREACH x%d — hold E on it to repair" % leaks,
+		elif leaks > 0 and blink:
+			draw_string(font, Vector2(12, 156), "BREACH x%d — hold E on it to repair" % leaks,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff5a4a"))
 		elif absf(away) > 3.0:
 			var where := "above" if away < 0.0 else "below"
-			draw_string(font, Vector2(12, 132), "You are %d m %s the drill" % [absi(int(away)), where],
+			draw_string(font, Vector2(12, 156), "You are %d m %s the drill" % [absi(int(away)), where],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9c9b0"))
 
 	func _bar(at: Vector2, label: String, frac: float, c: Color, high_is_bad := false) -> void:

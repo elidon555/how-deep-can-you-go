@@ -24,7 +24,9 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "drill")
 os.makedirs(OUT, exist_ok=True)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
 UNLIT = [np.array(c) for c in ([255, 226, 168], [12, 26, 28], [216, 212, 196])]   # lamps, screens, gauge face
-GLOW = [np.array(c) for c in ([255, 138, 42], [255, 210, 122])]           # furnace fire
+GLOW = [np.array(c) for c in ([255, 138, 42], [255, 210, 122],           # furnace fire
+                              [122, 240, 255], [240, 255, 255],          # generator core, drone eye
+                              [90, 255, 122], [255, 184, 74], [255, 244, 208])]   # status lamp, radio dial, floodlight
 # game rects (x0, y0, x1, y1) that must stay empty, per sprite, and each sprite's top-left
 CLEAR = {"drill_frame": [(-88, -48, 88, 40), (-96, -6, -88, 40), (88, -6, 96, 40)]}
 ORIGIN = {"drill_frame": (-124, -76)}
@@ -72,7 +74,14 @@ def convert(name):
     return out, glow, flat, normal_map(f"{SRC}/{name}_normal.png", out)
 
 
-for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit", "sonar", "gunner", "coolant"):
+def rendered(name):
+    return os.path.exists(f"{SRC}/{name}_flat.png")
+
+
+for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit", "sonar", "gunner", "coolant",
+             "generator", "junction", "radio", "floodlight", "sprinkler", "cargo", "drone", "extinguisher_rack"):
+    if not rendered(name):          # drill_blender.py was run for a subset
+        continue
     out, glow, flat, normals = convert(name)
     Image.fromarray(out, "RGBA").save(f"{OUT}/{name}.png")
     Image.fromarray(normals, "RGBA").save(f"{OUT}/{name}_n.png")
@@ -83,6 +92,8 @@ for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medki
         Image.fromarray(g, "RGBA").save(f"{OUT}/{name}_glow.png")
     print("wrote", name, out.shape[1::-1], "(+glow)" if glow.any() else "")
 
+if not rendered("drill_head_0") or not rendered("drill_braces_0") or not rendered("turret_r_0_0"):
+    sys.exit(0)                     # the animated parts were not in this render set
 heads = [convert(f"drill_head_{i}") for i in range(HEAD_FRAMES)]
 frames = [h[0] for h in heads]
 Image.fromarray(np.concatenate(frames, axis=1), "RGBA").save(f"{OUT}/drill_head.png")

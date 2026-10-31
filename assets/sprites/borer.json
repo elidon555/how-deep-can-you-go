@@ -1,0 +1,24 @@
+{
+ "cell_w": 80,
+ "cell_h": 48,
+ "columns": 8,
+ "anims": {
+  "walk": {
+   "row": 0,
+   "frames": 8
+  },
+  "burrow": {
+   "row": 1,
+   "frames": 6
+  },
+  "bite": {
+   "row": 2,
+   "frames": 4
+  },
+  "die": {
+   "row": 3,
+   "frames": 4
+  }
+ },
+ "feet_below_center": 16
+}

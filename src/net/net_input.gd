@@ -5,7 +5,8 @@ class_name NetInput
 ## reads this like any PlayerInput. Presses travel as counters, so a quick click survives a
 ## dropped packet and still counts exactly once.
 
-const ACTIONS := ["left", "right", "up", "down", "jump", "dig", "rope", "interact", "roll", "ui_cancel", "ping"]
+const ACTIONS := ["left", "right", "up", "down", "jump", "dig", "tool", "interact", "roll", "ui_cancel", "ping",
+	"tool_next"]
 
 var peer := 0
 var aim := Vector2.INF        # where they point (world), from their own mouse / stick

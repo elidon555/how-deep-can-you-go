@@ -19,8 +19,11 @@ SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "props")
 os.makedirs(OUT, exist_ok=True)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
-GLOW_KEYS = [np.array(c) for c in ([255, 179, 71], [176, 108, 255], [79, 240, 208], [255, 122, 26], [255, 208, 96])]
-STRIPS = {"lava": 8}  # animated props: <name>_0.. frames packed into one strip + <name>.json
+GLOW_KEYS = [np.array(c) for c in ([255, 179, 71], [176, 108, 255], [79, 240, 208], [255, 122, 26], [255, 208, 96],
+                                    [255, 244, 200], [255, 58, 42], [255, 200, 168], [232, 64, 26],   # spark, flare, fire
+                                    [90, 232, 240], [240, 96, 216], [159, 248, 255])]                 # fungi, ice
+STRIPS = {"lava": 8, "fire": 8}  # animated props: <name>_0.. frames packed into one strip + <name>.json
+GLOW_DIM = {"ice_crystal": 0.45}  # faint glows: the _glow layer is darkened by this factor
 TILE = {"rope": 16}   # rendered several tiles tall: keep one middle tile (rows TILE..2*TILE)
 
 def convert(name):
@@ -50,7 +53,7 @@ def convert(name):
     g = None
     if glow.any():
         g = np.zeros((h, w, 4), np.uint8)
-        g[glow, :3] = np.clip(flat[..., :3][glow], 0, 255)
+        g[glow, :3] = np.clip(flat[..., :3][glow] * GLOW_DIM.get(name, 1.0), 0, 255)
         g[glow, 3] = 255
     return out, normal_map(normals, out), g
 
@@ -69,6 +72,8 @@ for name in names:
     if name not in strip_frames:
         save(name, *convert(name))
 for name, count in STRIPS.items():            # animated: frames side by side, glow strip alongside
+    if f"{name}_0" not in names:              # not in this render set
+        continue
     frames = [convert(f"{name}_{i}") for i in range(count)]
     h, w = frames[0][0].shape[:2]
     glows = [f[2] if f[2] is not None else np.zeros((h, w, 4), np.uint8) for f in frames]

@@ -3,7 +3,7 @@ class_name DrillArt
 ## How the drill looks: Blender-rendered pieces (assets/drill, tools/drill_blender.py) layered
 ## as a cutaway — back wall, crew + stations, hull frame in front, spinning head below — plus
 ## what moves in play: braces gripping / pulling in (8 rendered frames, drill_braces_*.png),
-## spinning side reamers, lights, the alarm beacon, smoke, sparks. (Ladders: DrillLadder.)
+## spinning side reamers, lights, the alarm beacon, smoke, sparks.
 ## Never animated by rotating / scaling sprite images: real frames only.
 
 
@@ -146,7 +146,10 @@ func _process(dt: float) -> void:
 	var hot := clampf((drill.thermal.heat - 55.0) / 45.0, 0.0, 1.0)
 	_frame.modulate = Color(1.0 + hot * 0.6, 1.0 - hot * 0.25, 1.0 - hot * 0.35)
 	_grit.emitting = drill.cutter.drilling
-	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
+	var lit := drill.power.level("lights")           # brownout: the lights dim and stutter
+	if lit < 1.0 and randf() < 0.15:
+		lit *= randf_range(0.2, 0.8)
+	_interior.energy = (1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)) * maxf(lit, 0.08)
 	_head.frame = int(_spin) % _head_frames
 	if _brace_frames > 0:              # 0 = pulled in .. last = gripping the wall
 		for b: Sprite2D in _braces:

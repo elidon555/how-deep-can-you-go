@@ -1,6 +1,6 @@
 extends Node2D
 ## Puts the game together: world, the drill, player, camera, lighting, creatures, HUD.
-## Game rules that span systems live here: who gets the ore, ropes, the drill being wrecked,
+## Game rules that span systems live here: who gets the ore, throws, the drill being wrecked,
 ## dying, milestones. The drill (src/drill) is the crew's base: ore is sold at its workbench.
 ## Co-op: a second player on a controller (Start), or online (src/net, up to Net.MAX_PLAYERS):
 ## the host runs this whole game for the crew, a client runs it as a puppet show of the host's
@@ -40,6 +40,7 @@ var ending := false
 var players: Array[Player] = []     # player one first; a second joins with Start on a controller
 var _menu_user: Player = null       # who opened the shop / sonar (unfrozen when it closes)
 const RESPAWN_TIME := 8.0
+const RESPAWN_TIME_BUNK := 3.0     # with the crew bunk module
 var notes_read := 0
 var tips := Tips.new()
 var spawner := Spawner.new()
@@ -95,6 +96,7 @@ func _ready() -> void:
 
 	player = _add_player(PlayerInput.new())
 	player.puppet = Net.is_client()
+	player.role = Settings.role
 	player.health_changed.connect(hud.set_health)
 	player.bag_changed.connect(_update_bag)
 	player.breath_changed.connect(hud.set_breath)
@@ -229,7 +231,7 @@ func _update_light(depth: int, dt: float) -> void:
 func _on_progress_changed() -> void:
 	drill.apply_upgrades()
 	if drill.contains(player.global_position):
-		player.refill_ropes()      # a bigger rope bag fills up right there at the workbench
+		player.restock()
 	_update_bag()
 
 
@@ -261,12 +263,13 @@ func _add_player(input: PlayerInput) -> Player:
 		p.pick.mouse_aim = false
 	p.pick.struck.connect(_on_struck.bind(p))
 	p.pick.hit_thing.connect(_on_hit_thing.bind(p))
-	p.rope_requested.connect(_on_rope_requested.bind(p))
 	p.went_down.connect(_on_player_down.bind(p))
 	p.bled_out.connect(_on_player_bled_out.bind(p))
 	p.revived.connect(func(): hud.toast("%s is back on their feet." % p.tag_name(), 1.5))
 	p.kicked_dust.connect(fx.dust)
 	p.pinged.connect(func(at): show_ping(at, p.number, p.tag_name()))
+	p.message.connect(func(text): _tell(p, text, 1.6))
+	p.tools.throw_requested.connect(_throw)
 	players.append(p)
 	return p
 
@@ -280,9 +283,10 @@ func _free_number() -> int:
 
 
 ## Host: a miner for someone who joined online (their controls arrive over the network).
-func add_remote_player(input: NetInput, display_name := "") -> Player:
+func add_remote_player(input: NetInput, display_name := "", role := "miner") -> Player:
 	var p := _add_player(input)
 	p.display_name = display_name
+	p.role = role if role in Roles.ALL else "miner"
 	p.update_crew_look()
 	return p
 
@@ -362,8 +366,9 @@ func _on_player_bled_out(p: Player) -> void:
 	if players.all(func(q): return q.health <= 0):
 		_game_over("Everyone is down. The ore you carried is lost.")
 		return
-	hud.toast("%s didn't make it. Back in the drill in %d s." % [p.tag_name(), int(RESPAWN_TIME)], 2.5)
-	await get_tree().create_timer(RESPAWN_TIME).timeout
+	var wait := RESPAWN_TIME_BUNK if drill.modules.has("bunk") else RESPAWN_TIME
+	hud.toast("%s didn't make it. Back in the drill in %d s." % [p.tag_name(), int(wait)], 2.5)
+	await get_tree().create_timer(wait).timeout
 	if run_over or not is_instance_valid(p):
 		return
 	p.global_position = drill.global_position + Vector2(0, Drill.FLOOR - Player.HALF_HEIGHT - 1)
@@ -434,6 +439,9 @@ func _on_gas_released(pos: Vector2) -> void:
 func _on_gas_exploded(pos: Vector2, size: float) -> void:
 	fx.explosion(pos, size)
 	add_shake(2.0, pos)
+	var l := drill.to_local(pos)
+	if absf(l.x) < Drill.HW + size and l.y > Drill.TOP - size and l.y < Drill.BOTTOM + size:
+		drill.fires.ignite(clampf(l.x, -70.0, 70.0), 0.5)     # the blast sets the cabin alight
 
 
 ## Steel on stone throws sparks: any gas around them goes up.
@@ -465,9 +473,8 @@ func _shake_for(p: Player, amount: float) -> void:
 func _on_ore_found(pos: Vector2, kind: int) -> void:
 	var ore: Array = World.ORES[kind]
 	var p := _nearest_player(pos)
-	if p == null:
-		return               # dug while the drill was being set down, before anyone's here
-	p.add_ore(kind)
+	if p == null or not p.add_ore(kind):
+		return               # nobody here yet (the drill setting down), or their bag is full
 	_shake_for(p, 0.8)
 	var c: Color = ore[3]
 	fx.burst(pos, Color(c.r * 2.0, c.g * 2.0, c.b * 2.0), 14, 140.0, Vector2.UP, 180.0, 0.6, 2.5, true)
@@ -536,6 +543,22 @@ func _on_workbench_used(p: Player) -> void:
 	_show_to(p, "shop")
 
 
+## A flare or a lit bundle of dynamite leaves someone's hand.
+func _throw(kind: String, from: Vector2, velocity: Vector2) -> void:
+	var t := Thrown.new()
+	t.kind = kind
+	t.world = world
+	t.position = from
+	t.velocity = velocity
+	t.exploded.connect(func(at, size):
+		fx.explosion(at, size)
+		add_shake(2.0, at)
+		var l := drill.to_local(at)
+		if absf(l.x) < Drill.HW + size and l.y > Drill.TOP - size and l.y < Drill.BOTTOM + size:
+			drill.fires.ignite(clampf(l.x, -70.0, 70.0), 0.5))
+	add_child(t)
+
+
 ## A crew marker at a spot, in that player's colour (on every screen, online).
 func show_ping(at: Vector2, number: int, who: String) -> void:
 	Net.echo(&"main", &"show_ping", [at, number, who])
@@ -590,18 +613,6 @@ func _nearest_player(pos: Vector2) -> Player:
 	return best
 
 
-func _on_rope_requested(feet: Vector2, p: Player) -> void:
-	if p.ropes <= 0:
-		_tell(p, "No ropes left. More at the drill's workbench.", 1.2)
-		return
-	if not GameConfig.infinite_resources():
-		p.ropes -= 1
-	world.add_child(Rope.hang(world, feet))
-	Sfx.play("rope", feet)
-	_update_bag()
-
-
-## A message for one miner only (on their screen, online).
 func _tell(p: Player, text: String, seconds := 2.0) -> void:
 	if _is_here(p) or p == player:
 		hud.note(text, seconds)
@@ -684,6 +695,7 @@ func _setup_menus() -> void:
 func _start_run() -> void:
 	hud.visible = true
 	player.frozen = false
+	player.role = Settings.role          # (picked on the title screen)
 
 
 ## Title screen "Host a game": open this run to others and start digging.

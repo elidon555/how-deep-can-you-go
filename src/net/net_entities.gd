@@ -20,7 +20,7 @@ static var TYPES := [
 	["worm", Worm, "main"], ["eye", TheEye, "main"], ["vein", TheEye.Vein, "main"],
 	["orb", TheEye.Orb, "main"], ["bolt", Turret.Bolt, "main"], ["gas", GasCloud, "main"],
 	["boulder", Boulder, "world"], ["crate", CampItems.LootCrate, "world"],
-	["note", CampItems.Note, "world"], ["rope", Rope, "world"],
+	["note", CampItems.Note, "world"], ["drone", Drone, "main"],
 ]
 
 var main                       # the run (src/main.gd)

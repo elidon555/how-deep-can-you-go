@@ -1,0 +1,32 @@
+{
+ "cell_w": 192,
+ "cell_h": 128,
+ "columns": 8,
+ "anims": {
+  "idle": {
+   "row": 0,
+   "frames": 6
+  },
+  "walk": {
+   "row": 1,
+   "frames": 8
+  },
+  "spit": {
+   "row": 2,
+   "frames": 6
+  },
+  "slam": {
+   "row": 3,
+   "frames": 6
+  },
+  "hurt": {
+   "row": 4,
+   "frames": 2
+  },
+  "die": {
+   "row": 5,
+   "frames": 6
+  }
+ },
+ "feet_below_center": 54
+}

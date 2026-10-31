@@ -10,6 +10,7 @@ var effects := 0.9
 var fullscreen := false
 var last_address := ""
 var player_name := ""     # shown over your miner online ("" = P1, P2 ...)
+var role := "miner"       # Roles: what you play as
 
 
 func _ready() -> void:
@@ -26,6 +27,7 @@ func _ready() -> void:
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
 		last_address = cfg.get_value("online", "last_address", last_address)
 		player_name = cfg.get_value("online", "player_name", player_name)
+		role = cfg.get_value("game", "role", role)
 	apply()
 
 
@@ -45,6 +47,7 @@ func save() -> void:
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("online", "last_address", last_address)
 	cfg.set_value("online", "player_name", player_name)
+	cfg.set_value("game", "role", role)
 	cfg.save(PATH)
 
 
