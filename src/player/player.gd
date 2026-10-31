@@ -55,7 +55,6 @@ var _rope_last_y := 0.0
 var _anim_t := 0.0
 var _coyote_t := 0.0
 var _buffer_t := 0.0
-var _squash := Vector2.ONE
 var _land_t := 0.0
 var _hurt_t := 0.0
 var _invuln_t := 0.0
@@ -107,7 +106,6 @@ func _physics_process(dt: float) -> void:
 	_hurt_t -= dt
 	_land_t -= dt
 	sprite.visible = _invuln_t <= 0.0 or fmod(_invuln_t, 0.12) > 0.05
-	_squash = _squash.lerp(Vector2.ONE, 12 * dt)
 	_animate(dt)
 
 
@@ -122,7 +120,6 @@ func _move(dt: float, dir: float) -> void:
 		velocity.y = JUMP_V
 		_buffer_t = 0
 		_coyote_t = 0
-		_squash = Vector2(0.75, 1.25)
 		Sfx.play("jump", global_position, -8.0)
 		kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), 0.5)
 	if Input.is_action_just_released("jump") and velocity.y < 0:
@@ -136,7 +133,6 @@ func _move(dt: float, dir: float) -> void:
 	var fall_speed := velocity.y
 	move_and_slide()
 	if is_on_floor() and not was_on_floor and fall_speed > 150:
-		_squash = Vector2(1.25, 0.75)
 		_land_t = 0.16
 		Sfx.play("land", global_position + Vector2(0, HALF_HEIGHT), -4.0 if fall_speed > 400 else -10.0)
 		kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), clampf(fall_speed / 350.0, 0.4, 1.5))
@@ -266,7 +262,7 @@ func _setup_sprite() -> void:
 	sprite.hframes = int(info.columns)
 	sprite.vframes = rows
 	sprite.position = Vector2(0, HALF_HEIGHT)                  # feet
-	sprite.offset = Vector2(0, -float(info.feet_below_center))  # so squashing keeps the feet put
+	sprite.offset = Vector2(0, -float(info.feet_below_center))
 	if not Art.has_normals(SHEET):      # no normal map yet: keep it flat and always readable
 		var unlit := CanvasItemMaterial.new()
 		unlit.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
@@ -346,7 +342,6 @@ func _animate(dt: float) -> void:
 		frame = int(_anim_t) % int(a[1]) if spd[1] else mini(int(_anim_t), int(a[1]) - 1)
 	sprite.frame = a[0] * sprite.hframes + frame
 	sprite.flip_h = facing < 0
-	sprite.scale = _squash
 	# footsteps on the frames where a boot hits the ground (start and middle of the cycle)
 	var half := int(a[1]) / 2
 	if anim == "run" and frame != _last_step_frame and (frame == 1 or frame == half + 1):

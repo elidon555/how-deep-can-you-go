@@ -2,8 +2,9 @@ extends Node2D
 class_name DrillArt
 ## How the drill looks: Blender-rendered pieces (assets/drill, tools/drill_blender.py) layered
 ## as a cutaway — back wall, crew + stations, hull frame in front, spinning head below — plus
-## what moves in play: braces gripping / pulling in (cut from the frame sprite), spinning side
-## reamers, lights, the alarm beacon, smoke, sparks. (The ladders draw themselves: DrillLadder.)
+## what moves in play: braces gripping / pulling in (8 rendered frames, drill_braces_*.png),
+## spinning side reamers, lights, the alarm beacon, smoke, sparks. (Ladders: DrillLadder.)
+## Never animated by rotating / scaling sprite images: real frames only.
 
 
 const DIR := "res://assets/drill/"
@@ -11,13 +12,12 @@ const DIR := "res://assets/drill/"
 const BACK_AT := Vector2(-88, -48)
 const FRAME_AT := Vector2(-124, -76)
 const HEAD_AT := Vector2(-88, 54)
-const HULL_COLS := Vector2i(28, 220)   # frame pixel columns of the hull; braces lie outside them
-const BRACE_IN := 0.3                  # how short the braces get when pulled in
 var drill: Drill
 var _spin := 0.0
 var _back: Texture2D = Art.lit(DIR + "drill_back.png")
 var _frame := Sprite2D.new()      # in front of the crew
 var _braces := [Sprite2D.new(), Sprite2D.new()]
+var _brace_frames := 0
 var _head := Sprite2D.new()
 var _head_frames := 6
 var _interior := PointLight2D.new()
@@ -30,29 +30,30 @@ var _grit := CPUParticles2D.new()     # rock dust blown up the gap beside the hu
 
 func _ready() -> void:
 	z_index = -1
-	# the frame sprite is split: the hull in front of the crew, and the braces on each side,
-	# which squash in toward the hull when they let go of the walls
 	var frame: Texture2D = Art.lit(DIR + "drill_frame.png")
-	var h := frame.get_height()
-	_frame.texture = _region(frame, Rect2i(HULL_COLS.x, 0, HULL_COLS.y - HULL_COLS.x, h))
 	_frame.centered = false
-	_frame.position = FRAME_AT + Vector2(HULL_COLS.x, 0)
 	_frame.z_index = 2                 # draws over the crew: the hull's front edges
 	_frame.z_as_relative = false
 	add_child(_frame)
-	for i in 2:
-		var b: Sprite2D = _braces[i]
-		b.centered = false
-		b.z_index = 1
-		b.z_as_relative = false
-		if i == 0:
-			b.texture = _region(frame, Rect2i(0, 0, HULL_COLS.x, h))
-			b.position = Vector2(-Drill.HW, FRAME_AT.y)
-			b.offset = Vector2(-HULL_COLS.x, 0)            # squashes toward the hull's left side
-		else:
-			b.texture = _region(frame, Rect2i(HULL_COLS.y, 0, frame.get_width() - HULL_COLS.y, h))
-			b.position = Vector2(Drill.HW, FRAME_AT.y)
-		add_child(b)
+	if ResourceLoader.exists(DIR + "drill_braces.json"):
+		_frame.texture = frame
+		_frame.position = FRAME_AT
+		var bi = JSON.parse_string(FileAccess.get_file_as_string(DIR + "drill_braces.json"))
+		_brace_frames = int(bi.frames)
+		for i in 2:
+			var b: Sprite2D = _braces[i]
+			b.texture = Art.lit(DIR + ("drill_braces_l.png" if i == 0 else "drill_braces_r.png"))
+			b.hframes = _brace_frames
+			b.centered = false
+			b.position = Vector2(bi.left_top_left[0], bi.left_top_left[1]) if i == 0 \
+				else Vector2(bi.right_top_left[0], bi.right_top_left[1])
+			b.z_index = 1                  # behind the frame
+			b.z_as_relative = false
+			add_child(b)
+	else:
+		# older art: braces baked into the frame (they just stay put)
+		_frame.texture = frame
+		_frame.position = FRAME_AT
 	var info = JSON.parse_string(FileAccess.get_file_as_string(DIR + "drill_head.json"))
 	if info is Dictionary:
 		_head_frames = int(info.get("frames", 6))
@@ -121,8 +122,9 @@ func _process(dt: float) -> void:
 	_grit.emitting = drill.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames
-	for b: Sprite2D in _braces:
-		b.scale.x = lerpf(BRACE_IN, 1.0, drill.grip)
+	if _brace_frames > 0:              # 0 = pulled in .. last = gripping the wall
+		for b: Sprite2D in _braces:
+			b.frame = int(round(drill.grip * (_brace_frames - 1)))
 	queue_redraw()
 
 
@@ -142,16 +144,6 @@ func _draw_reamer(c: Vector2) -> void:
 		var d := Vector2(cos(a), sin(a))
 		draw_line(c + d * 6.0, c + d * 11.0, Color("c9ccd1"), 2.0)
 	draw_circle(c, 2.5, Color("1a1c20"))
-
-
-## A piece of a (possibly normal-mapped) texture as its own texture.
-static func _region(tex: Texture2D, r: Rect2i) -> Texture2D:
-	if tex is CanvasTexture:
-		var ct := CanvasTexture.new()
-		ct.diffuse_texture = ImageTexture.create_from_image(tex.diffuse_texture.get_image().get_region(r))
-		ct.normal_texture = ImageTexture.create_from_image(tex.normal_texture.get_image().get_region(r))
-		return ct
-	return ImageTexture.create_from_image(tex.get_image().get_region(r))
 
 
 func _particles(p: CPUParticles2D, at: Vector2, extents: Vector2, amount: int, life: float,

@@ -32,7 +32,7 @@ func _ready() -> void:
 	cs.shape = shape
 	add_child(cs)
 	_sprite.texture = Art.lit(TEX) if ResourceLoader.exists(TEX) else _placeholder()
-	_sprite.rotation = randf() * TAU
+	_sprite.flip_h = randf() < 0.5
 	add_child(_sprite)
 
 
@@ -57,7 +57,6 @@ func _physics_process(dt: float) -> void:
 				_fall_from = global_position.y
 		State.FALL:
 			velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
-			_sprite.rotation += dt * 5.0
 			if _lands_on(player):
 				player.hurt(2, global_position)
 				shatter()
