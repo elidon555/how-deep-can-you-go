@@ -33,6 +33,8 @@ var sprite := Sprite2D.new()
 var anim := "idle"
 var anim_t := 0.0
 var dig_kind := ""
+var last_dig_kind := ""
+var dig_hold := 0.0
 var cone := PointLight2D.new()
 var glow := PointLight2D.new()
 
@@ -121,10 +123,18 @@ func _handle_dig(dt: float, dir: float) -> void:
 	var b := Vector2.ZERO
 	var r := 0.0
 	dig_kind = ""
-	if down and dir != 0:                       # diagonal, down-left / down-right
-		a = c + Vector2(dir * 12, 16)
-		b = a
-		r = 12.0
+	# rock in front of the head/chest: tunnel even when the wall's lip reads as "floor"
+	# (or holding a direction without getting anywhere, e.g. pinched by a tunnel's rounded end)
+	var blocked := dir != 0 and (is_on_wall() or absf(get_real_velocity().x) < 20.0 \
+		or not world.is_air(c + Vector2(dir * 10, -14)) or not world.is_air(c + Vector2(dir * 10, 2)))
+	if down and dir != 0:                       # diagonal: body-sized hole ahead + floor ahead
+		var res := _dig_side(c, dir, dt)
+		var res2 := world.dig(c + Vector2(dir * 10, 20), c + Vector2(dir * 10, 20), 12.0, dig_power * dt)
+		_dig_result(res if res.hit else res2, "dig_down", c + Vector2(dir * 10, 10), dt)
+		return
+	elif blocked and not up:
+		_dig_result(_dig_side(c, dir, dt), "dig_side", c + Vector2(dir * 13, 0), dt)
+		return
 	elif down:
 		a = c + Vector2(0, 21)
 		b = a
@@ -133,21 +143,35 @@ func _handle_dig(dt: float, dir: float) -> void:
 		a = c + Vector2(0, -21)
 		b = a
 		r = 13.0
-	elif dir != 0 and is_on_wall():           # tunnel sideways, as tall as you
-		a = c + Vector2(dir * 13, -10)
-		b = c + Vector2(dir * 13, 8)
-		r = 10.0
 	else:
-		dig_anim = 0
+		_dig_result({"hit": false}, "dig_side" if dir != 0 else "", c, dt)
 		return
-	dig_kind = "dig_up" if up and not down else ("dig_side" if not down else "dig_down")
-	var res := world.dig(a, b, r, dig_power * dt)
+	# straight down gets a bonus so it stays the fastest way deeper (diagonal digs two holes)
+	var res := world.dig(a, b, r, dig_power * dt * (1.0 if up else 1.4))
+	_dig_result(res, "dig_up" if up else "dig_down", a.lerp(b, 0.5), dt)
+
+
+## Tunnel sideways, a bit taller than you: a hole ahead that reaches head and feet height at
+## your front edge, plus a clearance pass around your body so half-dug cells can't pinch you.
+func _dig_side(c: Vector2, dir: float, dt: float) -> Dictionary:
+	var res := world.dig(c + Vector2(dir * 13, -16), c + Vector2(dir * 13, 12), 11.0, dig_power * dt)
+	var body := world.dig(c + Vector2(0, -15), c + Vector2(0, 10), 10.0, dig_power * dt)
+	return res if res.hit else body
+
+
+func _dig_result(res: Dictionary, kind: String, at: Vector2, dt: float) -> void:
 	if res.hit:
 		dig_anim += dt
-		digging.emit(a.lerp(b, 0.5), res.mat)
+		dig_hold = 0.15
+		dig_kind = kind
+		digging.emit(at, res.mat)
 	else:
 		dig_anim = 0
-		dig_kind = ""
+		# keep the swing going briefly between hits so the animation doesn't flicker
+		dig_hold -= dt
+		dig_kind = last_dig_kind if dig_hold > 0.0 and kind != "" else ""
+	if dig_kind != "":
+		last_dig_kind = dig_kind
 
 
 func _update_lamp(dt: float) -> void:

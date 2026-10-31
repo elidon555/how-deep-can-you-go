@@ -30,6 +30,14 @@ darkness + helmet lamp, depth counter and best depth.
 
 See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
 
+## Feel test
+
+Headless check that digging never gets stuck and how fast each direction is per material:
+
+```
+godot --headless --path . --fixed-fps 60 -s tests/feel_test.gd
+```
+
 ## Art pipeline
 
 All art is generated, so it can be tweaked and rebuilt:
