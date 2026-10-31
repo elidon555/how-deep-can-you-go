@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Turns the prop renders into pixel-art sprites: <name>.png (lit) + <name>_glow.png (emissive parts).
+"""Turns the prop renders into pixel-art sprites: <name>.png (lit), <name>_n.png (normal map)
+and <name>_glow.png (emissive parts).
 
 Run:  python3 tools/props_sheet.py <render_dir>
 """
@@ -9,6 +10,9 @@ import sys
 
 import numpy as np
 from PIL import Image
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from normal_maps import cel_mult, normal_map  # noqa: E402
 
 SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "props")
@@ -23,7 +27,7 @@ for flat_path in sorted(glob.glob(f"{SRC}/*_flat.png")):
     clay = np.array(Image.open(f"{SRC}/{name}_clay.png").convert("RGB")).astype(np.float32) / 255
     solid = flat[..., 3] > 128
     lum = clay.mean(-1)
-    mult = np.select([lum > 0.78, lum > 0.5, lum > 0.27], [1.12, 0.92, 0.72], 0.52)
+    mult = cel_mult(lum)
     rgb = flat[..., :3] * mult[..., None]
     glow = np.zeros(solid.shape, bool)
     for k in GLOW_KEYS:
@@ -37,10 +41,12 @@ for flat_path in sorted(glob.glob(f"{SRC}/*_flat.png")):
     n = np.zeros_like(solid)
     n[1:] |= solid[:-1]; n[:-1] |= solid[1:]; n[:, 1:] |= solid[:, :-1]; n[:, :-1] |= solid[:, 1:]
     out[n & ~solid] = OUTLINE
+    normals = np.array(Image.open(f"{SRC}/{name}_normal.png").convert("RGBA"))
     if name in TILE:
         t = TILE[name]
-        out, glow, flat, h = out[t:2 * t], glow[t:2 * t], flat[t:2 * t], t
+        out, glow, flat, normals, h = out[t:2 * t], glow[t:2 * t], flat[t:2 * t], normals[t:2 * t], t
     Image.fromarray(out, "RGBA").save(f"{OUT}/{name}.png")
+    Image.fromarray(normal_map(normals, out), "RGBA").save(f"{OUT}/{name}_n.png")
     if glow.any():
         g = np.zeros((h, w, 4), np.uint8)
         g[glow, :3] = np.clip(flat[..., :3][glow] * 1.0, 0, 255)

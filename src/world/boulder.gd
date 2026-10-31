@@ -31,7 +31,7 @@ func _ready() -> void:
 	shape.radius = RADIUS
 	cs.shape = shape
 	add_child(cs)
-	_sprite.texture = load(TEX) if ResourceLoader.exists(TEX) else _placeholder()
+	_sprite.texture = Art.lit(TEX) if ResourceLoader.exists(TEX) else _placeholder()
 	_sprite.rotation = randf() * TAU
 	add_child(_sprite)
 

@@ -1,5 +1,5 @@
 """Models the drilling machine (cutaway hull, back wall, drill head, stations) in Blender and
-renders flat + clay passes for each sprite. tools/drill_sheet.py makes the pixel art.
+renders flat + clay + normal passes for each sprite. tools/drill_sheet.py makes the pixel art.
 
 Run headless:
   blender -b --factory-startup -P tools/drill_blender.py -- <out_dir>
@@ -16,6 +16,9 @@ import sys
 import bmesh
 import bpy
 from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
 
 OUT = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else "/tmp/drill"
 os.makedirs(OUT, exist_ok=True)
@@ -136,17 +139,19 @@ def material(name):
         df = N("ShaderNodeBsdfDiffuse")
         df.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1)
     nt.links.new(em.outputs[0], out.inputs["Surface"])
-    MATS[name] = (m, nt, out, em, df)
+    MATS[name] = (m, nt, out, em, df, normal_shader(nt))
     return m
 
 
-def set_mode(clay):
-    for m, nt, out, em, df in MATS.values():
+def set_mode(mode):
+    """mode: "flat" (albedo), "clay" (white clay lit by the sun) or "normal" (camera normals)."""
+    for m, nt, out, em, df, nm in MATS.values():
         for l in list(out.inputs["Surface"].links):
             nt.links.remove(l)
-        nt.links.new((df if clay else em).outputs[0], out.inputs["Surface"])
-    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if clay else 0.0
-    sun_data.energy = 1.4 if clay else 0.0
+        nt.links.new({"flat": em, "clay": df, "normal": nm}[mode].outputs[0], out.inputs["Surface"])
+    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if mode == "clay" else 0.0
+    sun_data.energy = 1.4 if mode == "clay" else 0.0
+    set_view(scene, mode)
 
 
 # ---------------------------------------------------------------- modelling helpers (game px coords)
@@ -477,9 +482,9 @@ def render(name, left, top, w, h):
     scene.render.resolution_y = h
     cam_data.ortho_scale = max(w, h)
     cam.location = (left + w / 2, -300, -(top + h / 2))
-    for clay in (False, True):
-        set_mode(clay)
-        scene.render.filepath = os.path.join(OUT, f"{name}_{'clay' if clay else 'flat'}.png")
+    for mode in PASSES:
+        set_mode(mode)
+        scene.render.filepath = os.path.join(OUT, f"{name}_{mode}.png")
         bpy.ops.render.render(write_still=True)
 
 

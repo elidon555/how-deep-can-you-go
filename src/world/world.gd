@@ -71,7 +71,7 @@ func _ready() -> void:
 	_make_decor_textures()
 	for p in PROP_NAMES:
 		var g := "res://assets/props/%s_glow.png" % p
-		props[p] = [load("res://assets/props/%s.png" % p), load(g) if ResourceLoader.exists(g) else null]
+		props[p] = [Art.lit("res://assets/props/%s.png" % p), load(g) if ResourceLoader.exists(g) else null]
 	if fixed_seed >= 0:
 		rng.seed = fixed_seed
 	else:

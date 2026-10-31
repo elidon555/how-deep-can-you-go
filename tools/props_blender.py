@@ -1,4 +1,4 @@
-"""Models the cave props in Blender and renders flat + clay passes for each.
+"""Models the cave props in Blender and renders flat + clay + normal passes for each.
 
 Run headless:
   blender -b --factory-startup -P tools/props_blender.py -- <out_dir>
@@ -11,6 +11,9 @@ import sys
 
 import bpy
 from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
 
 OUT = sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else "/tmp/props"
 os.makedirs(OUT, exist_ok=True)
@@ -82,17 +85,19 @@ def material(name):
         df = nt.nodes.new("ShaderNodeBsdfDiffuse")
         df.inputs["Color"].default_value = (0.8, 0.8, 0.8, 1)
     nt.links.new(em.outputs[0], out.inputs["Surface"])
-    MATS[name] = (m, nt, out, em, df)
+    MATS[name] = (m, nt, out, em, df, normal_shader(nt))
     return m
 
 
-def set_mode(clay):
-    for m, nt, out, em, df in MATS.values():
+def set_mode(mode):
+    """mode: "flat" (albedo), "clay" (white clay lit by the sun) or "normal" (camera normals)."""
+    for m, nt, out, em, df, nm in MATS.values():
         for l in list(out.inputs["Surface"].links):
             nt.links.remove(l)
-        nt.links.new((df if clay else em).outputs[0], out.inputs["Surface"])
-    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if clay else 0.0
-    sun_data.energy = 1.4 if clay else 0.0
+        nt.links.new({"flat": em, "clay": df, "normal": nm}[mode].outputs[0], out.inputs["Surface"])
+    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if mode == "clay" else 0.0
+    sun_data.energy = 1.4 if mode == "clay" else 0.0
+    set_view(scene, mode)
 
 
 PROPS = {}   # name -> (objects, w_px, h_px, centre)
@@ -334,8 +339,8 @@ for name, (objs, w, h, centre, samples) in PROPS.items():
     scene.render.resolution_y = h
     cam_data.ortho_scale = max(w, h) / PX_PER_UNIT
     cam.location = (centre[0], -10, centre[1])
-    for clay in (False, True):
-        set_mode(clay)
-        scene.render.filepath = os.path.join(OUT, f"{name}_{'clay' if clay else 'flat'}.png")
+    for mode in PASSES:
+        set_mode(mode)
+        scene.render.filepath = os.path.join(OUT, f"{name}_{mode}.png")
         bpy.ops.render.render(write_still=True)
 print("PROPS_DONE", list(PROPS))

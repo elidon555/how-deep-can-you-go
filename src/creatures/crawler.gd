@@ -175,7 +175,7 @@ func _setup_sprite() -> void:
 		s.vframes = rows
 		s.offset = Vector2(0, -float(info.get("feet_below_center", 0.0)))
 		s.position = Vector2(0, 8)    # feet at the bottom of the capsule
-	_sprite.texture = load(SHEET)
+	_sprite.texture = Art.lit(SHEET)
 	add_child(_sprite)
 	if ResourceLoader.exists(SHEET_GLOW) and glow_parent:
 		_eyes.texture = load(SHEET_GLOW)

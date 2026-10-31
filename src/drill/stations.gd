@@ -14,7 +14,7 @@ static func stand(ci: CanvasItem, tex: Texture2D) -> void:
 
 ## Speed lever + depth screen.
 class Helm extends Station:
-	var _tex: Texture2D = load(Stations.DIR + "helm.png")
+	var _tex: Texture2D = Art.lit(Stations.DIR + "helm.png")
 
 	func prompt(_p: Player) -> String:
 		var next: String = Drill.SPEED_NAMES[(drill.speed + 1) % 3]
@@ -42,8 +42,9 @@ class Helm extends Station:
 
 ## Coal goes in here; the mouth glows while the head is turning.
 class Furnace extends Station:
-	var _tex: Texture2D = load(Stations.DIR + "furnace.png")
+	var _tex: Texture2D = Art.lit(Stations.DIR + "furnace.png")
 	var _fire := Sprite2D.new()
+	var _embers := CPUParticles2D.new()
 
 	func _ready() -> void:
 		super._ready()
@@ -53,6 +54,23 @@ class Furnace extends Station:
 		unlit.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
 		_fire.material = unlit
 		add_child(_fire)
+		_embers.position = Vector2(0, -12)
+		_embers.amount = 6
+		_embers.lifetime = 1.4
+		_embers.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+		_embers.emission_rect_extents = Vector2(5, 2)
+		_embers.direction = Vector2(0, -1)
+		_embers.spread = 25.0
+		_embers.initial_velocity_min = 8.0
+		_embers.initial_velocity_max = 20.0
+		_embers.gravity = Vector2(0, -6)
+		_embers.color = Color(2.2, 0.9, 0.3)
+		var fade := Gradient.new()
+		fade.set_color(0, Color.WHITE)
+		fade.set_color(1, Color(1, 1, 1, 0))
+		_embers.color_ramp = fade
+		_embers.material = unlit
+		add_child(_embers)
 
 	func prompt(p: Player) -> String:
 		if p.coal > 0:
@@ -73,11 +91,12 @@ class Furnace extends Station:
 		# the fire burns brighter while the head is cutting rock, and flickers
 		var heat := 0.5 + (0.9 if drill.drilling else 0.0) + 0.15 * sin(Time.get_ticks_msec() * 0.02)
 		_fire.modulate = Color(heat, heat, heat) if drill.fuel > 0.0 else Color(0.2, 0.2, 0.2)
+		_embers.emitting = drill.fuel > 0.0
 
 
 ## Sells the metal ore you carry, restocks ropes and opens the upgrades.
 class Workbench extends Station:
-	var _tex: Texture2D = load(Stations.DIR + "workbench.png")
+	var _tex: Texture2D = Art.lit(Stations.DIR + "workbench.png")
 
 	func prompt(p: Player) -> String:
 		if p.ore_value > 0:
@@ -100,7 +119,7 @@ class Workbench extends Station:
 class Medkit extends Station:
 	const RECHARGE := 45.0
 	var _ready_at := 0.0
-	var _tex: Texture2D = load(Stations.DIR + "medkit.png")
+	var _tex: Texture2D = Art.lit(Stations.DIR + "medkit.png")
 
 	func prompt(p: Player) -> String:
 		if not p.is_hurt():

@@ -2,7 +2,7 @@
 
 Run headless:
   blender -b --factory-startup -P tools/crawler_blender.py -- <out_dir> [anim,anim,...]
-Same scale, camera and flat + clay passes as the miner (tools/miner_blender.py);
+Same scale, camera and flat + clay + normal passes as the miner (tools/miner_blender.py);
 tools/crawler_sheet.py turns them into the sprite sheet + an eye glow sheet.
 """
 import math
@@ -11,6 +11,9 @@ import sys
 
 import bpy
 from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGS[0] if ARGS else "/tmp/crawler"
@@ -87,18 +90,20 @@ def material(name):
     if name == "eye":   # eyes glow: stay bright in the clay pass too
         df = nt.nodes.new("ShaderNodeEmission")
         df.inputs["Strength"].default_value = 3.0
-    MATS[name] = (m, nt, out, em, df)
+    MATS[name] = (m, nt, out, em, df, normal_shader(nt))
     nt.links.new(em.outputs[0], out.inputs["Surface"])
     return MATS[name]
 
 
-def set_mode(clay):
-    for m, nt, out, em, df in MATS.values():
+def set_mode(mode):
+    """mode: "flat" (albedo), "clay" (white clay lit by the sun) or "normal" (camera normals)."""
+    for m, nt, out, em, df, nm in MATS.values():
         for l in list(out.inputs["Surface"].links):
             nt.links.remove(l)
-        nt.links.new((df if clay else em).outputs[0], out.inputs["Surface"])
-    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if clay else 0.0
-    sun_data.energy = 1.4 if clay else 0.0
+        nt.links.new({"flat": em, "clay": df, "normal": nm}[mode].outputs[0], out.inputs["Surface"])
+    world.node_tree.nodes["Background"].inputs[1].default_value = 1.0 if mode == "clay" else 0.0
+    sun_data.energy = 1.4 if mode == "clay" else 0.0
+    set_view(scene, mode)
 
 
 # ---------------------------------------------------------------- modelling helpers (as the miner's)
@@ -359,8 +364,8 @@ for name in ORDER:
         continue
     for i, p in enumerate(ANIMS[name]):
         pose(p)
-        for clay in (False, True):
-            set_mode(clay)
-            scene.render.filepath = os.path.join(OUT, f"{name}_{i}_{'clay' if clay else 'flat'}.png")
+        for mode in PASSES:
+            set_mode(mode)
+            scene.render.filepath = os.path.join(OUT, f"{name}_{i}_{mode}.png")
             bpy.ops.render.render(write_still=True)
 print("CRAWLER_DONE", OUT)

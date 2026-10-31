@@ -65,6 +65,7 @@ func _ready() -> void:
 	player.health_changed.connect(hud.set_health)
 	player.died.connect(_on_died)
 	player.bag_changed.connect(_update_bag)
+	player.kicked_dust.connect(fx.dust)
 	player.interactor.prompt_changed.connect(hud.set_prompt)
 	Sfx.listener = player
 
@@ -188,6 +189,7 @@ func _on_boulder_shattered(pos: Vector2) -> void:
 
 
 func _on_crawler_killed(pos: Vector2) -> void:
+	fx.gore(pos)
 	var p := _nearest_player(pos)
 	if p:
 		p.add_value(2)    # crawlers carry a shiny bit or two

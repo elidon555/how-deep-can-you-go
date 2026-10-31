@@ -13,7 +13,7 @@ const HEAD_AT := Vector2(-88, 54)
 
 var drill: Drill
 var _spin := 0.0
-var _back: Texture2D = load(DIR + "drill_back.png")
+var _back: Texture2D = Art.lit(DIR + "drill_back.png")
 var _frame := Sprite2D.new()      # in front of the crew
 var _head := Sprite2D.new()
 var _head_frames := 6
@@ -21,11 +21,13 @@ var _interior := PointLight2D.new()
 var _beacon := PointLight2D.new()
 var _heads := [PointLight2D.new(), PointLight2D.new()]
 var _smoke := CPUParticles2D.new()
+var _sparks := CPUParticles2D.new()   # off the cutters while biting rock
+var _grit := CPUParticles2D.new()     # rock dust blown up the gap beside the hull
 
 
 func _ready() -> void:
 	z_index = -1
-	_frame.texture = load(DIR + "drill_frame.png")
+	_frame.texture = Art.lit(DIR + "drill_frame.png")
 	_frame.centered = false
 	_frame.position = FRAME_AT
 	_frame.z_index = 2                 # draws over the crew: the hull's front edges
@@ -34,7 +36,7 @@ func _ready() -> void:
 	var info = JSON.parse_string(FileAccess.get_file_as_string(DIR + "drill_head.json"))
 	if info is Dictionary:
 		_head_frames = int(info.get("frames", 6))
-	_head.texture = load(DIR + "drill_head.png")
+	_head.texture = Art.lit(DIR + "drill_head.png")
 	_head.hframes = _head_frames
 	_head.centered = false
 	_head.position = HEAD_AT
@@ -73,6 +75,18 @@ func _ready() -> void:
 	_smoke.scale_amount_max = 5.0
 	_smoke.color = Color(0.25, 0.24, 0.24, 0.5)
 	add_child(_smoke)
+	_particles(_sparks, Vector2(0, 100), Vector2(150, 8), 40, 0.45, Color(2.4, 1.5, 0.6), 1.2, true)
+	_sparks.direction = Vector2(0, -1)
+	_sparks.spread = 70.0
+	_sparks.initial_velocity_min = 60.0
+	_sparks.initial_velocity_max = 160.0
+	_sparks.gravity = Vector2(0, 500)
+	_particles(_grit, Vector2(0, 60), Vector2(118, 10), 30, 1.4, Color(0.5, 0.44, 0.38, 0.6), 3.5, false)
+	_grit.direction = Vector2(0, -1)
+	_grit.spread = 25.0
+	_grit.initial_velocity_min = 20.0
+	_grit.initial_velocity_max = 50.0
+	_grit.gravity = Vector2(0, 20)
 
 
 func _process(dt: float) -> void:
@@ -83,6 +97,8 @@ func _process(dt: float) -> void:
 	var alarm := drill.get_breaches().size() > 0 or drill.hull < drill.max_hull * 0.25
 	_beacon.enabled = alarm and fmod(Time.get_ticks_msec() / 1000.0, 0.6) < 0.3
 	_smoke.emitting = drill.speed != Drill.Speed.STOP and drill.fuel > 0.0
+	_sparks.emitting = drill.drilling
+	_grit.emitting = drill.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames
 	queue_redraw()
@@ -90,6 +106,28 @@ func _process(dt: float) -> void:
 
 func _draw() -> void:
 	draw_texture(_back, BACK_AT)
+
+
+func _particles(p: CPUParticles2D, at: Vector2, extents: Vector2, amount: int, life: float,
+		color: Color, size: float, glowing: bool) -> void:
+	p.position = at
+	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	p.emission_rect_extents = extents
+	p.amount = amount
+	p.lifetime = life
+	p.color = color
+	p.scale_amount_min = size * 0.5
+	p.scale_amount_max = size
+	p.emitting = false
+	var fade := Gradient.new()
+	fade.set_color(0, Color.WHITE)
+	fade.set_color(1, Color(1, 1, 1, 0))
+	p.color_ramp = fade
+	if glowing:                     # bright and unaffected by the dark, so it blooms
+		var m := CanvasItemMaterial.new()
+		m.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
+		p.material = m
+	add_child(p)
 
 
 static func _radial_texture() -> GradientTexture2D:

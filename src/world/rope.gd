@@ -31,7 +31,7 @@ static func hang(world: World, feet: Vector2) -> Rope:
 func _ready() -> void:
 	add_to_group("rope")
 	z_index = -1
-	_tex = load(TEX) if ResourceLoader.exists(TEX) else null
+	_tex = Art.lit(TEX) if ResourceLoader.exists(TEX) else null
 	_anchor = load(ANCHOR_TEX) if ResourceLoader.exists(ANCHOR_TEX) else null
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
 
