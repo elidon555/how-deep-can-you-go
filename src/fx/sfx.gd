@@ -1,7 +1,8 @@
 extends Node
 ## Autoload "Sfx": plays the generated sounds in assets/sfx (tools/gen_sfx.py).
 ## Sfx.play("hit_stone", pos) picks a random variant (hit_stone_v1, _v2 ...) and varies pitch.
-## Also runs the cave ambience (crossfades with depth) and random water drips.
+## Also runs the cave ambience (crossfades with depth), random water drips, and the music
+## (title theme, deep-layer theme). Effects go to the "SFX" bus, music to "Music" (Settings).
 
 const DIR := "res://assets/sfx/"
 const POOL := 16
@@ -11,6 +12,8 @@ var _players: Array[AudioStreamPlayer2D] = []
 var _next := 0
 var _ui := AudioStreamPlayer.new()
 var _amb := [AudioStreamPlayer.new(), AudioStreamPlayer.new()]   # cave, deep
+var _music := AudioStreamPlayer.new()
+var _music_name := ""
 var _drip_t := 3.0
 var listener: Node2D      # usually the player; drips play around it
 
@@ -21,12 +24,17 @@ func _ready() -> void:
 		var p := AudioStreamPlayer2D.new()
 		p.max_distance = 900.0
 		p.attenuation = 1.4
+		p.bus = "SFX"
 		add_child(p)
 		_players.append(p)
+	_ui.bus = "SFX"
 	add_child(_ui)
+	_music.bus = "Music"
+	add_child(_music)
 	for i in 2:
 		_amb[i].stream = looping(["amb_cave", "amb_deep"][i])
 		_amb[i].volume_db = -80.0
+		_amb[i].bus = "SFX"
 		add_child(_amb[i])
 
 
@@ -61,6 +69,24 @@ func play(name: String, pos := Vector2.INF, volume_db := 0.0, pitch_var := 0.08)
 	p.volume_db = volume_db
 	p.pitch_scale = pitch
 	p.play()
+
+
+## Plays a looping music track ("" = none), crossfading from whatever was on.
+func music(name: String) -> void:
+	if name == _music_name:
+		return
+	_music_name = name
+	var tw := create_tween()
+	if _music.playing:
+		tw.tween_property(_music, "volume_db", -40.0, 1.5)
+	tw.tween_callback(func():
+		_music.stream = looping(name) if name != "" else null
+		if _music.stream:
+			_music.volume_db = -40.0
+			_music.play()
+			create_tween().tween_property(_music, "volume_db", 0.0, 2.5)
+		else:
+			_music.stop())
 
 
 ## Ambience mix for a depth in meters: silent at the surface, cave drone, deep drone past ~150 m.

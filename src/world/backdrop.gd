@@ -13,6 +13,7 @@ const ZONES := [
 const SKY := [["hills_far", 0.08, 0.3, Color("3b4652")], ["hills_near", 0.2, 0.5, Color("2a333c")],
 	["forest", 0.35, 0.7, Color("181d23")]]
 const CAVE := [["cave_far", 0.15], ["cave_mid", 0.35], ["cave_near", 0.6]]
+const DEEP_FAR_FROM := 350.0   # m: the far layer becomes the vast deep cavern
 
 var wall := ColorRect.new()
 var _layer := CanvasLayer.new()
@@ -21,6 +22,8 @@ var _sky_clip := Control.new()
 var _cave_clip := Control.new()
 var _sky := []    # [TextureRect, horizontal scroll, vertical scroll, tint]
 var _cave := []   # [TextureRect, scroll, zone colour index]
+var _far_tex: Texture2D
+var _far_deep_tex: Texture2D
 
 
 func _ready() -> void:
@@ -52,6 +55,9 @@ func _ready() -> void:
 		var t := _tiled(CAVE[i][0], Vector2(1280 / 2 + 512, 720 / 2 + 512))
 		_cave_clip.add_child(t)
 		_cave.append([t, CAVE[i][1], i])
+	_far_tex = _cave[0][0].texture
+	var deep := "res://assets/bg/cave_far_deep.png"
+	_far_deep_tex = load(deep) if ResourceLoader.exists(deep) else _far_tex
 
 
 ## Call every frame with the camera.
@@ -66,6 +72,7 @@ func follow(cam: Camera2D, depth_m: float) -> void:
 	_cave_clip.position = Vector2(0, horizon)
 	_cave_clip.size = Vector2(vs.x, vs.y - horizon)
 	var zc := _zone_colours(depth_m)
+	_cave[0][0].texture = _far_deep_tex if depth_m > DEEP_FAR_FROM else _far_tex
 	_fill.color = Color("4a5663").lerp(zc[0], clampf(depth_m / 6.0, 0.0, 1.0))
 	for L in _sky:
 		var t: TextureRect = L[0]

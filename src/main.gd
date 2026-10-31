@@ -3,6 +3,8 @@ extends Node2D
 ## Game rules that span systems live here: who gets the ore, ropes, the drill being wrecked,
 ## dying, milestones. The drill (src/drill) is the crew's base: ore is sold at its workbench.
 
+static var skip_title := false  # set when restarting a run, so it goes straight back in
+
 const MILESTONES := {
 	10: "The daylight is gone", 25: "It's very quiet down here", 50: "Something is watching you",
 	100: "100 m. Nobody has dug this deep", 200: "The rock feels... warm", 300: "You hear breathing",
@@ -23,6 +25,14 @@ var fx := Fx.new()
 var hud := Hud.new()
 var shop := Shop.new()
 var sonar := SonarView.new()
+var menus := CanvasLayer.new()
+var title := TitleMenu.new()
+var pause := PauseMenu.new()
+var settings_menu := SettingsMenu.new()
+var game_over := GameOver.new()
+var run_time := 0.0
+var kills := 0
+var run_over := false
 var drill := Drill.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
@@ -108,6 +118,7 @@ func _ready() -> void:
 	Progress.changed.connect(_on_progress_changed)
 	hud.set_health(player.health, player.max_health)
 	_update_bag()
+	_setup_menus()
 	_autotest()
 
 
@@ -122,6 +133,9 @@ func _process(dt: float) -> void:
 	if Progress.record_depth(depth):
 		new_best = true
 	hud.set_depth(depth, Progress.best, new_best)
+	if not title.visible:
+		run_time += dt
+		Sfx.music("music_deep" if depth_m > 300.0 else "")
 	for m in MILESTONES:
 		if depth >= m and not shown.has(m):
 			shown[m] = true
@@ -135,7 +149,7 @@ func _process(dt: float) -> void:
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
-	if Input.is_action_just_pressed("restart"):
+	if Input.is_action_just_pressed("restart") and not title.visible:
 		_restart()
 
 
@@ -228,6 +242,7 @@ func _on_worm_coming(_w: Worm) -> void:
 
 
 func _on_worm_killed(pos: Vector2) -> void:
+	kills += 1
 	fx.gore(pos)
 	shake = maxf(shake, 1.2)
 	var p := _nearest_player(pos)
@@ -237,6 +252,7 @@ func _on_worm_killed(pos: Vector2) -> void:
 
 
 func _on_crawler_killed(pos: Vector2) -> void:
+	kills += 1
 	fx.gore(pos)
 	var p := _nearest_player(pos)
 	if p:
@@ -251,9 +267,8 @@ func _on_workbench_used(p: Player) -> void:
 
 
 func _on_drill_wrecked() -> void:
-	hud.toast("The drill is wrecked at %d m." % int(drill.global_position.y / World.METER), 3.0)
 	Sfx.play("drill_stall", drill.global_position)
-	_game_over()
+	_game_over("The drill is wrecked.")
 
 
 func _nearest_player(pos: Vector2) -> Player:
@@ -277,22 +292,67 @@ func _on_rope_requested(feet: Vector2) -> void:
 
 
 func _on_died() -> void:
-	var depth := maxi(0, int(player.position.y / World.METER))
 	player.lose_bag()
-	hud.toast("You died at %d m. The ore you carried is lost." % depth, 3.0)
-	_game_over()
+	_game_over("You died. The ore you carried is lost.")
 
 
-func _game_over() -> void:
+func _game_over(reason: String) -> void:
+	if run_over:
+		return
+	run_over = true
 	player.frozen = true
 	Progress.save()
-	await get_tree().create_timer(3.0).timeout
-	get_tree().reload_current_scene()
+	await get_tree().create_timer(1.5).timeout
+	game_over.show_run({"reason": reason, "depth": maxi(0, int(drill.global_position.y / World.METER)),
+		"best": Progress.best, "new_best": new_best, "earned": player.sold_value, "kills": kills,
+		"seconds": run_time})
 
 
-func _restart() -> void:
+func _restart(to_title := false) -> void:
 	Progress.save()
+	skip_title = not to_title
+	get_tree().paused = false
 	get_tree().reload_current_scene()
+
+
+# ---------------------------------------------------------------- menus
+
+func _setup_menus() -> void:
+	menus.layer = 20
+	add_child(menus)
+	for m in [title, pause, settings_menu, game_over]:
+		menus.add_child(m)
+	title.start_pressed.connect(_start_run)
+	title.settings_pressed.connect(func(): settings_menu.open())
+	pause.settings_pressed.connect(func(): settings_menu.open())
+	pause.restart_pressed.connect(_restart)
+	pause.title_pressed.connect(func(): _restart(true))
+	game_over.again_pressed.connect(_restart)
+	game_over.title_pressed.connect(func(): _restart(true))
+	# tests and autotests go straight in; so does "dig again"
+	if skip_title or Progress.dry_run:
+		title.visible = false
+		skip_title = false
+	else:
+		title.visible = true
+		hud.visible = false
+		player.frozen = true
+		Sfx.music("music_title")
+
+
+func _start_run() -> void:
+	title.visible = false
+	hud.visible = true
+	player.frozen = false
+	Sfx.music("")
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Esc pauses, unless something else used it (shop, sonar, the turret seat take it first)
+	if event.is_action_pressed("ui_cancel") and not title.visible and not run_over \
+			and not pause.visible and drill.gunner != player:
+		pause.open()
+		get_viewport().set_input_as_handled()
 
 
 func _notification(what: int) -> void:

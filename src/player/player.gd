@@ -42,6 +42,7 @@ var ore_count := 0
 var ore_value := 0
 var coal := 0
 var ropes := 0
+var sold_value := 0            # this run: ore sold at the workbench
 var health := 3
 var max_health := 3
 var frozen := false            # e.g. while the shop is open
@@ -249,6 +250,7 @@ func add_value(value: int) -> void:
 ## Hands over the metal ore's value and empties that part of the bag.
 func take_ore_value() -> int:
 	var v := ore_value
+	sold_value += v
 	ore_count = 0
 	ore_value = 0
 	bag_changed.emit()

@@ -407,6 +407,105 @@ def cave_near(name, S, rng):
     print("wrote", name, f"{m.mean():.0%} solid")
 
 
+def walk(rng, y, x, steps, ang, turn):
+    """A wandering path of (y, x) points, 1 px per step."""
+    pts = []
+    for _ in range(steps):
+        pts.append((y, x))
+        ang += rng.normal(0, turn)
+        y += np.sin(ang)
+        x += np.cos(ang)
+    return pts, ang
+
+
+def basalt_columns(cv, x0, width, base, rng, up=True, hmin=40, hmax=200):
+    """A cluster of hexagonal basalt columns side by side, stepped flat/angled tops (Giant's
+    Causeway), tallest in the middle. Draws into cv; returns the joint lines between columns."""
+    joints = []
+    x = x0
+    while x < x0 + width:
+        w = rng.uniform(7, 15)
+        t = (x - x0) / width
+        hgt = hmin + (hmax - hmin) * np.sin(np.pi * t) ** 0.7 * rng.uniform(0.6, 1.0)
+        tilt = rng.uniform(-3, 3)
+        s = -1 if up else 1
+        y_top = base + s * hgt
+        cv.poly([(x, base - s * 4), (x, y_top + tilt), (x + w / 2, y_top - s * 2), (x + w, y_top - tilt),
+                 (x + w, base - s * 4)])
+        joints.append((x, base, y_top + tilt))
+        x += w
+    return joints
+
+
+def cave_far_deep(name, S, rng):
+    """The deep backdrop: a vast cavern with huge basalt column clusters, two distant lava
+    falls spilling from great hanging rock masses into glowing pools, hot seams in the rock and haze rising
+    off the lava. Value only (tinted per zone): lava is full white, rock is dark."""
+    sh, top, bot = shelf(S, S, 476, 26, rng, cells=8)
+    rock = Canvas(S, S)
+    rock.img = Image.fromarray(np.where(sh, 255, 0).astype(np.uint8), "L")
+    rock.dr = ImageDraw.Draw(rock.img)
+    ceil = lambda x: bot[int(x) % S] - S - 2
+    floor = lambda x: top[int(x) % S] + 2
+    joints = []
+    c1 = rng.uniform(0, S)
+    joints += basalt_columns(rock, c1, 120, floor(c1 + 60), rng, True, 50, 260)
+    c2 = (c1 + 230) % S
+    joints += basalt_columns(rock, c2, 80, floor(c2 + 40), rng, True, 30, 150)
+    for cx in ((c1 + 150) % S, (c2 + 140) % S):        # columns hanging from the roof
+        joints += basalt_columns(rock, cx, 60, ceil(cx + 30), rng, False, 30, 110)
+    hx = (c1 + 330) % S                                 # one colossal pillar, roof to floor
+    rock.poly(column_pts(hx, ceil(hx) - 4, floor(hx) + 4, 70, 40, 76, rng))
+    for x in place(rng, S, [c1 + 190, c2 + 120], 12, 50):
+        spike_cluster(rock, x, ceil(x), rng.uniform(15, 55), rng.uniform(6, 14), rng, True, 1)
+    # lava falls
+    lava = Canvas(S, S)
+    falls = [(c1 + 100) % S, (c2 + 200) % S]
+    for fx in falls:
+        y0, y1 = rng.uniform(140, 210), floor(fx)
+        # a great blunt mass hanging from the roof; the lava spills from its lip
+        rock.poly(spike_pts(fx + 6, ceil(fx), y0 - ceil(fx) + 6, rng.uniform(70, 95), rng, True,
+                            rng.uniform(-8, 8), 0.3, 12))
+        pts = [(fx + 1.5 * np.sin(k * 0.09) + (k / (y1 - y0)) ** 2 * 5, y0 + k) for k in range(int(y1 - y0))]
+        lava.line(pts, 150, 8)
+        lava.line(pts, 255, 3)
+        lava.ellipse(fx - 22, y1 - 4, fx + 30, y1 + 5, fill=150)    # the pool it lands in
+        lava.ellipse(fx - 14, y1 - 3, fx + 22, y1 + 3, fill=255)
+    m = rock.mask()
+    v = shade_rock(m, rng, 0.42, 0.6, 0.12, maxd=18)
+    under = m & (~np.roll(m, -1, 0) | ~np.roll(m, -2, 0))    # undersides catch the lava light
+    v = np.where(under, 0.72, v)
+    jm = Canvas(S, S)                                    # dark joints between the columns
+    for x, b, t in joints:
+        jm.line([(x, b), (x, t)], 255)
+    v = np.where(jm.mask() & m & ~under, v - 0.12, v)
+    seams = Canvas(S, S)                                 # glowing seams, only inside the rock
+    ys, xs = np.nonzero(dist_to(m, 6) > 4)
+    for _ in range(10):
+        i = rng.integers(len(ys))
+        pts, _ = walk(rng, ys[i], xs[i], int(rng.integers(12, 40)), rng.uniform(0, 6.28), 0.35)
+        seams.line([(px, py) for py, px in pts], 255, 1)
+    v = np.where(seams.mask() & m, 0.92, v)
+    # haze rising off the pools, plus a general warm fog low down
+    yy, xx = np.mgrid[0:S, 0:S].astype(float)
+    haze = np.zeros((S, S))
+    wisp = fractal(S, S, 6, 12, 3, rng)
+    for fx in falls:
+        y1 = floor(fx)
+        dx = (xx - fx + S / 2) % S - S / 2
+        rise = np.clip((y1 - yy) / 300.0, 0, 1)
+        haze = np.maximum(haze, np.exp(-(dx / (30 + 110 * rise)) ** 2) * (1 - rise) * (yy <= y1 + 4))
+    haze = np.maximum(haze * (0.55 + 0.6 * wisp), fog_band(S, S, [440], 50, rng, 0.5) * 0.7)
+    v = v + (1 - v) * haze * 0.4 * m
+    alpha = np.where(m, 1.0, steps(0.1 + haze * 0.45, 16))
+    v = np.where(m, v, 1.0)
+    la = lava.array() / 255.0                            # lava over everything
+    v = np.where(la > 0, np.where(la > 0.7, 1.0, 0.9), v)
+    alpha = np.where(la > 0, 1.0, alpha)
+    to_rgba(v, alpha).save(os.path.join(OUT, name + ".png"))
+    print("wrote", name, f"{m.mean():.0%} solid")
+
+
 # ---------------------------------------------------------------- surface layers
 def shade_flat(mask, base, rim, n=None, tex=0.0):
     """Surface silhouettes: flat value, lit top rim, half-lit left edge."""
@@ -633,6 +732,7 @@ if __name__ == "__main__":
     cave_far("cave_far", 512, np.random.default_rng(2024))
     cave_mid("cave_mid", 512, np.random.default_rng(2025))
     cave_near("cave_near", 512, np.random.default_rng(2026))
+    cave_far_deep("cave_far_deep", 512, np.random.default_rng(2030))
     hills_far("hills_far", 1024, 160, np.random.default_rng(2027))
     hills_near("hills_near", 1024, 160, np.random.default_rng(2028))
     dead_forest("forest", 1024, 160, np.random.default_rng(2029))

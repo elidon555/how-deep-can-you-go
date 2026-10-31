@@ -40,7 +40,7 @@ func _ready() -> void:
 	mat.shader.code = VIGNETTE
 	_vignette.material = mat
 	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	under.add_child(_vignette)
 
 	_label(_depth, Vector2(24, 12), 56)

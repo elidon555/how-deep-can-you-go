@@ -609,6 +609,207 @@ def wall(name, S, rng):
     save(name, img, height, 2.4)
 
 
+def save_glow(name, glow):
+    """Emissive map for the bloom layer, same convention as the prop glows: RGB = light colour
+    (intensity baked in), alpha 255 where it glows, fully transparent black elsewhere."""
+    on = glow.max(-1) > 4
+    out = np.zeros(glow.shape[:2] + (4,), np.uint8)
+    out[..., :3] = np.where(on[..., None], np.clip(glow, 0, 255), 0).astype(np.uint8)
+    out[..., 3] = np.where(on, 255, 0)
+    Image.fromarray(out, "RGBA").save(os.path.join(OUT, name + "_glow.png"))
+    print("wrote", name + "_glow", f"{on.mean():.1%} glowing")
+
+
+def prism(img, height, glow, rng, cy, cx, ang, L, w, pal, glow_col):
+    """One hexagonal crystal seen side-on: three long faces (lit / middle / shadow side), a
+    pointed termination with two facets, bright ridges between faces. Painter's order."""
+    S = img.shape[0]
+    ay, ax = np.sin(ang), np.cos(ang)            # axis (image coords, y down)
+    py, px = ax, -ay                             # across the crystal
+    R = int(L + w + 3)
+    o = np.arange(-R, R + 1)
+    dy, dx = np.meshgrid(o, o, indexing="ij")
+    u = dx * ax + dy * ay
+    v = dx * px + dy * py
+    tip = min(w * 1.7, L * 0.5)
+    half = np.where(u < L - tip, w, w * (L - u) / tip)
+    inside = (u >= -1.5) & (u <= L) & (np.abs(v) <= half + 0.35)
+    if not inside.any():
+        return
+    sgn = np.sign(v + 1e-6)
+    s = np.abs(v) / np.maximum(half, 0.6)
+    in_tip = u > L - tip
+    face = np.where(in_tip, np.where(v < 0, 3, 4), np.where(s < 0.36, 1, np.where(v < 0, 0, 2)))
+    lit = np.array([-0.6, -0.8])                 # towards the light, image coords
+    side = sgn * (py * lit[0] + px * lit[1])     # +1 = this half faces the light
+    litside = side > 0
+    tone = np.where(face == 1, 4.4, np.where(litside, 6.2, 2.6))
+    tone = np.where(in_tip, np.where(litside, 7.3, 4.4), tone)
+    # outline all round (so overlapping crystals stay separate), pale on the lit edge;
+    # a bright ridge where the lit face meets the middle face and along the tip
+    fpad = np.where(inside, face, -1)
+    nbr = [np.roll(fpad, k, ax) for k in (1, -1) for ax in (0, 1)]
+    outer = inside & np.any([n < 0 for n in nbr], axis=0)
+    ridge = inside & ~outer & litside & np.any([(n >= 0) & (n != fpad) for n in nbr], axis=0)
+    tone = np.where(ridge, 8, tone)
+    tone = np.where(outer, np.where(litside & (u > 1), 6.8, 0), tone)
+    streak = inside & ~outer & (face == 1) & (np.abs(v) < 0.6) & (u > L * 0.25) & (u < L - tip) & \
+        ((u.astype(int) % 6) < 2)
+    tone = np.where(streak, tone + 1.5, tone)
+    ti = np.clip(np.round(tone), 0, len(pal) - 1).astype(int)
+    ys, xs = (cy + dy[inside]) % S, (cx + dx[inside]) % S
+    img[ys, xs] = pal[ti[inside]]
+    hh = 1.0 + 0.45 * (1 - np.clip((s - 0.36) / 0.64, 0, 1))
+    hh = np.where(in_tip, hh - 0.35 * (u - (L - tip)) / max(tip, 1), hh)
+    height[ys, xs] = hh[inside]
+    # glow only on the brightest bits: the lit ridge, the lit edge and the very tip
+    gi = np.where(ridge, 0.75, 0.0)
+    gi = np.where(outer & litside & (u > L * 0.45), 0.55, gi)
+    gi = np.where(in_tip & litside & (u > L - tip * 0.6), 1.0, gi)
+    gi = np.where(streak, np.maximum(gi, 0.5), gi)
+    glow[ys, xs] = np.maximum(glow[ys, xs], (glow_col * gi[inside, None]))
+
+
+def crystal(name, S, rng):
+    """Crystal caverns: dark violet host rock with clusters of amethyst/quartz prisms and a
+    couple of fractured geodes."""
+    host = palette("#07050c", "#0c0814", "#110b1c", "#170f25", "#1d142f", "#251a3a", "#2e2146", "#382953")
+    cpal = palette("#140a24", "#22113d", "#331a58", "#462474", "#5b3192", "#7443ad", "#905fc7",
+                   "#b28ae0", "#d9c0f5")
+    idx = voronoi(S, rng.random((14, 2)) * S, 1.0, ((fractal(S, 4, 3, rng) - 0.5) * 12,
+                                                    (fractal(S, 4, 3, rng) - 0.5) * 12))
+    gap = borders(idx)
+    gap = chip_corners(gap, idx, rng, 10, S)
+    d = dist_to(~gap, 6)
+    height = np.clip(d / 2.5, 0, 1) ** 0.8
+    rough = fractal(S, 10, 3, rng)
+    height += (rough - 0.5) * 0.2
+    face = rng.choice([3.6, 4.2, 4.8], idx.max() + 1)
+    shade = face[idx] + baked_light(height, 2.4) * 4.5 + (rough - 0.5) * 1.2
+    shade = np.where(gap, 0, shade)
+    img = host[np.clip(np.round(shade), 0, len(host) - 1).astype(int)]
+    glow = np.zeros((S, S, 3))
+    # tiny crystal grains sprinkled in the host rock
+    for _ in range(40):
+        y, x = rng.integers(0, S, 2)
+        if d[y, x] > 1.5:
+            img[y, x] = cpal[rng.integers(4, 7)]
+            img[(y + 1) % S, (x + 1) % S] = host[1]
+    # geodes: chalcedony rind, a ring of crystal teeth pointing in, a dark hollow; cracked through
+    for gy, gx, gr in ((34, 92, 11.0), (100, 28, 8.5)):
+        ry, rx = gr * 0.8, gr
+        o = np.arange(-int(gr) - 3, int(gr) + 4)
+        dy, dx = np.meshgrid(o, o, indexing="ij")
+        r = np.sqrt((dy / ry) ** 2 + (dx / rx) ** 2)
+        a = np.arctan2(dy, dx)
+        t = (a / (2 * np.pi) * 16) % 1.0
+        t = (a / (2 * np.pi) * 11 + 0.3 * np.sin(a * 3)) % 1.0
+        tooth = (r < 0.86) & ((0.86 - r) / 0.62 < 1 - np.abs(t - 0.5) * 2)
+        ys, xs = (gy + dy) % S, (gx + dx) % S
+        lit_in = np.cos(a - np.arctan2(0.8, 0.6))      # inner wall facing up-left = lower-right part
+        col = np.zeros(dy.shape + (3,))
+        col[:] = palette("#06030a")[0]
+        tt = np.clip(np.round(4.2 + 2.5 * lit_in * (t - 0.5) * 2 + 1.5 * (0.86 - r) / 0.62), 2, 8).astype(int)
+        col = np.where(tooth[..., None], cpal[tt], col)
+        rind = (r >= 0.86) & (r <= 1.0)
+        rc = palette("#4a4360", "#6d6587", "#8f88a8")
+        col = np.where(rind[..., None], rc[np.where(r < 0.93, 1 + (lit_in > 0.3), 0)], col)
+        edge = (r > 1.0) & (r <= 1.13)
+        col = np.where(edge[..., None], host[0], col)
+        m = r <= 1.13
+        img[ys[m], xs[m]] = col[m]
+        height[ys[m], xs[m]] = np.where(r[m] < 0.86, 0.25 + 0.4 * tooth[m], 0.9)
+        g = tooth & (tt >= 7)
+        glow[ys[g], xs[g]] = palette("#b98cff")[0] * (0.6 + 0.4 * (tt[g] == 8))[:, None]
+        pts, _ = walk(rng, gy - gr * 1.6, gx - gr * 0.5, int(gr * 3.4), 1.2, 0.2)   # the fracture
+        for py, px in pts:
+            iy, ix = int(py) % S, int(px) % S
+            img[iy, ix] = host[0]
+            img[iy, (ix + 1) % S] = img[iy, (ix + 1) % S] * 0.6
+            height[iy, ix] -= 0.4
+    # crystal clusters: fans of prisms growing out of the rock
+    gcol = palette("#c9a0ff")[0]
+    for cy, cx, ang0, big in ((84, 76, -1.75, 1.0), (24, 30, -0.6, 0.7), (110, 118, -2.5, 0.8),
+                              (50, 112, 2.3, 0.55)):
+        n = int(rng.integers(4, 7))
+        spec = sorted(((rng.uniform(14, 40) * big, ang0 + rng.normal(0, 0.42), rng.uniform(3.2, 6.5) * big ** 0.5,
+                        rng.uniform(-4, 4), rng.uniform(-4, 4)) for _ in range(n)), key=lambda q: -q[0])
+        for L, ang, w, oy, ox in spec:
+            prism(img, height, glow, rng, int(cy + oy), int(cx + ox), ang, L, w, cpal, gcol)
+        for _ in range(4):                       # small shards around the foot
+            prism(img, height, glow, rng, int(cy + rng.uniform(-7, 7)), int(cx + rng.uniform(-7, 7)),
+                  ang0 + rng.normal(0, 0.9), rng.uniform(4, 8), rng.uniform(1.2, 2.0), cpal, gcol)
+    save(name, img, height, 2.4)
+    save_glow(name, glow)
+
+
+def magma(name, S, rng):
+    """Magma layer: near-black basalt blocks, a web of hot cracks between them (some cooled),
+    ash-grey crust on the blocks, a few glassy obsidian bands."""
+    pal = palette("#040303", "#080606", "#0c0908", "#110d0b", "#16110e", "#1c1612", "#231b16", "#2b221b")
+    ash = palette("#1d1b1a", "#272524", "#33302e", "#3f3b38", "#4c4743", "#5a5450")
+    hot = palette("#3a0c05", "#7a1a0a", "#c43a12", "#f06d1c", "#ffa63a", "#ffd97a")
+    seeds = rng.random((12, 2)) * S
+    idx = voronoi(S, seeds, 1.0, ((fractal(S, 4, 3, rng) - 0.5) * 16, (fractal(S, 4, 3, rng) - 0.5) * 16))
+    seam = borders(idx)
+    # a few branch cracks splitting blocks
+    ys, xs = np.nonzero(seam)
+    for _ in range(6):
+        i = rng.integers(len(ys))
+        pts, _ = walk(rng, ys[i], xs[i], int(rng.integers(8, 20)), rng.uniform(0, 6.28), 0.15)
+        for py, px in pts:
+            seam[int(py) % S, int(px) % S] = True
+    ds = dist_to(~seam, 8)                       # distance to the crack's core line
+    wid = 0.6 + 2.0 * fractal(S, 6, 2, rng)      # crack half-width wanders 0.6..2.6 px
+    crack = ds <= wid
+    heatn = np.clip((fractal(S, 6, 2, rng) - 0.42) / 0.2, 0, 1)   # about half the cracks have cooled
+    heat = heatn * np.clip(1 - ds / (wid + 0.6), 0, 1) ** 0.8
+    heat = np.where(crack, heat, 0)
+    d = np.maximum(ds - wid, 0)
+    height = np.clip(d / 3.0, 0, 1) ** 0.7
+    rough = fractal(S, 12, 3, rng)
+    height += (rough - 0.5) * 0.2
+    face = rng.choice([3.4, 4.0, 4.6], idx.max() + 1)
+    shade = face[idx] + baked_light(height, 2.4) * 4.0 + (rough - 0.5) * 1.2
+    img = pal[np.clip(np.round(shade), 0, len(pal) - 1).astype(int)]
+    # ash crust patches with small pits
+    crust = (fractal(S, 6, 3, rng) > 0.56) & (d > 2.5)
+    at = np.clip(np.round(2.3 + baked_light(height, 2.4) * 4 + (rough - 0.5) * 2.5), 0, len(ash) - 1).astype(int)
+    img = np.where(crust[..., None], ash[at], img)
+    pits = crust & (rng.random((S, S)) < 0.05)
+    img[pits] = ash[0]
+    craze = borders(voronoi(S, rng.random((70, 2)) * S)) & crust     # crazing in the crust
+    img[craze] = ash[0]
+    img[np.roll(craze, 1, 0) & crust & ~craze] = ash[4]
+    height = np.where(craze, height - 0.12, height)
+    height = np.where(crust, height + 0.08, height)
+    # obsidian: glassy black bands with a sharp cold highlight along their top edge
+    yy, xx = np.mgrid[0:S, 0:S]
+    off = rng.integers(-3, 4, idx.max() + 1)
+    for c, hw in ((40, 2.6), (97, 1.8)):
+        band_c = c + wave(S, 2, rng, 6.0)[xx] + off[idx]
+        dyb = yy - band_c
+        ob = (np.abs(dyb) < hw + wave(S, 8, rng, 0.8)[xx]) & ~crack & (d > 0.5)
+        img[ob] = palette("#040407")[0]
+        top_e = ob & ~np.roll(ob, 1, 0)
+        img[top_e] = palette("#2b3140")[0]
+        hl = ob & (np.abs(dyb + hw * 0.35) < 0.5) & (fractal(S, 10, 1, rng) > 0.5)   # glassy sheen
+        img[hl] = palette("#4a5468")[0]
+        img[hl & (rng.random((S, S)) < 0.12)] = palette("#9aa6bc")[0]
+        img[ob & ~np.roll(ob, -1, 0)] = palette("#0e0f14")[0]
+        height = np.where(ob, height + 0.1, height)
+    # rock right at a hot crack is heat-tinted
+    rim = ~crack & (ds <= wid + 1.5) & (heatn > 0.3)
+    img = np.where(rim[..., None], img * 0.6 + hot[0] * 0.4 * heatn[..., None], img)
+    # the cracks themselves: cooled ones are dark grooves, hot ones get hotter towards the core
+    hi = np.clip(np.floor(heat * 6), 0, 5).astype(int)
+    img = np.where(crack[..., None], np.where((heat > 0.04)[..., None], hot[hi], pal[0]), img)
+    height = np.where(crack, -0.4 + 0.1 * heat, height)
+    save(name, img, height, 2.4)
+    glow = np.where((crack & (heat > 0.12))[..., None], hot[np.clip(hi, 1, 5)] * np.clip(heat * 1.3, 0.35, 1)[..., None], 0)
+    save_glow(name, glow)
+
+
 def mask(name, size, rng):
     """Tileable low-frequency noise used to cut holes in the back wall."""
     m = fractal(size, 4, 4, rng)
@@ -625,6 +826,8 @@ if __name__ == "__main__":
     hard("hard", S, np.random.default_rng(1339))
     bedrock("bedrock", S, np.random.default_rng(1340))
     wall("wall", 256, np.random.default_rng(1341))
+    crystal("crystal", S, np.random.default_rng(1342))
+    magma("magma", S, np.random.default_rng(1343))
     # the wall holes keep their old layout: this is the generator state the first version of
     # this script had reached by the time it made the mask
     rng = np.random.default_rng()
