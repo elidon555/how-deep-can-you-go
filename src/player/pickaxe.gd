@@ -1,8 +1,9 @@
 extends Node2D
 class_name Pickaxe
 ## The miner's pickaxe: click (one swing) or hold (keep swinging) the dig button.
-## With the mouse, the swing goes where you point and breaks rock right at the cursor (up to
-## arm's reach; a marker shows the spot). With J / a controller, the direction keys aim it
+## With the mouse, the cursor only sets the direction: the swing goes that way and hits the
+## first rock in front of you within arm's reach (a marker shows where). With J / a
+## controller, the direction keys aim it
 ## (down, up, down+side = diagonal, otherwise the way you face). Rock only breaks when a
 ## swing lands.
 ## A swing needs room: if rock is in the way of the wind-up, the pick knocks into it instead
@@ -25,7 +26,7 @@ const DOWN_BONUS := 1.4   # straight down stays the fastest way deeper (diagonal
 const TRAIL := {"dig_side": [-1.75, 0.26], "dig_down": [-1.75, 1.4], "dig_diag": [-1.75, 1.1],
 	"dig_up": [2.27, -1.66]}
 const TRAIL_TIME := 0.13
-const REACH := 32.0       # how far from the shoulder a mouse-aimed swing can land
+const REACH := 32.0       # how far from the shoulder a mouse-aimed swing reaches
 const AIM_R := 11.0       # size of the bite where a mouse-aimed swing lands
 const SHOULDER := Vector2(0, -6)
 # points (facing right, from the miner's centre) the pick passes through on the wind-up, over
@@ -45,7 +46,7 @@ var _t := 0.0
 var _trail_t := 9.0
 var _cooldown := 0.0
 var mouse_aim := true     # last aimed with the mouse (vs J / controller + direction keys)
-var _target := Vector2.ZERO   # where a mouse-aimed swing lands (global)
+var _target := Vector2.ZERO   # where a mouse-aimed swing lands: first rock that way (global)
 var aim_at := Vector2.INF     # set to aim somewhere other than the local mouse (tests, co-op)
 
 
@@ -136,11 +137,20 @@ func _intent(dir: float) -> String:
 	return "dig_side"
 
 
-## The cursor, pulled in to arm's reach.
+## The first rock in the direction of the cursor, within arm's reach (or the end of the reach
+## if there's only air). The bite goes a little into the rock so it takes a real chunk.
 func _aim_point() -> Vector2:
 	var shoulder := player.global_position + SHOULDER
 	var to := aim_at if aim_at != Vector2.INF else get_global_mouse_position()
-	return shoulder + (to - shoulder).limit_length(REACH)
+	var dir := (to - shoulder).normalized()
+	if dir == Vector2.ZERO:
+		dir = Vector2(player.facing, 0)
+	var d := 8.0
+	while d < REACH:
+		if world.is_diggable(shoulder + dir * d):
+			return shoulder + dir * minf(d + 4.0, REACH)
+		d += 2.0
+	return shoulder + dir * REACH
 
 
 ## Which swing (and animation) fits a direction from the shoulder.
@@ -161,7 +171,7 @@ func _strike(dir: int) -> void:
 	var amount := power * SWING_TIME
 	var res: Dictionary
 	var at := c
-	if mouse_aim:     # exactly where you pointed (+ keep room around your body when tunnelling)
+	if mouse_aim:     # the first rock the way you point (+ keep room around your body when tunnelling)
 		at = _target
 		res = world.dig(at, at, AIM_R, amount * (DOWN_BONUS if kind == "dig_down" else 1.0))
 		if kind == "dig_side" or kind == "dig_diag":

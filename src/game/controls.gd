@@ -19,7 +19,7 @@ const PAD := {
 }
 const STICK := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
-const HELP := "A/D move · Space/W jump · hold Left click to dig where you point (or J + W/A/S/D) · Q/Right-click rope · E use · R restart"
+const HELP := "A/D move · Space/W jump · hold Left click to dig the way you point (or J + W/A/S/D) · Q/Right-click rope · E use · R restart"
 
 
 static func setup() -> void:

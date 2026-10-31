@@ -21,7 +21,7 @@ Or open `project.godot` in the Godot editor and press F5.
 |---|---|---|
 | Move | A / D | Left stick / D-pad |
 | Jump | Space or W | A |
-| Dig (click = one swing, hold = keep swinging) | Left click: digs exactly where the mouse points (arm's reach) · or J | X |
+| Dig (click = one swing, hold = keep swinging) | Left click: swings the way the mouse points, hitting the first rock in front (arm's reach) · or J | X |
 | Aim the pick with J / controller | W up · S down · S + A/D diagonal · otherwise the way you face | Stick / D-pad |
 | Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
 | Use a station (helm, furnace, workbench, medkit) / hold to repair a breach | E | B |
