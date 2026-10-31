@@ -38,6 +38,7 @@ var players: Array[Player] = []     # player one first; a second joins with Star
 var _menu_user: Player = null       # who opened the shop / sonar (unfrozen when it closes)
 const RESPAWN_TIME := 8.0
 var notes_read := 0
+var tips := Tips.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 
@@ -128,6 +129,9 @@ func _ready() -> void:
 	hud.set_health(player.health, player.max_health)
 	_update_bag()
 	_setup_menus()
+	tips.main = self
+	if not Progress.dry_run:
+		add_child(tips)
 	_autotest()
 
 

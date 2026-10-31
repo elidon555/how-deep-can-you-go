@@ -23,6 +23,7 @@ var levels := {}   # upgrade id -> level bought
 var found_notes: Array = []   # Lore.NOTES ids you've read, ever
 var beaten := false           # the Floor has been opened at least once
 var daily := {}               # date ("2026-10-31") -> best depth on that day's Daily Dig
+var tips_seen: Array = []     # first-run hints already shown (Tips)
 var dry_run := false   # tests: keep everything in memory
 
 
@@ -67,6 +68,12 @@ static func daily_seed() -> int:
 func record_daily(depth: int) -> void:
 	if depth > daily.get(today(), 0):
 		daily[today()] = depth
+		save()
+
+
+func see_tip(id: String) -> void:
+	if not tips_seen.has(id):
+		tips_seen.append(id)
 		save()
 
 
@@ -136,7 +143,7 @@ func save() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels, "notes": found_notes,
-			"beaten": beaten, "daily": daily}))
+			"beaten": beaten, "daily": daily, "tips": tips_seen}))
 	changed.emit()
 
 
@@ -151,6 +158,8 @@ func _load() -> void:
 			for n in d.get("notes", []):
 				found_notes.append(int(n))
 			beaten = bool(d.get("beaten", false))
+			for t in d.get("tips", []):
+				tips_seen.append(str(t))
 			for k in d.get("daily", {}):
 				daily[k] = int(d.daily[k])
 	elif FileAccess.file_exists(OLD_BEST_PATH):
