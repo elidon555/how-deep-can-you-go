@@ -1,8 +1,7 @@
 extends CharacterBody2D
 class_name Player
-## The little digger. Tight platformer controls + directional digging + helmet lamp.
-
-signal digging(pos: Vector2, mat: int)   # every frame while digging
+## The little digger. Tight platformer controls, animation and helmet lamp.
+## Digging lives in the Pickaxe child (pickaxe.gd).
 
 const SPEED := 150.0
 const ACCEL := 1300.0
@@ -14,27 +13,23 @@ const COYOTE := 0.1
 const JUMP_BUFFER := 0.12
 
 const SHEET := preload("res://assets/sprites/miner.png")
-const ANIMS := {   # row, frames, fps (from assets/sprites/miner.json)
+const ANIMS := {   # row, frames, fps (from assets/sprites/miner.json); dig rows follow the pickaxe
 	"idle": [0, 4, 4.0], "run": [1, 8, 13.0], "jump": [2, 1, 1.0], "fall": [3, 1, 1.0],
-	"dig_side": [4, 6, 14.0], "dig_down": [5, 6, 14.0], "dig_up": [6, 6, 14.0],
+	"dig_side": [4, 8, 0.0], "dig_down": [5, 8, 0.0], "dig_up": [6, 8, 0.0],
 }
 const FEET_BELOW_CENTER := 26.5
 
 var world: World
-var dig_power := 3.0   # fill removed per second at the centre of the dig (dirt)
+var pick := Pickaxe.new()
 var light_mul := 1.0   # set by main for flicker
 var lamp_on := false
 var coyote_t := 0.0
 var buffer_t := 0.0
 var facing := 1
 var squash := Vector2.ONE
-var dig_anim := 0.0
 var sprite := Sprite2D.new()
 var anim := "idle"
 var anim_t := 0.0
-var dig_kind := ""
-var last_dig_kind := ""
-var dig_hold := 0.0
 var cone := PointLight2D.new()
 var glow := PointLight2D.new()
 
@@ -81,6 +76,10 @@ func _ready() -> void:
 	glow.height = 90.0
 	add_child(glow)
 
+	pick.player = self
+	pick.world = world
+	add_child(pick)
+
 
 func _physics_process(dt: float) -> void:
 	var dir := Input.get_axis("left", "right")
@@ -109,69 +108,10 @@ func _physics_process(dt: float) -> void:
 	if is_on_floor() and not was_on_floor and fall_speed > 150:
 		squash = Vector2(1.25, 0.75)
 
-	_handle_dig(dt, dir)
+	pick.update(dt, dir)
 	_update_lamp(dt)
 	squash = squash.lerp(Vector2.ONE, 12 * dt)
 	_animate(dt)
-
-
-func _handle_dig(dt: float, dir: float) -> void:
-	var down := Input.is_action_pressed("down")
-	var up := Input.is_action_pressed("up")
-	var c := global_position
-	var a := Vector2.ZERO
-	var b := Vector2.ZERO
-	var r := 0.0
-	dig_kind = ""
-	# rock in front of the head/chest: tunnel even when the wall's lip reads as "floor"
-	# (or holding a direction without getting anywhere, e.g. pinched by a tunnel's rounded end)
-	var blocked := dir != 0 and (is_on_wall() or absf(get_real_velocity().x) < 20.0 \
-		or not world.is_air(c + Vector2(dir * 10, -14)) or not world.is_air(c + Vector2(dir * 10, 2)))
-	if down and dir != 0:                       # diagonal: body-sized hole ahead + floor ahead
-		var res := _dig_side(c, dir, dt)
-		var res2 := world.dig(c + Vector2(dir * 10, 20), c + Vector2(dir * 10, 20), 12.0, dig_power * dt)
-		_dig_result(res if res.hit else res2, "dig_down", c + Vector2(dir * 10, 10), dt)
-		return
-	elif blocked and not up:
-		_dig_result(_dig_side(c, dir, dt), "dig_side", c + Vector2(dir * 13, 0), dt)
-		return
-	elif down:
-		a = c + Vector2(0, 21)
-		b = a
-		r = 13.0
-	elif up:
-		a = c + Vector2(0, -21)
-		b = a
-		r = 13.0
-	else:
-		_dig_result({"hit": false}, "dig_side" if dir != 0 else "", c, dt)
-		return
-	# straight down gets a bonus so it stays the fastest way deeper (diagonal digs two holes)
-	var res := world.dig(a, b, r, dig_power * dt * (1.0 if up else 1.4))
-	_dig_result(res, "dig_up" if up else "dig_down", a.lerp(b, 0.5), dt)
-
-
-## Tunnel sideways, a bit taller than you: a hole ahead that reaches head and feet height at
-## your front edge, plus a clearance pass around your body so half-dug cells can't pinch you.
-func _dig_side(c: Vector2, dir: float, dt: float) -> Dictionary:
-	var res := world.dig(c + Vector2(dir * 13, -16), c + Vector2(dir * 13, 12), 11.0, dig_power * dt)
-	var body := world.dig(c + Vector2(0, -15), c + Vector2(0, 10), 10.0, dig_power * dt)
-	return res if res.hit else body
-
-
-func _dig_result(res: Dictionary, kind: String, at: Vector2, dt: float) -> void:
-	if res.hit:
-		dig_anim += dt
-		dig_hold = 0.15
-		dig_kind = kind
-		digging.emit(at, res.mat)
-	else:
-		dig_anim = 0
-		# keep the swing going briefly between hits so the animation doesn't flicker
-		dig_hold -= dt
-		dig_kind = last_dig_kind if dig_hold > 0.0 and kind != "" else ""
-	if dig_kind != "":
-		last_dig_kind = dig_kind
 
 
 func _update_lamp(dt: float) -> void:
@@ -190,8 +130,9 @@ func _update_lamp(dt: float) -> void:
 
 func _animate(dt: float) -> void:
 	var want := "idle"
-	if dig_kind != "":
-		want = dig_kind
+	var dig := pick.anim()
+	if dig != "":
+		want = dig
 	elif not is_on_floor():
 		want = "jump" if velocity.y < 0 else "fall"
 	elif absf(velocity.x) > 15:
@@ -200,11 +141,14 @@ func _animate(dt: float) -> void:
 		anim = want
 		anim_t = 0.0
 	var a: Array = ANIMS[anim]
-	var speed := 1.0
-	if anim == "run":
-		speed = clampf(absf(velocity.x) / SPEED, 0.4, 1.2)
-	anim_t += dt * a[2] * speed
-	sprite.frame = a[0] * 8 + int(anim_t) % int(a[1])
+	if dig != "":
+		sprite.frame = a[0] * 8 + pick.frame
+	else:
+		var speed := 1.0
+		if anim == "run":
+			speed = clampf(absf(velocity.x) / SPEED, 0.4, 1.2)
+		anim_t += dt * a[2] * speed
+		sprite.frame = a[0] * 8 + int(anim_t) % int(a[1])
 	sprite.flip_h = facing < 0
 	sprite.scale = squash
 

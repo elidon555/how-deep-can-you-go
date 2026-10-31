@@ -24,6 +24,7 @@ var player: Player
 var cam := Camera2D.new()
 var dark := CanvasModulate.new()
 var glow_layer := CanvasLayer.new()
+var fx := Fx.new()
 var back_wall := ColorRect.new()
 var motes := CPUParticles2D.new()
 var vignette := ColorRect.new()
@@ -48,7 +49,6 @@ var help := Label.new()
 var best := 0
 var ore := 0
 var shake := 0.0
-var dust_t := 0.0
 var watch_t := 5.0
 var flicker_t := 0.0
 var time := 0.0
@@ -86,7 +86,10 @@ func _ready() -> void:
 	player.world = world
 	player.position = Vector2(World.WIDTH_PX / 2.0, -40)
 	add_child(player)
-	player.digging.connect(_on_digging)
+	player.pick.struck.connect(_on_struck)
+	fx.lit = self
+	fx.glow = glow_layer
+	add_child(fx)
 
 	cam.zoom = Vector2(2, 2)
 	cam.position_smoothing_enabled = true
@@ -151,7 +154,6 @@ func _process(dt: float) -> void:
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
-	dust_t -= dt
 	if Input.is_action_just_pressed("restart"):
 		_save_best()
 		get_tree().reload_current_scene()
@@ -179,41 +181,15 @@ func _spawn_watcher() -> void:
 		return
 
 
-func _on_digging(pos: Vector2, mat: int) -> void:
-	shake = maxf(shake, 0.2)
-	if dust_t <= 0:
-		dust_t = 0.06
-		_burst(pos, World.COLORS[mat], 4, 60.0)
+func _on_struck(pos: Vector2, mat: int, broke: int, kind: String) -> void:
+	shake = maxf(shake, 0.25 if kind == "bonk" else (0.6 if broke > 0 else 0.35))
+	fx.impact(pos, mat, broke, kind, player.facing)
 
 
 func _on_ore_found(pos: Vector2) -> void:
 	ore += 1
 	shake = maxf(shake, 0.8)
-	_burst(pos, Color(2.0, 1.5, 0.5), 14, 140.0, true)
-
-
-func _burst(pos: Vector2, color: Color, amount: int, speed: float, glowing := false) -> void:
-	var p := CPUParticles2D.new()
-	p.position = pos
-	p.one_shot = true
-	p.explosiveness = 1.0
-	p.amount = amount
-	p.lifetime = 0.6
-	p.direction = Vector2(0, -1)
-	p.spread = 180.0
-	p.initial_velocity_min = speed * 0.4
-	p.initial_velocity_max = speed
-	p.gravity = Vector2(0, 600)
-	p.scale_amount_min = 1.0
-	p.scale_amount_max = 2.5
-	p.color = color.lightened(0.15) if not glowing else color
-	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	p.emission_rect_extents = Vector2(8, 8)
-	p.z_index = 2
-	var parent: Node = glow_layer if glowing else self
-	parent.add_child(p)
-	p.emitting = true
-	p.finished.connect(p.queue_free)
+	fx.burst(pos, Color(2.0, 1.5, 0.5), 14, 140.0, Vector2.UP, 180.0, 0.6, 2.5, true)
 
 
 func _setup_background() -> void:
@@ -421,7 +397,7 @@ func _autotest() -> void:
 			out = a.trim_prefix("--autotest=")
 	if out == "":
 		return
-	player.dig_power = 9.0
+	player.pick.power = 9.0
 	await get_tree().create_timer(1.0).timeout
 	get_viewport().get_texture().get_image().save_png(out.replace(".png", "_0.png"))
 	Input.action_press("down")

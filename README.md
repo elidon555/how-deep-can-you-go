@@ -30,6 +30,18 @@ darkness + helmet lamp, depth counter and best depth.
 
 See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
 
+## Code layout
+
+| File | What it does |
+|---|---|
+| `main.gd` | Sets up the scene: world, player, camera, lighting, backgrounds, HUD, milestones |
+| `world.gd` | Endless diggable ground: generation, fill/damage grid, collision, cave props |
+| `player.gd` | Movement, animation, helmet lamp |
+| `pickaxe.gd` | Swings: what the keys dig, room check, impact timing, swoosh trail |
+| `fx.gd` | One-shot effects: particle bursts, pickaxe impacts, hit-stop |
+| `watcher.gd` | Glowing eyes in the dark |
+| `terrain.gdshader` / `backwall.gdshader` | Smooth rock with outlines and cracks / cave back wall |
+
 ## Feel test
 
 Headless check that digging never gets stuck and how fast each direction is per material:

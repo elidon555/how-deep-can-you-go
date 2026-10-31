@@ -16,7 +16,7 @@ SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "sprites")
 os.makedirs(OUT, exist_ok=True)
 CELL = 80
-ORDER = [("idle", 4), ("run", 8), ("jump", 1), ("fall", 1), ("dig_side", 6), ("dig_down", 6), ("dig_up", 6)]
+ORDER = [("idle", 4), ("run", 8), ("jump", 1), ("fall", 1), ("dig_side", 8), ("dig_down", 8), ("dig_up", 8)]
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
 LAMP = np.array([255, 246, 192])
 

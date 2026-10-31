@@ -2,7 +2,7 @@ shader_type canvas_item;
 // Smooth terrain: the dig grid (fill_map, bilinear) becomes an organic contour.
 // Distance to the edge drives outline, mossy/lit top lips, dark undersides, bevels.
 
-uniform sampler2D fill_map : filter_linear, repeat_disable;  // R = fill, G = depth inside rock
+uniform sampler2D fill_map : filter_linear, repeat_disable;  // R = fill, G = depth inside rock, B = cracks
 uniform sampler2D mat_map : filter_linear, repeat_disable;   // one-hot: dirt, stone, hard, bedrock
 uniform sampler2D t_dirt : filter_nearest, repeat_enable;
 uniform sampler2D t_stone : filter_nearest, repeat_enable;
@@ -19,6 +19,28 @@ uniform vec2 origin;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 fuv(vec2 local) { return (local / cell_px + 1.0) / (cells + 2.0); }
 float F(vec2 local) { return texture(fill_map, fuv(local)).r; }
+
+// Crack network: edges of a small Voronoi pattern. More damage = wider and more of it.
+float cracks(vec2 wp, float dmg) {
+	vec2 q = wp / 7.0;
+	vec2 iq = floor(q);
+	vec2 fq = fract(q);
+	float f1 = 9.0;
+	float f2 = 9.0;
+	vec2 cell = vec2(0.0);
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 o = vec2(float(i), float(j));
+			vec2 r = o + vec2(hash(iq + o), hash(iq + o + 17.3)) - fq;
+			float dd = dot(r, r);
+			if (dd < f1) { f2 = f1; f1 = dd; cell = iq + o; }
+			else if (dd < f2) { f2 = dd; }
+		}
+	}
+	float edge = sqrt(f2) - sqrt(f1);
+	float shown = step(hash(cell + 3.1), dmg * 1.4);   // cracks spread cell by cell
+	return step(edge, 0.06 + 0.14 * dmg) * shown;
+}
 
 void fragment() {
 	vec2 local = floor(UV * cells * cell_px) + 0.5;   // snap to whole pixels
@@ -50,6 +72,10 @@ void fragment() {
 	}
 
 	col *= mix(1.0, 0.38, s.g);   // rock gets darker deep inside
+	if (s.b > 0.02) {             // pickaxe damage: dusty and cracked
+		col = mix(col, col * 1.3 + 0.03, s.b * 0.35);
+		col *= 1.0 - 0.75 * cracks(wp, s.b);
+	}
 	vec3 nrm = nm * 2.0 - 1.0;
 	if (d < 6.0) {
 		float drip = floor(hash(vec2(floor(wp.x), 7.0)) * 4.0);

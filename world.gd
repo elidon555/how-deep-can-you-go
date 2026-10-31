@@ -3,6 +3,7 @@ class_name World
 ## Endless smooth diggable ground. Under the hood: a fine grid of "fill" values
 ## (8 px cells, 1 = solid rock, 0 = air). The terrain shader draws the 0.5
 ## contour as smooth organic rock; collision uses the same contour (marching squares).
+## Pickaxe hits add "damage" (drawn as cracks); a cell breaks once fill - damage < 0.5.
 ## Generated in 32x32-cell chunks as the player goes down. 24 px = 1 meter.
 
 signal ore_found(pos: Vector2)
@@ -22,6 +23,7 @@ class Chunk:
 	var key: Vector2i
 	var fill := PackedFloat32Array()
 	var mat := PackedByteArray()
+	var dmg := PackedFloat32Array()   # pickaxe damage not yet enough to break the cell
 	var img: Image
 	var tex_fill: ImageTexture
 	var tex_mat: ImageTexture
@@ -94,6 +96,7 @@ func _gen_chunk(key: Vector2i) -> void:
 	ch.key = key
 	ch.fill.resize(C * C)
 	ch.mat.resize(C * C)
+	ch.dmg.resize(C * C)
 	for j in C:
 		for i in C:
 			var v := _gen_cell(key.x * C + i, key.y * C + j)
@@ -297,6 +300,11 @@ func get_fill(gx: int, gy: int) -> float:
 	return ch.fill[(gy & 31) * C + (gx & 31)]
 
 
+func get_dmg(gx: int, gy: int) -> float:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	return ch.dmg[(gy & 31) * C + (gx & 31)] if ch and gx >= 0 and gx < W else 0.0
+
+
 func get_mat(gx: int, gy: int) -> int:
 	if gx < 0 or gx >= W:
 		return M.BEDROCK
@@ -315,14 +323,31 @@ func is_air(p: Vector2) -> bool:
 	return get_fill(c.x, c.y) < 0.5
 
 
+func is_bedrock(p: Vector2) -> bool:
+	var c := cell_at(p)
+	return get_mat(c.x, c.y) == M.BEDROCK
+
+
+func mat_at(p: Vector2) -> int:
+	var c := cell_at(p)
+	return get_mat(c.x, c.y)
+
+
+func is_diggable(p: Vector2) -> bool:
+	return not is_air(p) and not is_bedrock(p)
+
+
 # ---------------------------------------------------------------- digging
 
-## Digs a capsule (segment a-b, radius r). Returns {hit: bool, mat: int}.
+## One pickaxe hit on a capsule (segment a-b, radius r): damages rock, strongest at the
+## centre, and breaks cells whose damage is enough. Already-open cells get cleaned up too.
+## Returns {hit: touched rock, mat: its material, broke: cells broken}.
 func dig(a: Vector2, b: Vector2, r: float, amount: float) -> Dictionary:
 	var lo := cell_at(Vector2(minf(a.x, b.x) - r, minf(a.y, b.y) - r))
 	var hi := cell_at(Vector2(maxf(a.x, b.x) + r, maxf(a.y, b.y) + r))
 	var hit := false
 	var hit_mat := -1
+	var broke := 0
 	for gy in range(lo.y, hi.y + 1):
 		for gx in range(lo.x, hi.x + 1):
 			var p := Vector2(gx * CELL + 4, gy * CELL + 4)
@@ -335,11 +360,17 @@ func dig(a: Vector2, b: Vector2, r: float, amount: float) -> Dictionary:
 			var m := get_mat(gx, gy)
 			if m == M.BEDROCK:
 				continue
-			var nf := maxf(0.0, f - amount * (1.0 - 0.6 * dist / r) / HARDNESS[m])
-			_set_fill(gx, gy, nf, f)
-			hit = true
-			hit_mat = m
-	return {"hit": hit, "mat": hit_mat}
+			var d: float = get_dmg(gx, gy) + amount * (1.0 - 0.6 * dist / r) / HARDNESS[m]
+			if f >= 0.5:
+				hit = true
+				hit_mat = m
+			if f - d < 0.5:
+				if f >= 0.5:
+					broke += 1
+				_set_fill(gx, gy, maxf(0.0, f - d), f)
+			else:
+				_set_dmg(gx, gy, d)
+	return {"hit": hit, "mat": hit_mat, "broke": broke}
 
 
 func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
@@ -347,19 +378,9 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 	if ch == null:
 		return
 	ch.fill[(gy & 31) * C + (gx & 31)] = nf
-	var crossed := old >= 0.5 and nf < 0.5
-	# update the fill pixel in every chunk image whose 1-cell margin covers this cell
-	for kx in _keys_covering(gx, 1):
-		for ky in _keys_covering(gy, 1):
-			var o: Chunk = chunks.get(Vector2i(kx, ky))
-			if o and o.img:
-				var li: int = gx - kx * C + 1
-				var lj: int = gy - ky * C + 1
-				var px := o.img.get_pixel(li, lj)
-				px.r = nf
-				o.img.set_pixel(li, lj, px)
-				o.vis_dirty = true
-	if crossed:
+	ch.dmg[(gy & 31) * C + (gx & 31)] = 0.0
+	_set_pixel(gx, gy, nf, 0.0)
+	if old >= 0.5 and nf < 0.5:
 		var cell := Vector2i(gx, gy)
 		dug[cell] = true
 		for kx in _keys_covering(gx, R_INT + 1):
@@ -380,6 +401,34 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 			for n in decor[cell]:
 				n.queue_free()
 			decor.erase(cell)
+
+
+func _set_dmg(gx: int, gy: int, d: float) -> void:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null:
+		return
+	ch.dmg[(gy & 31) * C + (gx & 31)] = d
+	_set_pixel(gx, gy, ch.fill[(gy & 31) * C + (gx & 31)], d)
+
+
+## Updates the fill (R) and crack (B) pixel in every chunk image whose 1-cell margin covers it.
+func _set_pixel(gx: int, gy: int, fill: float, d: float) -> void:
+	for kx in _keys_covering(gx, 1):
+		for ky in _keys_covering(gy, 1):
+			var o: Chunk = chunks.get(Vector2i(kx, ky))
+			if o and o.img:
+				var li: int = gx - kx * C + 1
+				var lj: int = gy - ky * C + 1
+				var px := o.img.get_pixel(li, lj)
+				px.r = fill
+				px.b = _crack(fill, d)
+				o.img.set_pixel(li, lj, px)
+				o.vis_dirty = true
+
+
+## How cracked a cell looks: 0 = untouched, 1 = about to break.
+static func _crack(fill: float, d: float) -> float:
+	return clampf(d / maxf(fill - 0.5, 0.01), 0.0, 1.0) if d > 0.0 else 0.0
 
 
 ## Chunk indices whose window [-margin, C-1+margin] contains global cell g.
@@ -464,6 +513,7 @@ func _build_images(ch: Chunk) -> void:
 			var k := (j * n + i) * 4
 			data[k] = int(clampf(get_fill(gx, gy), 0.0, 1.0) * 255.0)
 			data[k + 1] = int(clampf((dist[(j + R_INT) * ext + i + R_INT] - 1.0) / R_INT, 0.0, 1.0) * 255.0)
+			data[k + 2] = int(_crack(get_fill(gx, gy), get_dmg(gx, gy)) * 255.0)
 			data[k + 3] = 255
 			mdata[k + get_mat(gx, gy)] = 255
 	ch.img = Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, data)

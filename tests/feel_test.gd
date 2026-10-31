@@ -16,6 +16,8 @@ const AY1 := 330
 var main: Node
 var w: World
 var p: Player
+var bonks := 0
+var low := false   # arena pocket only a bit taller than the miner
 
 
 func _initialize() -> void:
@@ -29,6 +31,8 @@ func _run() -> void:
 	await physics_frame
 	w = main.world
 	p = main.player
+	main.fx.hitstop_enabled = false
+	p.pick.struck.connect(func(_pos, _mat, _broke, kind): if kind == "bonk": bonks += 1)
 	w.ensure_generated(AY1 * World.CELL + 600)
 	print("--- surface walk (generated terrain)")
 	await _surface_walk()
@@ -39,6 +43,10 @@ func _run() -> void:
 		await _scenario(m, "diag", ["down", "right"], 3.0)
 		await _scenario(m, "up+jump", ["up"], 3.0, true)
 		await _scenario(m, "down,then side", ["down"], 1.5, false, ["right"], 3.0)
+		low = true
+		await _scenario(m, "side, low cave", ["right"], 3.0)
+		await _scenario(m, "down, low cave", ["down"], 3.0)
+		low = false
 	quit()
 
 
@@ -46,8 +54,9 @@ func _arena(m: int) -> void:
 	for gy in range(AY0, AY1):
 		for gx in range(AX0, AX1):
 			var ch: World.Chunk = w.chunks.get(Vector2i(gx >> 5, gy >> 5))
-			var air := gx >= 60 and gx < 68 and gy >= 204 and gy < 216
+			var air := gx >= 60 and gx < 68 and gy >= (211 if low else 204) and gy < 216
 			ch.fill[(gy & 31) * World.C + (gx & 31)] = 0.0 if air else 1.0
+			ch.dmg[(gy & 31) * World.C + (gx & 31)] = 0.0
 			ch.mat[(gy & 31) * World.C + (gx & 31)] = m
 	for ch: World.Chunk in w.chunks.values():
 		ch.int_dirty = true
@@ -79,6 +88,7 @@ func _scenario(m: int, label: String, keys: Array, secs: float, jump := false,
 		secs = secs2
 	var start := p.global_position
 	var st := _Stats.new()
+	bonks = 0
 	for k in keys:
 		Input.action_press(k)
 	for i in int(secs * 60):
@@ -91,8 +101,8 @@ func _scenario(m: int, label: String, keys: Array, secs: float, jump := false,
 		st.sample(p)
 	_release_all()
 	var d := (p.global_position - start) / World.METER
-	print("  %-15s  dx %+5.2f m  dy %+5.2f m  (%.2f m/s)  stuck %3d%%  anim switches %.1f/s  on_floor %3d%%  %s" % [
-		label, d.x, d.y, d.length() / secs, st.stuck * 100 / st.n, st.switches / secs,
+	print("  %-15s  dx %+5.2f m  dy %+5.2f m  (%.2f m/s)  stuck %3d%%  bonks %2d  anim switches %.1f/s  on_floor %3d%%  %s" % [
+		label, d.x, d.y, d.length() / secs, st.stuck * 100 / st.n, bonks, st.switches / secs,
 		st.floor * 100 / st.n, st.kinds()])
 
 
@@ -129,7 +139,7 @@ class _Stats:
 			floor += 1
 		var moved := last_pos.distance_to(p.global_position) > 0.2
 		last_pos = p.global_position
-		if not moved and p.dig_kind == "":
+		if not moved and p.pick.kind == "":
 			stuck += 1
 		if p.anim != last:
 			switches += 1

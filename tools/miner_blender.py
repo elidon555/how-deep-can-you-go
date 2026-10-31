@@ -262,14 +262,53 @@ ANIMS["jump"] = [{"lean": 6, f"thigh_{NEAR}": 45, f"knee_{NEAR}": -70, f"thigh_{
                   f"shoulder_{NEAR}": 120, f"elbow_{NEAR}": 30, f"shoulder_{FAR}": 140, f"elbow_{FAR}": 20}]
 ANIMS["fall"] = [{"lean": -4, f"thigh_{NEAR}": 20, f"knee_{NEAR}": -15, f"thigh_{FAR}": -15, f"knee_{FAR}": -25,
                   f"shoulder_{NEAR}": 70, f"elbow_{NEAR}": 10, f"shoulder_{FAR}": 100, f"elbow_{FAR}": 10}]
+# Swings: 8 frames each = lift, wind-up, peak, peak hold (anticipation), strike (fast),
+# IMPACT (frame 5, the game breaks rock here), recoil, settle. Frame 7 flows back into 0.
 stance = {f"thigh_{NEAR}": 18, f"knee_{NEAR}": -18, f"thigh_{FAR}": -16, f"knee_{FAR}": -8}
-ANIMS["dig_side"] = [dict(lean=l, **stance, **shoulder_pair(a)) for a, l in
-                     [(120, 0), (165, -6), (150, -3), (95, 12), (70, 16), (90, 8)]]
-crouch = {f"thigh_{NEAR}": 35, f"knee_{NEAR}": -45, f"thigh_{FAR}": 10, f"knee_{FAR}": -40, "bob": -0.08}
-ANIMS["dig_down"] = [dict(lean=l, look=-15, **crouch, **shoulder_pair(a)) for a, l in
-                     [(130, 5), (170, 0), (140, 10), (55, 28), (25, 32), (60, 22)]]
-ANIMS["dig_up"] = [dict(lean=l, look=25, **stance, **shoulder_pair(a)) for a, l in
-                   [(60, 4), (40, 6), (100, -2), (170, -10), (195, -12), (150, -6)]]
+braced = {f"thigh_{NEAR}": 30, f"knee_{NEAR}": -30, f"thigh_{FAR}": -22, f"knee_{FAR}": -6, "bob": -0.04}
+
+
+def swing(frames, legs_at):
+    """frames: (shoulder, lean, look, extra); legs_at(i) gives the leg pose per frame."""
+    out = []
+    for i, (a, l, lk, extra) in enumerate(frames):
+        p = dict(lean=l, look=lk, **legs_at(i), **shoulder_pair(a))
+        p.update(extra)
+        out.append(p)
+    return out
+
+
+# side: pick goes back over the shoulder, then whips forward into the wall at waist height
+ANIMS["dig_side"] = swing(
+    [(110, 4, 0, {}), (160, -4, 5, {}), (188, -9, 8, {}), (194, -11, 8, {}),
+     (125, 8, 0, {}), (62, 17, -5, {f"elbow_{NEAR}": 0}), (74, 14, -3, {}), (96, 8, 0, {})],
+    lambda i: braced if 4 <= i <= 6 else stance)
+
+# down: lean back with the pick high overhead, then fold forward and slam it into the
+# ground right in front of the boots (deep crouch on impact)
+def down_legs(i):
+    k = [0.3, 0.1, 0.0, 0.0, 0.6, 1.0, 0.9, 0.6][i]
+    return {f"thigh_{NEAR}": 10 + 35 * k, f"knee_{NEAR}": -10 - 50 * k,
+            f"thigh_{FAR}": -8 + 20 * k, f"knee_{FAR}": -10 - 45 * k, "bob": 0.01 - 0.11 * k}
+
+
+ANIMS["dig_down"] = swing(
+    [(70, 12, -10, {}), (150, 0, 5, {}), (192, -8, 10, {}), (200, -10, 10, {}),
+     (90, 18, -15, {}), (-16, 34, -30, {f"elbow_{NEAR}": 0, f"elbow_{FAR}": 6}),
+     (-4, 30, -25, {}), (25, 22, -18, {})],
+    down_legs)
+
+# up: pick drops low behind the hip, then stabs upward over the head
+def up_legs(i):
+    k = [0.3, 0.7, 1.0, 1.0, 0.4, 0.0, 0.1, 0.2][i]
+    return {f"thigh_{NEAR}": 12 + 25 * k, f"knee_{NEAR}": -12 - 35 * k,
+            f"thigh_{FAR}": -12 + 10 * k, f"knee_{FAR}": -8 - 30 * k, "bob": 0.02 - 0.08 * k}
+
+
+ANIMS["dig_up"] = swing(
+    [(40, 4, 10, {}), (-10, 8, 0, {}), (-38, 10, -5, {}), (-44, 11, -5, {}),
+     (90, 0, 20, {}), (178, -12, 35, {f"elbow_{NEAR}": 0}), (166, -10, 32, {}), (125, -4, 22, {})],
+    up_legs)
 
 ORDER = ["idle", "run", "jump", "fall", "dig_side", "dig_down", "dig_up"]
 for row, name in enumerate(ORDER):
