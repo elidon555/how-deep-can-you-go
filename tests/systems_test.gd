@@ -70,7 +70,17 @@ func _drill_ride() -> void:
 	_station(Stations.Helm).interact(p)
 	_station(Stations.Helm).interact(p)
 	_check("helm sets full speed", d.speed == Drill.Speed.FULL)
-	await _frames(60 * 8)
+	var phases := {}
+	var min_grip := 1.0
+	var max_stroke := 0.0
+	for i in 60 * 8:
+		await get_tree().physics_frame
+		phases[d.phase] = true
+		min_grip = minf(min_grip, d.grip)
+		max_stroke = maxf(max_stroke, d.stroke)
+	_check("goes through grip, bore, release and advance", phases.size() == 4, str(phases.keys()))
+	_check("head rams out a full stroke", max_stroke >= Drill.STROKE - 0.5, "%.0f px" % max_stroke)
+	_check("braces let go and ladders fold while the hull moves", min_grip <= 0.0)
 	var down := (d.global_position.y - y0) / World.METER
 	_check("drill bores down", down > 2.0, "%.1f m in 8 s" % down)
 	_check("drill burns fuel", d.fuel < fuel0, "%.0f -> %.0f" % [fuel0, d.fuel])

@@ -304,11 +304,11 @@ func _update_lamp(dt: float) -> void:
 	_cone.rotation = lerp_angle(_cone.rotation, aim, 10.0 * dt)
 	_cone.position = Vector2(4 * facing, -20)
 	_cone.texture_scale = 2.3 * reach
-	_glow.texture_scale = reach
+	_glow.texture_scale = reach * 1.15
 	_cone.enabled = lamp_on
 	_glow.enabled = lamp_on
 	_cone.energy = 2.4 * light_mul
-	_glow.energy = 1.1 * light_mul
+	_glow.energy = 1.35 * light_mul     # enough to always read the miner, like Dead Cells' hero
 
 
 func _animate(dt: float) -> void:

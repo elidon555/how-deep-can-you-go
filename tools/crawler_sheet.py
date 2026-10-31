@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from normal_maps import cel_mult, normal_map  # noqa: E402
+from normal_maps import FLAT, cel_mult, normal_map  # noqa: E402
 
 SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "sprites")
@@ -53,6 +53,7 @@ def frame(name, i):
 sheet = np.zeros((CELL_H * len(ORDER), CELL_W * 8, 4), dtype=np.uint8)
 glow_sheet = np.zeros_like(sheet)
 normal_sheet = np.zeros_like(sheet)
+normal_sheet[..., :3] = FLAT     # empty cells: flat, transparent
 anims = {}
 for row, (name, count) in enumerate(ORDER):
     anims[name] = {"row": row, "frames": count}

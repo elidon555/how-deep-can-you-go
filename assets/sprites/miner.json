@@ -1,22 +1,22 @@
 {
  "cell": 80,
- "columns": 8,
+ "columns": 12,
  "anims": {
   "idle": {
    "row": 0,
-   "frames": 4
+   "frames": 8
   },
   "run": {
    "row": 1,
-   "frames": 8
+   "frames": 12
   },
   "jump": {
    "row": 2,
-   "frames": 2
+   "frames": 3
   },
   "fall": {
    "row": 3,
-   "frames": 2
+   "frames": 3
   },
   "dig_side": {
    "row": 4,
@@ -32,15 +32,15 @@
   },
   "land": {
    "row": 7,
-   "frames": 2
+   "frames": 3
   },
   "climb": {
    "row": 8,
-   "frames": 4
+   "frames": 6
   },
   "hurt": {
    "row": 9,
-   "frames": 2
+   "frames": 3
   }
  },
  "feet_below_center": 26.5,

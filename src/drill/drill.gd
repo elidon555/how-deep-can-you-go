@@ -1,7 +1,11 @@
 extends AnimatableBody2D
 class_name Drill
-## The crew's drilling machine. Bores straight down and carries whoever is inside; burns fuel
-## while the head turns; falls if it breaks into a cave (and crashes if it falls far).
+## The crew's drilling machine. Bores straight down like a real tunnel-boring machine, in
+## strokes: GRIP (braces push on the shaft walls, ladders out) -> BORE (the spinning head rams
+## forward, chewing only the rock its cutters touch) -> RELEASE (braces in, ladders fold up) ->
+## ADVANCE (the hull slides down to the head; side reamers widen the shaft so there's a gap
+## beside the hull). Carries whoever is inside; burns fuel; falls if it breaks into a cave
+## (and crashes if it falls far).
 ## Damage (boulders, crawlers, crashes) opens hull breaches that leak until repaired.
 ## All of the machine's state lives here and stations only call these methods, so co-op can
 ## sync it from one place later.
@@ -13,7 +17,7 @@ signal damaged(amount: float)
 
 enum Speed { STOP, SLOW, FULL }
 const SPEED_NAMES := ["Stopped", "Slow", "Full"]
-const DESCENT := [0.0, 0.35, 0.9]      # m/s it descends at when the rock gives way
+const DESCENT := [0.0, 0.45, 1.2]      # m/s the head rams forward when the rock gives way
 const FUEL_BURN := [0.0, 0.5, 1.2]     # fuel per second while the head turns
 const HEAD_POWER := [0.0, 0.5, 1.0]
 const FUEL_PER_COAL := 12.0
@@ -27,10 +31,19 @@ const BOTTOM := 56.0           # underside of the hull, the head hangs below
 const DOOR_TOP := -6.0         # side doors are open from here down to the floor
 const WALL := 8.0
 const HEAD := [Vector2(-84, 56), Vector2(84, 56), Vector2(34, 92), Vector2(0, 104), Vector2(-34, 92)]
-# what the head cuts: a capsule a bit wider than the hull, leaving a gap at the sides
-const CUT_HALF := 76.0
-const CUT_Y := 70.0
-const CUT_R := 44.0
+# the head's cutting face (left to right along its underside); cutters bite just beyond it
+const FACE := [Vector2(-86, 54), Vector2(-34, 93), Vector2(0, 106), Vector2(34, 93), Vector2(86, 54)]
+const CUTTER_R := 6.0
+const CUTTER_REACH := 3.0      # how far in front of the face the cutters chew
+# side reamers at the hull's bottom corners widen the shaft beyond the hull (the crew's gap)
+const REAMERS := [Vector2(-104, 60), Vector2(104, 60)]
+const REAMER_R := 16.0
+# the stroke cycle
+enum Phase { GRIP, BORE, RELEASE, ADVANCE }
+const STROKE := 24.0           # px the head rams out per stroke (1 m)
+const GRIP_TIME := 0.35
+const RELEASE_TIME := 0.3
+const ADVANCE_SPEED := 55.0    # px/s the hull slides down to catch up
 const MAX_BREACHES := 4
 const BREACH_LEAK := 0.35      # hull per second per open breach
 const FALL_GRAVITY := 700.0
@@ -44,6 +57,12 @@ var hull := 100.0
 var max_hull := 100.0
 var drilling := false          # the head is turning and biting rock
 var is_wrecked := false
+var phase := Phase.GRIP
+var stroke := 0.0              # how far the head is rammed out below the hull (px)
+var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls (ladders follow)
+var _phase_t := 0.0
+var _ladders: Array[Rope] = []
+var _head_shape := CollisionShape2D.new()
 var _fall_v := 0.0
 var _bite_t := 0.0          # keeps "drilling" steady between frames that touch rock
 var art := DrillArt.new()
@@ -61,11 +80,10 @@ func _ready() -> void:
 	_add_box(Rect2(-HW, TOP, HW * 2.0, ROOF - TOP))                    # roof
 	_add_box(Rect2(-HW, TOP, WALL, DOOR_TOP - TOP))                    # left wall above the door
 	_add_box(Rect2(HW - WALL, TOP, WALL, DOOR_TOP - TOP))              # right wall
-	var head := CollisionShape2D.new()
 	var poly := ConvexPolygonShape2D.new()
 	poly.points = PackedVector2Array(HEAD)
-	head.shape = poly
-	add_child(head)
+	_head_shape.shape = poly
+	add_child(_head_shape)
 	art.drill = self
 	add_child(art)
 	_add_station(Stations.Helm.new(), Vector2(58, FLOOR))
@@ -79,6 +97,7 @@ func _ready() -> void:
 		l.top = DOOR_TOP
 		l.bottom = BOTTOM + 30.0
 		add_child(l)
+		_ladders.append(l)
 	for n in ["drill_loop", "drill_idle"]:
 		_sounds[n] = Sfx.looping(n)
 	_engine.max_distance = 1200.0
@@ -94,8 +113,12 @@ func place(at_x: float) -> void:
 	while world.is_air(Vector2(at_x, y)) and y < 200.0:
 		y += 2.0
 	position = Vector2(at_x, y - BOTTOM + 4.0)
-	for i in 6:
-		_cut(10.0)
+	# set down in a pit dug to the head's shape (the cutters only ever chew in front of it)
+	var pit_a := global_position + Vector2(-80, 74)
+	var pit_b := global_position + Vector2(80, 74)
+	for i in 4:
+		world.dig(pit_a, pit_b, 40.0, 10.0, false)
+		_cut_reamers(10.0)
 
 
 func apply_upgrades() -> void:
@@ -112,13 +135,16 @@ func _physics_process(dt: float) -> void:
 	_bite_t -= dt
 	if running:
 		fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
-		if _cut(Progress.drill_power() * HEAD_POWER[speed] * dt):
+		var power: float = Progress.drill_power() * HEAD_POWER[speed] * dt
+		if _cut_face(power):
 			_bite_t = 0.3
+		_cut_reamers(power * 0.8)
 		if fuel == 0.0:
 			Sfx.play("drill_stall", global_position)
 			changed.emit()
 	drilling = running and _bite_t > 0.0
-	_descend(dt, running)
+	if not _fall(dt):
+		_stroke_cycle(dt, running)
 	_engine_sound(running)
 	var leaks := get_breaches().size()
 	if leaks > 0:
@@ -138,36 +164,121 @@ func _engine_sound(running: bool) -> void:
 		_engine.stop()
 
 
-## Moves down as far as the rock under the head allows; free-falls through open caves.
-func _descend(dt: float, running: bool) -> void:
-	var free := _free_below(64.0)
-	var want: float = DESCENT[speed] * World.METER * dt if running else 0.0
-	if free > 12.0:
+## GRIP -> BORE -> RELEASE -> ADVANCE, over and over while running. Stopping finishes the
+## hull's slide first, then holds with the braces out and the ladders down.
+func _stroke_cycle(dt: float, running: bool) -> void:
+	_phase_t -= dt
+	match phase:
+		Phase.GRIP:
+			grip = move_toward(grip, 1.0, dt / GRIP_TIME)
+			if grip >= 1.0 and running:
+				phase = Phase.BORE
+		Phase.BORE:
+			if running:     # rams forward only as fast as the rock in front gives way
+				var push: float = DESCENT[speed] * World.METER * dt
+				_set_stroke(stroke + minf(push, _free_below_face(push + 1.0)))
+			if stroke >= STROKE and not _anyone_on_ladders():
+				phase = Phase.RELEASE
+				Sfx.play("lever", global_position, -6.0)
+		Phase.RELEASE:
+			grip = move_toward(grip, 0.0, dt / RELEASE_TIME)
+			if grip <= 0.0:
+				phase = Phase.ADVANCE
+		Phase.ADVANCE:
+			var step := minf(minf(ADVANCE_SPEED * dt, stroke), _free_below_reamers(ADVANCE_SPEED * dt + 1.0))
+			position.y += step
+			_set_stroke(stroke - step)       # the head stays put while the hull catches up
+			if stroke <= 0.0:
+				phase = Phase.GRIP
+				Sfx.play("lever", global_position, -6.0)
+	for l in _ladders:                    # ladders fold up while the braces are in
+		l.bottom = lerpf(DOOR_TOP + 10.0, BOTTOM + 30.0, grip)
+		l.queue_redraw()
+
+
+## Free-falls (head, hull and all) when it breaks into a cave with nothing under it.
+## Returns true while falling.
+func _fall(dt: float) -> bool:
+	var open := _free_below_face(14.0) >= 14.0 and _free_below_reamers(14.0) >= 14.0
+	if open:
 		_fall_v = minf(_fall_v + FALL_GRAVITY * dt, 500.0)
-	elif free <= 0.0:
-		if _fall_v > CRASH_SPEED:     # crashed onto a cave floor (a drop of ~3.5 m or more)
-			damage((_fall_v - CRASH_SPEED + 30.0) * 0.12, global_position + Vector2(randf_range(-40, 40), BOTTOM))
-		_fall_v = 0.0
-	var step := minf(free, maxf(want, _fall_v * dt))
-	if step > 0.0:
+		var step := minf(_fall_v * dt, minf(_free_below_face(64.0), _free_below_reamers(64.0)))
 		position.y += step
+		return step > 0.0
+	if _fall_v > CRASH_SPEED:     # crashed onto a cave floor (a drop of ~3.5 m or more)
+		damage((_fall_v - CRASH_SPEED + 30.0) * 0.12, global_position + Vector2(randf_range(-40, 40), BOTTOM))
+	_fall_v = 0.0
+	return false
 
 
-## Free space (px) under the head before it would touch rock, up to `limit`.
-func _free_below(limit: float) -> float:
+func _set_stroke(s: float) -> void:
+	stroke = clampf(s, 0.0, STROKE)
+	_head_shape.position.y = stroke
+
+
+func _anyone_on_ladders() -> bool:
+	for p: Player in get_tree().get_nodes_in_group("player"):
+		if p.rope in _ladders:
+			return true
+	return false
+
+
+## Free space (px) in front of the head's cutting face, up to `limit`.
+func _free_below_face(limit: float) -> float:
+	return _free_below(_face_points(), limit)
+
+
+## Free space (px) under the hull's whole bottom, up to `limit`: the corners are what the
+## reamers cut, the middle is where the head has already been.
+func _free_below_reamers(limit: float) -> float:
+	var pts := []
+	for x in [-118.0, -104.0, -90.0, -60.0, -20.0, 20.0, 60.0, 90.0, 104.0, 118.0]:
+		pts.append(Vector2(x, BOTTOM + 2.0))
+	return _free_below(pts, limit)
+
+
+func _free_below(points: Array, limit: float) -> float:
 	var d := 0.0
 	while d < limit:
-		for p: Vector2 in [Vector2(-70, 86), Vector2(-34, 96), Vector2(0, 106), Vector2(34, 96), Vector2(70, 86)]:
+		for p: Vector2 in points:
 			if not world.is_air(global_position + p + Vector2(0, d + 2.0)):
 				return d
-		d += 2.0
+		d += 1.0
 	return limit
 
 
-func _cut(amount: float) -> bool:
-	var a := global_position + Vector2(-CUT_HALF, CUT_Y)
-	var b := global_position + Vector2(CUT_HALF, CUT_Y)
-	return world.dig(a, b, CUT_R, amount, false).hit    # ore it grinds through is lost
+## Points along the cutting face (local, with the head's current stroke), every ~8 px.
+func _face_points() -> Array:
+	var pts := []
+	for i in FACE.size() - 1:
+		var a: Vector2 = FACE[i]
+		var b: Vector2 = FACE[i + 1]
+		var n := int(ceil(a.distance_to(b) / 8.0))
+		for k in n:
+			pts.append(a.lerp(b, float(k) / n) + Vector2(0, stroke))
+	pts.append(FACE[-1] + Vector2(0, stroke))
+	return pts
+
+
+## The cutters chew only the rock just in front of the face (cracks first, then it crumbles).
+func _cut_face(amount: float) -> bool:
+	var hit := false
+	for i in FACE.size() - 1:
+		var a: Vector2 = FACE[i]
+		var b: Vector2 = FACE[i + 1]
+		var out := (b - a).orthogonal().normalized()    # points away from the head (down/out)
+		if out.y < 0.0:
+			out = -out
+		var off := Vector2(0, stroke) + out * CUTTER_REACH
+		if world.dig(global_position + a + off, global_position + b + off, CUTTER_R, amount, false).hit:
+			hit = true      # (ore it grinds through is lost)
+	return hit
+
+
+func _cut_reamers(amount: float) -> void:
+	for r: Vector2 in REAMERS:
+		var at := global_position + r
+		world.dig(at, at + Vector2(0, 6), REAMER_R, amount, false)
 
 
 # ---------------------------------------------------------------- crew actions (stations)

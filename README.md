@@ -95,13 +95,17 @@ All art is generated, so it can be tweaked and rebuilt:
 |---|---|
 | Terrain textures + normal maps | `python3 tools/gen_textures.py` |
 | Parallax backgrounds | `python3 tools/gen_backgrounds.py` |
-| Miner sprite sheet (Blender) | `blender -b --factory-startup -P tools/miner_blender.py -- /tmp/miner && python3 tools/miner_sheet.py /tmp/miner` |
-| Crawler creature sheet + eye glow (Blender) | `blender -b --factory-startup -P tools/crawler_blender.py -- /tmp/crawler && python3 tools/crawler_sheet.py /tmp/crawler` |
-| Cave props, rope, boulder, camp stall (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
-| Drill machine: hull, back wall, head, stations (Blender) | `blender -b --factory-startup -P tools/drill_blender.py -- /tmp/drill && python3 tools/drill_sheet.py /tmp/drill` |
+| Miner sprite sheet + normal map (Blender) | `blender -b --factory-startup -P tools/miner_blender.py -- /tmp/miner && python3 tools/miner_sheet.py /tmp/miner` |
+| Crawler creature sheet + normal map + eye glow (Blender) | `blender -b --factory-startup -P tools/crawler_blender.py -- /tmp/crawler && python3 tools/crawler_sheet.py /tmp/crawler` |
+| Cave props, rope, boulder, camp stall + normal maps (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
+| Drill machine: hull, back wall, head, stations + normal maps (Blender) | `blender -b --factory-startup -P tools/drill_blender.py -- /tmp/drill && python3 tools/drill_sheet.py /tmp/drill` |
 
 The character scripts take an optional anim list after the output dir to re-render only
 those rows (e.g. `-- /tmp/miner climb,hurt`); the sheet script still needs every frame in the dir.
-The miner, crawler and props are low-poly 3D models rendered to cel-shaded pixel art with outlines
-(the same idea Dead Cells used). Terrain is a fine dig grid drawn as smooth outlined rock by
+The miner, crawler, props and drill are 3D models rendered tiny without anti-aliasing to
+cel-shaded pixel art with outlines (the same idea Dead Cells used). Every sprite X.png also gets
+X_n.png, a normal map with the same layout for in-game lighting: Blender renders a camera-normal
+pass (`tools/normal_pass.py`) and `tools/normal_maps.py` snaps it to 17 directions so the lit
+result stays crisp. That module also holds `BAKED_CONTRAST`, how strong the cel bands baked
+into the colour sheets are now that the game lights the sprites. Terrain is a fine dig grid drawn as smooth outlined rock by
 `terrain.gdshader`.
