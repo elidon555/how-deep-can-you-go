@@ -58,6 +58,9 @@ func _ready() -> void:
 func _physics_process(dt: float) -> void:
 	_t -= dt
 	_growl_t -= dt
+	if state != State.DEAD and world.liquid_at(global_position).y == Liquids.LAVA:
+		hit(HP, global_position + Vector2(0, 10))          # lava kills it
+		Sfx.play("sizzle", global_position)
 	velocity.y = minf(velocity.y + GRAVITY * dt, 600.0)
 	var to_player := player.global_position - global_position
 	match state:

@@ -8,6 +8,7 @@ class_name World
 
 signal ore_found(pos: Vector2, kind: int)   # kind: index into ORES
 signal boulder_shattered(pos: Vector2)
+signal opened(gx: int, gy: int)          # a cell just became open (dug out): liquids may flow in
 
 const CELL := 8
 const METER := 24.0
@@ -47,6 +48,9 @@ class Chunk:
 	var tex_mat2: ImageTexture        # second material map: crystal, magma
 	var glows := false                # has crystal / magma, gets a glow pass
 	var glow_rect: ColorRect
+	var liquid := PackedFloat32Array()   # 0..1 per cell (see Liquids)
+	var ltype := PackedByteArray()       # Liquids.NONE / WATER / LAVA
+	var has_liquid := false
 	var rect: ColorRect
 	var shape: ConcavePolygonShape2D
 	var vis_dirty := false    # only fill values changed -> re-upload texture
@@ -70,6 +74,11 @@ var tx := {}
 var glow_tx := {}
 var terrain_glow_shader: Shader = preload("res://src/world/terrain_glow.gdshader")
 var noise_layer := FastNoiseLite.new()
+var noise_liquid := FastNoiseLite.new()
+var liquids: Liquids             # set by main; told when a chunk's liquid changes
+# liquid pockets: water from WATER_FROM m down to the magma layer, lava inside it
+const WATER_FROM := 8.0
+const LIQUID_POCKETS := 0.32     # noise threshold: higher = fewer, smaller pockets
 var deco_tex := {}
 var props := {}                 # name -> [texture, glow texture or null]
 var flicker := []               # lantern lights
@@ -102,6 +111,8 @@ func _ready() -> void:
 	noise_surf.seed = rng.randi()
 	noise_layer.seed = rng.randi()
 	noise_layer.frequency = 0.004
+	noise_liquid.seed = rng.randi()
+	noise_liquid.frequency = 0.012
 	noise_surf.frequency = 0.01
 	ensure_generated(CHUNK_PX * 4)
 
@@ -132,6 +143,8 @@ func _gen_chunk(key: Vector2i) -> void:
 	ch.fill.resize(C * C)
 	ch.mat.resize(C * C)
 	ch.dmg.resize(C * C)
+	ch.liquid.resize(C * C)
+	ch.ltype.resize(C * C)
 	for j in C:
 		for i in C:
 			var v := _gen_cell(key.x * C + i, key.y * C + j)
@@ -139,6 +152,7 @@ func _gen_chunk(key: Vector2i) -> void:
 			ch.mat[j * C + i] = int(v.y)
 			if int(v.y) >= M.CRYSTAL:
 				ch.glows = true
+	_gen_liquid(ch)
 	ch.rect = ColorRect.new()
 	ch.rect.position = Vector2(key) * CHUNK_PX
 	ch.rect.size = Vector2(CHUNK_PX, CHUNK_PX)
@@ -189,11 +203,16 @@ func _gen_cell(gx: int, gy: int) -> Vector2:
 	return Vector2(fill, _gen_mat(px, py, depth))
 
 
+## Depth (m) as the layers see it: real depth nudged by noise, so boundaries wander.
+func _layer_depth(px: float, py: float, depth: float) -> float:
+	return depth + noise_layer.get_noise_1d(px) * LAYER_WOBBLE + noise_layer.get_noise_2d(px, py) * 8.0
+
+
 ## Rock type: soil turning to stone and hard rock with depth, then the crystal caverns, deep
 ## basalt, and the magma layer. Layer boundaries wander with noise.
 func _gen_mat(px: float, py: float, depth: float) -> int:
 	var m := noise_mat.get_noise_2d(px, py) * 0.5 + 0.5
-	var d := depth + noise_layer.get_noise_1d(px) * LAYER_WOBBLE + noise_layer.get_noise_2d(px, py) * 8.0
+	var d := _layer_depth(px, py, depth)
 	if d >= MAGMA_FROM:
 		return M.HARD if m > 0.78 else M.MAGMA
 	if d >= CRYSTAL_TO:
@@ -206,6 +225,52 @@ func _gen_mat(px: float, py: float, depth: float) -> int:
 	if m < clampf((depth - 50.0) / 250.0, 0.0, 0.7):
 		mat = M.HARD
 	return mat
+
+
+## Liquid pockets in natural caves (noise), then settled: in every column, each run of open
+## cells has its liquid stacked at the bottom, so pools sit in basins from the start.
+func _gen_liquid(ch: Chunk) -> void:
+	for j in C:
+		for i in C:
+			var k := j * C + i
+			if ch.fill[k] >= 0.5:
+				continue
+			var gx := ch.key.x * C + i
+			var gy := ch.key.y * C + j
+			if gx < 3 or gx >= W - 3:
+				continue
+			var px := gx * CELL + 4.0
+			var py := gy * CELL + 4.0
+			var depth := py / METER
+			if depth < WATER_FROM or noise_liquid.get_noise_2d(px, py) < LIQUID_POCKETS:
+				continue
+			ch.liquid[k] = 1.0
+			ch.ltype[k] = Liquids.LAVA if _layer_depth(px, py, depth) >= MAGMA_FROM - 10.0 else Liquids.WATER
+			ch.has_liquid = true
+	if not ch.has_liquid:
+		return
+	for i in C:                       # settle each column's open runs
+		var j := 0
+		while j < C:
+			if ch.fill[j * C + i] >= 0.5:
+				j += 1
+				continue
+			var j0 := j
+			var amount := 0.0
+			var kind := Liquids.NONE
+			while j < C and ch.fill[j * C + i] < 0.5:
+				amount += ch.liquid[j * C + i]
+				if ch.ltype[j * C + i] != Liquids.NONE:
+					kind = ch.ltype[j * C + i]
+				ch.liquid[j * C + i] = 0.0
+				ch.ltype[j * C + i] = Liquids.NONE
+				j += 1
+			var y := j - 1
+			while amount > 0.001 and y >= j0:
+				ch.liquid[y * C + i] = minf(amount, 1.0)
+				ch.ltype[y * C + i] = kind
+				amount -= 1.0
+				y -= 1
 
 
 ## Ore, bones, glowing mushrooms and worms.
@@ -391,6 +456,57 @@ func _add_decor(cell: Vector2i, n: Node2D) -> void:
 
 # ---------------------------------------------------------------- queries
 
+func get_liquid(gx: int, gy: int) -> float:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	return ch.liquid[(gy & 31) * C + (gx & 31)] if ch and gx >= 0 and gx < W else 0.0
+
+
+func get_ltype(gx: int, gy: int) -> int:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	return ch.ltype[(gy & 31) * C + (gx & 31)] if ch and gx >= 0 and gx < W else Liquids.NONE
+
+
+func set_liquid(gx: int, gy: int, amount: float, kind: int) -> void:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null or gx < 0 or gx >= W:
+		return
+	var k := (gy & 31) * C + (gx & 31)
+	if amount <= Liquids.MIN:
+		amount = 0.0
+		kind = Liquids.NONE
+	ch.liquid[k] = amount
+	ch.ltype[k] = kind
+	if amount > 0.0:
+		ch.has_liquid = true
+	if liquids:
+		liquids.cell_changed(gx, gy)
+
+
+## Liquid at a world point: Vector2(amount, kind).
+func liquid_at(p: Vector2) -> Vector2:
+	var c := cell_at(p)
+	return Vector2(get_liquid(c.x, c.y), get_ltype(c.x, c.y))
+
+
+## Water meeting lava: a cell turns to solid rock.
+func place_rock(gx: int, gy: int, mat: int) -> void:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null:
+		return
+	var k := (gy & 31) * C + (gx & 31)
+	ch.fill[k] = 1.0
+	ch.mat[k] = mat
+	ch.dmg[k] = 0.0
+	ch.liquid[k] = 0.0
+	ch.ltype[k] = Liquids.NONE
+	for kx in _keys_covering(gx, R_INT + 1):
+		for ky in _keys_covering(gy, R_INT + 1):
+			var o: Chunk = chunks.get(Vector2i(kx, ky))
+			if o:
+				o.int_dirty = true
+				o.col_dirty = true
+
+
 func get_fill(gx: int, gy: int) -> float:
 	if gx < 0 or gx >= W:
 		return 1.0
@@ -485,6 +601,7 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 	ch.dmg[(gy & 31) * C + (gx & 31)] = 0.0
 	_set_pixel(gx, gy, nf, 0.0)
 	if old >= 0.5 and nf < 0.5:
+		opened.emit(gx, gy)
 		var cell := Vector2i(gx, gy)
 		dug[cell] = true
 		for kx in _keys_covering(gx, R_INT + 1):

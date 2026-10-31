@@ -9,8 +9,9 @@ import os
 import random
 import sys
 
+import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from normal_pass import PASSES, normal_shader, set_view  # noqa: E402
@@ -28,8 +29,11 @@ COLORS = {
     "boulder": "#6e6359", "hemp": "#a8875a", "hemp_dark": "#5e4528", "steel": "#878e99",
     "canvas_a": "#8c3a2e", "canvas_b": "#bfae88", "canvas_back": "#3e2622", "ore_rock": "#4b4f58",
     "gold": "#c9a227", "copper": "#b5653a", "paint": "#d6b85a",
+    "canvas_old": "#8a7a5e", "canvas_dark": "#5e5240", "wax": "#d8d0b4", "paper": "#d6c890",
+    "ink": "#3a2e22", "straw": "#b49a52", "leather": "#6e4028", "leather_dark": "#3a2016",
+    "lava": "#ff7a1a", "lava_hot": "#ffd060", "lava_crust": "#4a1c10", "lava_rock": "#3a3034",
 }
-GLOW = {"glass", "cryst_p", "cryst_t"}   # these stay bright (emissive) in the clay pass too
+GLOW = {"glass", "cryst_p", "cryst_t", "lava", "lava_hot"}   # these stay bright (emissive) in the clay pass too
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
@@ -328,6 +332,186 @@ box((-2.05, -0.2, 0.6), (0.07, 0.07, 1.25), "wood_dark")
 box((-2.05, -0.26, 1.15), (0.62, 0.05, 0.42), "plank")
 cyl((-2.05, -0.3, 1.15), 0.12, 0.03, "paint", rot=(math.radians(90), 0, 0), verts=10)
 prop("stall", 112, 96, (0, 48 / PX_PER_UNIT), samples=96)
+
+# ================================================================ abandoned mine camp (anchor: bottom centre)
+U = 1 / PX_PER_UNIT          # one game px in world units
+rng2 = random.Random(41)     # own stream: the props above keep their shapes
+
+
+def ground(name, w, h, samples=96):
+    """Close a prop whose sprite bottom row is the ground line (z = 0)."""
+    prop(name, w, h, (0, h / 2 * U), samples)
+
+
+def sheet_mesh(name, nx, ny, x0, x1, y0, y1, height, mats, holes=0.0, rng=None):
+    """A cloth sheet: grid over x/y with z = height(x, y); faces randomly use one of mats and a
+    fraction `holes` of them is torn out."""
+    rng = rng or rng2
+    bm = bmesh.new()
+    vs = [[bm.verts.new((x0 + (x1 - x0) * i / nx, y0 + (y1 - y0) * j / ny,
+                         height(x0 + (x1 - x0) * i / nx, y0 + (y1 - y0) * j / ny)))
+           for j in range(ny + 1)] for i in range(nx + 1)]
+    faces = []
+    for i in range(nx):
+        for j in range(ny):
+            if rng.random() < holes:
+                continue
+            faces.append(bm.faces.new((vs[i][j], vs[i + 1][j], vs[i + 1][j + 1], vs[i][j + 1])))
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    ob = bpy.data.objects.new(name, me)
+    scene.collection.objects.link(ob)
+    add(ob, mats[0], smooth=True)
+    for m in mats[1:]:
+        ob.data.materials.append(material(m))
+    for p in ob.data.polygons:
+        if len(mats) > 1 and rng.random() > 0.7:
+            p.material_index = rng.randrange(1, len(mats))
+    return ob
+
+
+# ---- collapsed tent: one pole still standing, the other snapped, canvas sagging to the ground
+cyl((-0.56, 0, 0.55), 0.035, 1.1, "wood", rot=(0, math.radians(8), 0))
+cyl((0.62, 0, 0.17), 0.035, 0.34, "wood", rot=(0, math.radians(-12), 0))           # snapped stump
+cyl((0.45, -0.15, 0.04), 0.03, 0.5, "wood_dark", rot=(0, math.radians(84), math.radians(20)))
+sheet_mesh("canvas", 14, 6, -0.88, 0.86, -0.32, 0.32,
+           lambda x, y: max(0.02, (0.98 * math.exp(-3.2 * (x + 0.6) ** 2) + 0.28 * math.exp(-8 * (x - 0.6) ** 2))
+                            * (1 - 0.75 * abs(y) / 0.32) + rng2.uniform(-0.025, 0.025)),
+           ["canvas_old", "canvas_dark"], holes=0.08)
+for sx, top in ((-0.88, (-0.62, 0.98)), (0.86, (0.62, 0.32))):                       # guy ropes + stakes
+    a, b = Vector((top[0], -0.05, top[1])), Vector((sx, -0.1, 0.03))
+    bpy.ops.mesh.primitive_cylinder_add(vertices=5, radius=0.012, depth=(b - a).length, location=(a + b) / 2)
+    o = bpy.context.active_object
+    o.rotation_euler = (b - a).to_track_quat("Z", "Y").to_euler()
+    add(o, "hemp")
+    cyl((sx, -0.1, 0.04), 0.022, 0.1, "wood_dark", verts=5)
+ground("tent_ruin", 40, 26)
+
+# ---- rough table with a candle stub and loose papers
+box((0, 0, 0.46), (0.86, 0.4, 0.06), "plank", rot=(0, math.radians(1.5), 0))
+for sx in (-0.36, 0.36):
+    box((sx, -0.12, 0.22), (0.06, 0.06, 0.44), "wood_dark")
+box((0, -0.12, 0.12), (0.72, 0.04, 0.04), "wood_dark")                               # stretcher
+cyl((-0.22, 0, 0.53), 0.045, 0.09, "wax")
+cyl((-0.22, 0, 0.59), 0.01, 0.04, "iron_dark", verts=4)                              # burnt wick
+cyl((-0.22, 0, 0.495), 0.08, 0.012, "iron_dark", verts=10)                           # drip dish
+box((0.14, -0.02, 0.505), (0.24, 0.18, 0.03), "paper", rot=(0, math.radians(3), 0))   # a stack of papers
+box((0.44, -0.08, 0.41), (0.16, 0.14, 0.01), "paper", rot=(0, math.radians(72), 0))   # one slipping off the edge
+ground("table", 22, 14)
+
+# ---- broken bunk: posts, a lower bed with a mattress, the upper bunk caved in
+for sx in (-0.6, 0.6):
+    box((sx, 0, 0.38 if sx < 0 else 0.28), (0.07, 0.07, 0.76 if sx < 0 else 0.56), "wood")
+box((0, 0, 0.22), (1.26, 0.36, 0.06), "wood_dark")                                   # lower frame
+box((0, 0, 0.29), (1.12, 0.34, 0.08), "straw", rot=(0, math.radians(1), 0))         # mattress
+box((-0.28, 0, 0.6), (0.66, 0.34, 0.05), "wood_dark", rot=(0, math.radians(-4), 0))  # upper rail, still up
+box((0.3, -0.05, 0.42), (0.62, 0.3, 0.04), "plank", rot=(0, math.radians(-28), 0))    # upper planks caved in
+box((0.62, 0.05, 0.05), (0.3, 0.08, 0.04), "plank", rot=(0, math.radians(12), math.radians(25)))
+ground("bunk", 30, 18)
+
+# ---- opened loot crate: lid off and leaning on it, straw spilling over the rim
+box((0, 0, 0.21), (0.46, 0.42, 0.42), "plank")
+box((0, -0.215, 0.05), (0.48, 0.02, 0.06), "wood_dark")
+box((0, -0.215, 0.38), (0.48, 0.02, 0.06), "wood_dark")
+box((-0.06, -0.218, 0.21), (0.05, 0.02, 0.36), "wood_dark")
+for k in range(6):
+    cyl((rng2.uniform(-0.18, 0.18), rng2.uniform(-0.15, 0.15), 0.44 + rng2.uniform(0, 0.04)), 0.012,
+        rng2.uniform(0.1, 0.18), "straw", rot=(rng2.uniform(-0.8, 0.8), rng2.uniform(-1.2, 1.2), 0), verts=4)
+box((0.31, 0.05, 0.2), (0.05, 0.4, 0.42), "plank", rot=(0, math.radians(-14), 0))     # lid against the side
+ground("crate_open", 16, 14)
+
+# ---- yellowed note nailed to a wall (anchor: bottom centre of the sprite)
+sheet_mesh("note", 3, 4, -0.13, 0.13, -0.17, 0.17, lambda x, z: 0.0, ["paper"])
+o = current[-1]
+o.rotation_euler = (math.radians(90), 0, math.radians(3))
+o.location = (0, 0, 0.2)
+for v in o.data.vertices:                                                           # curled lower corner
+    if v.co.x > 0.08 and v.co.y < -0.1:
+        v.co.z += 0.05
+for k in range(3):                                                                  # scrawled lines
+    box((-0.02, -0.01, 0.25 - k * 0.09), (0.17 - 0.05 * (k % 2), 0.005, 0.03), "ink")
+cyl((0, -0.025, 0.335), 0.034, 0.03, "iron", rot=(math.radians(90), 0, 0), verts=8)    # nail head
+ground("note", 8, 10)
+
+# ---- small leather journal lying on the floor, tipped a little toward the viewer
+jr = []
+for dz in (-0.03, 0.03):                                                              # front and back cover
+    jr.append(box((0, 0, 0.12 + dz), (0.38, 0.27, 0.018), "leather"))
+jr.append(box((0.015, -0.005, 0.12), (0.35, 0.27, 0.045), "paper"))                    # cream page block
+jr.append(box((-0.185, 0, 0.12), (0.02, 0.27, 0.078), "leather"))                     # spine
+jr.append(box((0.1, 0, 0.12), (0.035, 0.285, 0.085), "leather_dark"))                 # strap
+tilt = Matrix.Rotation(math.radians(55), 3, "X")                                    # turn the whole book
+for o in jr:                                                                         # about one pivot
+    o.location = tilt @ (o.location - Vector((0, 0, 0.12))) + Vector((0, 0, 0.16))
+    o.rotation_euler = (math.radians(55), 0, 0)
+ground("journal", 10, 8)
+
+# ---- barrel: bulging staves with iron hoops
+bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=0.2, depth=0.62, location=(0, 0, 0.31))
+o = bpy.context.active_object
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.subdivide(number_cuts=3)
+bpy.ops.object.mode_set(mode="OBJECT")
+for v in o.data.vertices:                                                           # bulge in the middle
+    v.co.x *= 1 + 0.22 * (1 - (v.co.z / 0.31) ** 2)
+    v.co.y *= 1 + 0.22 * (1 - (v.co.z / 0.31) ** 2)
+add(o, "wood")
+for z, r in ((0.07, 0.215), (0.55, 0.215), (0.2, 0.235), (0.42, 0.235)):
+    torus((0, 0, z), r, 0.024, "iron")
+cyl((0, 0, 0.62), 0.18, 0.01, "wood_dark", verts=12)
+ground("barrel", 12, 16)
+
+# ---- lamp post: wooden post, an arm with a hook, a lantern hanging from it
+box((0, 0, 0.62), (0.08, 0.08, 1.24), "wood")
+box((0.07, 0, 1.2), (0.2, 0.06, 0.05), "wood_dark")                                   # arm
+torus((0.13, 0, 1.13), 0.025, 0.008, "iron_dark", rot=(math.radians(90), 0, 0))       # hook
+box((0.13, 0, 1.07), (0.08, 0.08, 0.02), "iron_dark")
+box((0.13, 0, 1.01), (0.06, 0.06, 0.09), "glass")
+box((0.13, 0, 0.955), (0.08, 0.08, 0.02), "iron_dark")
+box((0, 0, 0.03), (0.14, 0.14, 0.06), "wood_dark")                                   # foot
+ground("lamp_post", 8, 30)
+
+# ---- lava pool: 8 frames of a bubbling pool in a rocky basin (anchor: bottom centre). Seen
+# from the side, so the pool's glowing face shows between rocks at its ends. Each frame is
+# modelled separately: the surface ripples, hot streaks wander, three bubbles swell and burst.
+LAVA_FRAMES = 8
+BUBBLES = [(-0.35, 0.0), (0.12, 0.35), (0.45, 0.7)]          # x, phase offset
+STREAKS = [(-0.5, 0.0, 0.1), (-0.12, 0.4, 0.08), (0.28, 0.2, 0.12), (0.55, 0.65, 0.07)]   # x, phase, width
+
+
+def lava_frame(f):
+    t = f / LAVA_FRAMES
+    wave = lambda ph: math.sin(2 * math.pi * (t + ph))          # noqa: E731, loops over the 8 frames
+
+    def surface(x, y):
+        return 0.19 + 0.012 * math.sin(2 * math.pi * (x * 3 - t)) + 0.008 * math.sin(2 * math.pi * (y * 5 + t))
+
+    box((0, 0.02, 0.035), (1.62, 0.44, 0.07), "lava_rock")                            # basin floor
+    box((0, 0.0, 0.125), (1.5, 0.4, 0.13), "lava")                                    # the molten body
+    sheet_mesh("lava_skin", 16, 3, -0.75, 0.75, -0.2, 0.2, surface, ["lava_hot", "lava", "lava_crust"],
+               rng=random.Random(3))                                                 # same patches every frame
+    for x, ph, w in STREAKS:                                                         # hot streaks on its face
+        box((x + 0.04 * wave(ph), -0.205, 0.13 + 0.015 * wave(ph + 0.25)), (w, 0.01, 0.035), "lava_hot")
+    for x, ph in ((-0.3, 0.1), (0.4, 0.55)):                                         # cooled crust drifting
+        box((x + 0.05 * wave(ph), -0.21, 0.09), (0.12, 0.012, 0.03), "lava_crust")
+    for bx, ph in BUBBLES:
+        k = (t + ph) % 1
+        if k < 0.85:                                                                 # swells, then bursts
+            r = 0.025 + 0.06 * k
+            ball((bx, -0.05, 0.19 + r * 0.5), r, "lava_hot" if k > 0.5 else "lava")
+        else:
+            for sgn in (-1, 1):                                                      # spatter as it pops
+                ball((bx + sgn * 0.06, -0.06, 0.28), 0.018, "lava_hot")
+    r2 = random.Random(9)                                                            # same rocks each frame
+    for x, h, r in ((-0.86, 0.3, 0.17), (-0.7, 0.2, 0.12), (0.72, 0.22, 0.13), (0.87, 0.28, 0.16),
+                    (-0.45, 0.06, 0.08), (0.15, 0.05, 0.07)):
+        ball((x, -0.22 + r2.uniform(-0.03, 0.03), h * 0.55), r, "lava_rock", scale=(1.3, 1, h / r))
+    ground(f"lava_{f}", 40, 10)
+
+
+for f in range(LAVA_FRAMES):
+    lava_frame(f)
+
 
 # ---------------------------------------------------------------- render each prop alone
 all_objs = [o for objs, *_ in PROPS.values() for o in objs]

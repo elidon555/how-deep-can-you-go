@@ -355,10 +355,13 @@ stow.rotation_euler.y = math.radians(-205)
 
 
 def pose(p):
-    """p: joint -> forward swing in degrees (0 = hanging down). Extra keys: bob, lean, look, stowed.
+    """p: joint -> forward swing in degrees (0 = hanging down). Extra keys: bob, lean, look, stowed,
+    and for whole-body moves: spin (turns the whole miner about his middle), ground (drop him
+    until his lowest point touches the floor), centre (keep his bounding box centred on x = 0),
+    float_z (put his bounding box centre at this height instead of grounding him).
 
     Every angle turns counter-clockwise on screen, so a positive limb swings forward but a
-    positive lean / look tips the torso / head back."""
+    positive lean / look / spin tips the torso / head / body back (a forward roll is negative)."""
     for name, e in J.items():
         e.rotation_euler = (0, 0, 0)
     for o in HAND_PICK:
@@ -371,6 +374,23 @@ def pose(p):
     for k, v in p.items():
         if k in J and k not in ("hips", "torso", "neck"):
             J[k].rotation_euler.y = math.radians(-v)
+    root = J["root"]
+    root.location = (0, 0, 0)
+    if p.get("spin"):                       # turn about the body's middle, not the feet
+        root.rotation_euler.y = math.radians(-p["spin"])
+        mid = Vector((0, 0, 0.9))
+        root.location = mid - root.rotation_euler.to_matrix() @ mid
+    if p.get("ground") or p.get("centre") or "float_z" in p:
+        bpy.context.view_layer.update()
+        pts = [o.matrix_world @ v.co for o in bpy.data.objects
+               if o.type == "MESH" and not o.hide_render for v in o.data.vertices]
+        xs, zs = [v.x for v in pts], [v.z for v in pts]
+        if p.get("centre"):
+            root.location.x -= (min(xs) + max(xs)) / 2
+        if p.get("ground"):
+            root.location.z -= min(zs)
+        if "float_z" in p:
+            root.location.z += p["float_z"] - (min(zs) + max(zs)) / 2
 
 
 def shoulder_pair(a, f=None):
@@ -440,16 +460,17 @@ def cloth(frames, scarf=(-25, 6), coat=(-4, 3), cycles=1.0, loop=True, sway=5.0)
         prev = frames[i - 1] if (loop or i > 0) else p
         dz = p.get("bob", 0.0) - prev.get("bob", 0.0)
         lean = p.get("lean", 0.0)
+        spin = p.get("spin", 0.0)           # cloth hangs in the world, so it undoes a body spin too
         drag = 300 * dz
         base, amp = scarf
-        p["scarf_n1"] = base + amp * wave(i, n, cycles) + drag - lean
+        p["scarf_n1"] = base + amp * wave(i, n, cycles) + drag - lean - spin
         p["scarf_n2"] = 0.8 * amp * wave(i, n, cycles, 1.3) + 0.5 * drag
-        p["scarf_f1"] = base - 10 + 0.7 * amp * wave(i, n, cycles, 0.9) + drag - lean
+        p["scarf_f1"] = base - 10 + 0.7 * amp * wave(i, n, cycles, 0.9) + drag - lean - spin
         p["scarf_f2"] = 0.7 * amp * wave(i, n, cycles, 2.0) + 0.5 * drag
         cb, ca = coat
-        p["coattail"] = cb + ca * wave(i, n, cycles, 0.6) + 0.6 * drag - 0.4 * lean
+        p["coattail"] = cb + ca * wave(i, n, cycles, 0.6) + 0.6 * drag - 0.4 * lean - spin
         p["pack"] = max(-8.0, min(8.0, 150 * dz))
-        p["lantern"] = -(lean + p["pack"]) + sway * wave(i, n, cycles, 0.8) - 0.8 * drag
+        p["lantern"] = -(lean + spin + p["pack"]) + sway * wave(i, n, cycles, 0.8) - 0.8 * drag
     return frames
 
 
@@ -587,7 +608,34 @@ ANIMS["hurt"] = cloth([
                shoulder_n=14, elbow_n=24, shoulder_f=20, elbow_f=40)),
 ], scarf=(-60, 14), coat=(-25, 8), loop=False, sway=12)
 
-ORDER = ["idle", "run", "jump", "fall", "dig_side", "dig_down", "dig_up", "land", "climb", "hurt"]
+# roll: a fast forward dodge roll: tuck, over the shoulder, back up into a crouch. The body
+# stays on the same spot (the game moves him), pickaxe stowed on the back
+TUCK = dict(thigh_n=105, knee_n=-140, thigh_f=95, knee_f=-135, shoulder_n=70, elbow_n=115,
+            shoulder_f=60, elbow_f=120, lean=-30, look=-20)
+ANIMS["roll"] = cloth([
+    P(stowed=True, ground=True, centre=True, spin=-20, **{**TUCK, "thigh_n": 70, "knee_n": -110,
+                                                           "thigh_f": 40, "knee_f": -70}),
+    P(stowed=True, ground=True, centre=True, spin=-95, **TUCK),
+    P(stowed=True, ground=True, centre=True, spin=-170, **TUCK),
+    P(stowed=True, ground=True, centre=True, spin=-245, **TUCK),
+    P(stowed=True, ground=True, centre=True, spin=-315, **{**TUCK, "thigh_n": 90, "knee_n": -125}),
+    grounded(P(stowed=True, centre=True, lean=-14, look=6, thigh_n=62, knee_n=-110, thigh_f=40, knee_f=-80,
+               shoulder_n=30, elbow_n=40, shoulder_f=10, elbow_f=50)),
+], scarf=(-60, 18), coat=(-30, 12), loop=False, sway=15)
+
+# swim: horizontal breaststroke with the head up: arms sweep out and back, then shoot forward
+# while the legs draw up and frog-kick; cloth drifts slowly upward as underwater
+SWIM_ARMS = [(175, 5), (140, 25), (95, 70), (60, 125), (120, 60), (165, 15)]   # shoulder, elbow
+SWIM_LEGS = [(4, -6), (6, -8), (40, -80), (62, -115), (24, -38), (8, -10)]    # thigh, knee
+ANIMS["swim"] = cloth([
+    P(stowed=True, centre=True, float_z=1.2, spin=-76 + 4 * wave(i, 6), look=45, lean=0,
+      shoulder_n=SWIM_ARMS[i][0], elbow_n=SWIM_ARMS[i][1],
+      shoulder_f=SWIM_ARMS[(i + 5) % 6][0] - 6, elbow_f=SWIM_ARMS[(i + 5) % 6][1],
+      thigh_n=SWIM_LEGS[i][0], knee_n=SWIM_LEGS[i][1], ankle_n=-50,
+      thigh_f=SWIM_LEGS[i][0] - 6, knee_f=SWIM_LEGS[i][1] + 6, ankle_f=-50)
+    for i in range(6)], scarf=(-170, 8), coat=(-150, 6), cycles=1, sway=6)
+
+ORDER = ["idle", "run", "jump", "fall", "dig_side", "dig_down", "dig_up", "land", "climb", "hurt", "roll", "swim"]
 for row, name in enumerate(ORDER):
     if ONLY and name not in ONLY:
         continue

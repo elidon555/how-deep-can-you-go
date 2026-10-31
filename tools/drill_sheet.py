@@ -23,7 +23,7 @@ SRC = sys.argv[1]
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "drill")
 os.makedirs(OUT, exist_ok=True)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
-UNLIT = [np.array(c) for c in ([255, 226, 168], [12, 26, 28])]            # lamps, helm screen
+UNLIT = [np.array(c) for c in ([255, 226, 168], [12, 26, 28], [216, 212, 196])]   # lamps, screens, gauge face
 GLOW = [np.array(c) for c in ([255, 138, 42], [255, 210, 122])]           # furnace fire
 # game rects (x0, y0, x1, y1) that must stay empty, per sprite, and each sprite's top-left
 CLEAR = {"drill_frame": [(-88, -48, 88, 40), (-96, -6, -88, 40), (88, -6, 96, 40)]}
@@ -72,7 +72,7 @@ def convert(name):
     return out, glow, flat, normal_map(f"{SRC}/{name}_normal.png", out)
 
 
-for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit", "sonar", "gunner"):
+for name in ("drill_back", "drill_frame", "helm", "furnace", "workbench", "medkit", "sonar", "gunner", "coolant"):
     out, glow, flat, normals = convert(name)
     Image.fromarray(out, "RGBA").save(f"{OUT}/{name}.png")
     Image.fromarray(normals, "RGBA").save(f"{OUT}/{name}_n.png")

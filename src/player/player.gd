@@ -8,6 +8,7 @@ signal bag_changed
 signal died
 signal rope_requested(feet: Vector2)   # main decides if there's a rope left to hang
 signal kicked_dust(at: Vector2, strength: float)   # steps, jumps, landings
+signal breath_changed(left: float)                 # 0..1 while underwater, 1 = full
 
 const SPEED := 150.0
 const ACCEL := 1300.0
@@ -20,6 +21,10 @@ const JUMP_BUFFER := 0.12
 const CLIMB_SPEED := 110.0
 const INVULNERABLE := 1.0      # seconds after a hit
 const HALF_HEIGHT := 18.0
+const SWIM_UP := -120.0         # holding jump in water
+const WATER_DRAG := 0.55        # how much slower you move in water
+const BREATH := 8.0             # seconds of air underwater
+const LAVA_HURT_EVERY := 0.45
 const ROLL_SPEED := 270.0
 const ROLL_TIME := 0.32        # untouchable for the whole roll
 const ROLL_COOLDOWN := 0.55
@@ -30,9 +35,10 @@ const SHEET_INFO := "res://assets/sprites/miner.json"
 const ANIM_SPEED := {
 	"idle": [4.0, true], "run": [13.0, true], "jump": [10.0, false], "fall": [6.0, true],
 	"land": [14.0, false], "climb": [9.0, true], "hurt": [10.0, false], "roll": [18.0, false],
+	"swim": [8.0, true],
 }
 # used while the sheet doesn't have an animation yet
-const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land"}
+const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land", "swim": "fall"}
 
 var world: World
 var pick := Pickaxe.new()
@@ -65,6 +71,10 @@ var _invuln_t := 0.0
 var _roll_t := 0.0
 var _roll_cool := 0.0
 var _roll_dir := 1
+var in_water := false
+var breath := BREATH
+var _lava_t := 0.0
+var _drown_t := 0.0
 var _last_step_frame := -1
 var _cone := PointLight2D.new()
 var _glow := PointLight2D.new()
@@ -104,6 +114,7 @@ func _physics_process(dt: float) -> void:
 	if not frozen and rope == null and _roll_t <= 0.0 and _roll_cool <= 0.0 \
 			and Input.is_action_just_pressed("roll") and pick.kind == "":
 		_start_roll(dir)
+	_liquids(dt)
 	if rope:
 		_climb(dt, dir)
 	elif _roll_t > 0.0:
@@ -126,7 +137,12 @@ func _physics_process(dt: float) -> void:
 
 func _move(dt: float, dir: float) -> void:
 	var was_on_floor := is_on_floor()
-	velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
+	if in_water:          # floaty: slow sinking, hold jump to swim up
+		velocity.y = minf(velocity.y + GRAVITY * 0.25 * dt, 70.0)
+		if not frozen and Input.is_action_pressed("jump"):
+			velocity.y = move_toward(velocity.y, SWIM_UP, 900.0 * dt)
+	else:
+		velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
 	_coyote_t = COYOTE if is_on_floor() else _coyote_t - dt
 	_buffer_t = JUMP_BUFFER if (not frozen and Input.is_action_just_pressed("jump")) else _buffer_t - dt
 	if _buffer_t > 0 and _coyote_t > 0:
@@ -140,7 +156,7 @@ func _move(dt: float, dir: float) -> void:
 	if _hurt_t > 0.0:
 		pass                       # knocked back: no control for a moment
 	elif dir != 0:
-		velocity.x = move_toward(velocity.x, dir * SPEED, ACCEL * dt)
+		velocity.x = move_toward(velocity.x, dir * SPEED * (WATER_DRAG if in_water else 1.0), ACCEL * dt)
 	else:
 		velocity.x = move_toward(velocity.x, 0, FRICTION * dt)
 	var fall_speed := velocity.y
@@ -149,6 +165,40 @@ func _move(dt: float, dir: float) -> void:
 		_land_t = 0.16
 		Sfx.play("land", global_position + Vector2(0, HALF_HEIGHT), -4.0 if fall_speed > 400 else -10.0)
 		kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), clampf(fall_speed / 350.0, 0.4, 1.5))
+
+
+## Water: you float and swim (slower, hold jump to rise), and run out of breath with your head
+## under. Lava: it burns, and throws you up out of it.
+func _liquids(dt: float) -> void:
+	var body := world.liquid_at(global_position)
+	var head := world.liquid_at(global_position + Vector2(0, -14))
+	var feet := world.liquid_at(global_position + Vector2(0, HALF_HEIGHT - 2))
+	var was := in_water
+	in_water = body.y == Liquids.WATER and body.x > 0.4
+	if in_water and not was and velocity.y > 120.0:
+		Sfx.play("land", global_position, -10.0)          # splash
+		kicked_dust.emit(global_position, 0.8)
+	var under := head.y == Liquids.WATER and head.x > 0.5
+	if under:
+		breath = maxf(breath - dt, 0.0)
+		if breath == 0.0:
+			_drown_t -= dt
+			if _drown_t <= 0.0:
+				_drown_t = 1.0
+				_invuln_t = 0.0
+				hurt(1, global_position + Vector2(0, 10))
+	else:
+		breath = minf(breath + dt * 3.0, BREATH)
+		_drown_t = 0.0
+	breath_changed.emit(breath / BREATH)
+	_lava_t -= dt
+	if (feet.y == Liquids.LAVA and feet.x > 0.2) or (body.y == Liquids.LAVA and body.x > 0.2):
+		if _lava_t <= 0.0:
+			_lava_t = LAVA_HURT_EVERY
+			_invuln_t = 0.0
+			hurt(1, global_position + Vector2(0, 20))
+			velocity.y = JUMP_V * 0.9
+			Sfx.play("sizzle", global_position)
 
 
 ## A quick dodge roll the way you're moving (or facing): fast, low, and nothing can hurt you.
@@ -371,6 +421,8 @@ func _animate(dt: float) -> void:
 		want = "hurt"
 	elif _roll_t > 0.0:
 		want = "roll"
+	elif in_water and not is_on_floor():
+		want = "swim"
 	elif rope:
 		want = "climb"
 	elif not is_on_floor():

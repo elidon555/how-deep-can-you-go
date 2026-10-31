@@ -212,6 +212,11 @@ func _update_heat(dt: float) -> void:
 	if drilling and chew_mat >= 0:
 		heat += HEAT_FROM_CUTTING[chew_mat] * (2.0 if speed == Speed.FULL else 1.0) * dt
 	heat = move_toward(heat, ambient, COOLING * dt)
+	var under := world.liquid_at(global_position + Vector2(0, 100))     # what the head sits in
+	if under.y == Liquids.LAVA and under.x > 0.2:
+		heat += 14.0 * dt
+	elif under.y == Liquids.WATER and under.x > 0.2:
+		heat -= 8.0 * dt
 	heat = clampf(heat, 0.0, HEAT_MAX)
 	if heat >= HEAT_MAX and not overheated:
 		overheated = true

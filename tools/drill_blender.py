@@ -39,13 +39,15 @@ COLORS = {
     "console": "#3b4048", "screen": "#0c1a1c", "slot": "#121316", "knob_r": "#c8322a",
     "knob_g": "#3fae5a", "knob_y": "#d0a03f", "furnace": "#2c2a2c", "furnace_lit": "#4a4446",
     "fire": "#ff8a2a", "fire_hot": "#ffd27a", "coal": "#242228", "bench": "#6b4a2e", "seat": "#5a3a2a",
+    "tank": "#3e6a78", "tank_dark": "#2a4a56", "coolant": "#5fd4e8", "gauge_flat": "#d8d4c4",
+    "valve": "#c8322a", "frost": "#d8eef4",
     "bench_dark": "#4a3320", "iron": "#7d8591", "tool": "#9aa3b2", "handle": "#7a5636",
     "cabinet": "#d8d4cc", "cross": "#c8322a",
 }
 RUSTY = {"steel": ("rust", 0.63), "steel_dark": ("rust_dark", 0.62), "back_steel": ("back_rust", 0.68),
          "furnace": ("rust_dark", 0.66), "soot": ("rust_dark", 0.7)}
 STRIPES = {"hazard": ("hazard_y", "hazard_k", 6.0)}     # 45 degree stripes, period in px
-UNLIT = {"lamp", "fire", "fire_hot", "screen"}          # stay at full colour in the clay pass
+UNLIT = {"lamp", "fire", "fire_hot", "screen", "gauge_flat"}          # stay at full colour in the clay pass
 
 # ---------------------------------------------------------------- scene setup
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -548,6 +550,41 @@ for x in (1.8, 9.2):
 rect(2.6, -14.2, 3.8, -12.2, "knob_r", -2.2, -0.2)                   # triggers
 rect(8.4, -14.2, 9.6, -12.2, "knob_r", -2.2, -0.2)
 sprite("gunner", -11, -34, 22, 34)
+
+# coolant: a riveted tank with a pressure gauge on top (flat pale face, 8 px: the game draws the
+# needle), a sight glass, pipes to the floor and up, a big red valve wheel, frost on the pipes
+rod(0, -2, 0, -29, 7.0, "tank", d=0, verts=20)                       # tank
+for y in (-27, -15, -4):
+    rod(0, y - 0.8, 0, y + 0.8, 7.5, "tank_dark", d=0, verts=20)     # bands
+bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=10, radius=7.0, location=(0, 0, 29))
+o = bpy.context.active_object
+o.scale = (1, 1, 0.35)
+add(o, "tank", smooth=True)                                         # domed top
+rect(-1.6, -27, 1.6, -17, "steel_dark", -7.6, -6.2)                  # sight glass frame
+rect(-0.8, -23, 0.8, -18, "coolant", -7.9, -7.4)                     # coolant level
+rod(0, -31, 0, -33, 1.2, "steel_dark", d=0)                          # gauge stalk
+disc(0, -34.5, 4.8, "brass", -2, 1, 20)                              # gauge bezel
+disc(0, -34.5, 4.0, "gauge_flat", -2.6, -1.8, 24)                    # flat face, 8 px
+rect(-12, -1.5, 12, 0, "steel_dark", -8, 8)                          # foot plate
+rod(7, -10, 10.5, -10, 1.3, "steel", d=0)                            # outlet pipe and elbow down
+rod(10.5, -10, 10.5, -1.5, 1.3, "steel", d=0)
+rod(-7, -24, -10.5, -24, 1.3, "steel", d=0)                          # inlet from above
+rod(-10.5, -24, -10.5, -39.5, 1.3, "steel", d=0)
+for x, y in ((10.5, -10), (10.5, -5), (-10.5, -24), (-10.5, -31)):  # frost crusting the cold pipes
+    stud(x, y, 1.7, "frost", -0.4)
+stud(9, -10, 1.3, "frost", -0.6)
+stud(-9, -24, 1.2, "frost", -0.6)
+torus_x, torus_y = 0, -12                                             # big red valve wheel on the front
+bpy.ops.mesh.primitive_torus_add(major_radius=3.8, minor_radius=0.7, major_segments=16, minor_segments=6,
+                                 location=(torus_x, -9.5, -torus_y), rotation=(math.radians(90), 0, 0))
+add(bpy.context.active_object, "valve", smooth=True)
+for k in range(3):
+    a = k * math.pi / 3
+    rod(torus_x - 3.6 * math.cos(a), torus_y - 3.6 * math.sin(a), torus_x + 3.6 * math.cos(a),
+        torus_y + 3.6 * math.sin(a), 0.45, "valve", d=-9.5, verts=6)
+disc(torus_x, torus_y, 1.1, "steel_dark", -10.5, -8, 10)
+rod(0, -12, 0, -12.1, 1.0, "steel_dark", d=-7.5)
+sprite("coolant", -12, -40, 24, 40)
 
 # ================================================================ hull turrets: harpoon cannons
 # A fixed armoured mount on each side wall with the gun pivoting at (+-102, -30). Rendered at 16

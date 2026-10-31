@@ -1,0 +1,30 @@
+{
+ "cell_w": 24,
+ "cell_h": 24,
+ "columns": 6,
+ "anims": {
+  "fly": {
+   "row": 0,
+   "frames": 6
+  },
+  "dive": {
+   "row": 1,
+   "frames": 2
+  },
+  "hang": {
+   "row": 2,
+   "frames": 2
+  },
+  "die": {
+   "row": 3,
+   "frames": 2
+  }
+ },
+ "anchor": "cell centre = body centre for fly / dive / die[0]",
+ "hang_feet_px": [
+  12,
+  2
+ ],
+ "die_floor_px": 22,
+ "note": "hang: the feet grip the ceiling at hang_feet_px (x, top row); die frame 1 lies on the floor line die_floor_px"
+}

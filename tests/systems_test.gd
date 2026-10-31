@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _sonar_and_worm()
 	await _mouse_aim()
 	await _rope_climb()
+	await _liquids()
 	await _crawler_fight()
 	await _boulder()
 	Progress.money = saved_money
@@ -274,6 +275,62 @@ func _arena(y_cell: int) -> void:
 		ch.int_dirty = true
 		ch.col_dirty = true
 	w._flush()
+
+
+## Water pours out of a pocket you open, swims / takes your breath; water meets lava -> rock.
+func _liquids() -> void:
+	w.ensure_generated(420 * World.CELL)
+	_arena(400)                                   # open room, floor at row 400
+	var liq: Liquids = main.liquids
+	# a water tank: cells x 40..47, rows 392..399, walled off on the right by a rock column
+	for gy in range(388, 400):
+		w.place_rock(48, gy, World.M.STONE)
+		for gx in range(40, 48):
+			liq.pour(gx, gy, 1.0, Liquids.WATER)
+	w._flush()
+	p.global_position = Vector2(56 * World.CELL, 400 * World.CELL - 19)
+	p.heal_full()
+	await _frames(20)
+	var before := w.get_liquid(52, 399)
+	for gy in range(388, 400):                    # knock the wall down
+		w.dig(Vector2(48 * World.CELL + 4, gy * World.CELL + 4), Vector2(48 * World.CELL + 4, gy * World.CELL + 4), 3.0, 50.0)
+	await _frames(60 * 3)
+	_check("opened water pours out across the floor", w.get_liquid(52, 399) > before + 0.1,
+		"%.2f -> %.2f" % [before, w.get_liquid(52, 399)])
+	# dunk the miner: fill a column over him
+	for gy in range(392, 400):
+		for gx in range(54, 60):
+			liq.pour(gx, gy, 1.0, Liquids.WATER)
+	p.global_position = Vector2(57 * World.CELL, 398 * World.CELL)
+	await _frames(30)
+	_check("in the water", p.in_water)
+	var b0 := p.breath
+	await _frames(60)
+	_check("underwater uses up breath", p.breath < b0, "%.1f -> %.1f" % [b0, p.breath])
+	# lava next to water
+	_arena(430)
+	for gx in range(60, 64):
+		liq.pour(gx, 429, 1.0, Liquids.LAVA)
+	for gy in range(424, 428):
+		liq.pour(61, gy, 1.0, Liquids.WATER)
+	w._flush()
+	p.global_position = Vector2(40 * World.CELL, 430 * World.CELL - 19)
+	var reacted := [false]
+	liq.reacted.connect(func(_pos): reacted[0] = true)
+	await _frames(60 * 2)
+	_check("water poured on lava hisses into rock", reacted[0] and w.get_fill(61, 429) >= 0.5)
+	p.heal_full()
+	await _frames(70)
+	var hp := p.health
+	for gx in range(36, 44):
+		liq.pour(gx, 429, 1.0, Liquids.LAVA)
+	await _frames(30)
+	_check("lava burns", p.health < hp, "hp %d -> %d" % [hp, p.health])
+	for gy in range(380, 440):                   # tidy up for the next test
+		for gx in range(2, World.W - 2):
+			if w.get_liquid(gx, gy) > 0.0:
+				w.set_liquid(gx, gy, 0.0, Liquids.NONE)
+	p.heal_full()
 
 
 func _crawler_fight() -> void:

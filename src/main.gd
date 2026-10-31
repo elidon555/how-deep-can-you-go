@@ -34,6 +34,7 @@ var run_time := 0.0
 var kills := 0
 var run_over := false
 var drill := Drill.new()
+var liquids := Liquids.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 
@@ -63,6 +64,11 @@ func _ready() -> void:
 
 	drill.world = world
 	add_child(drill)
+	liquids.world = world
+	liquids.drill = drill
+	world.liquids = liquids
+	add_child(liquids)
+	liquids.reacted.connect(_on_liquid_reacted)
 	drill.place(World.WIDTH_PX / 2.0)
 	drill.workbench_used.connect(_on_workbench_used)
 	drill.wrecked.connect(_on_drill_wrecked)
@@ -81,6 +87,7 @@ func _ready() -> void:
 	player.health_changed.connect(hud.set_health)
 	player.died.connect(_on_died)
 	player.bag_changed.connect(_update_bag)
+	player.breath_changed.connect(hud.set_breath)
 	player.kicked_dust.connect(fx.dust)
 	player.interactor.prompt_changed.connect(hud.set_prompt)
 	Sfx.listener = player
@@ -221,6 +228,12 @@ func _on_drill_chewed(points: Array, mat: int) -> void:
 	fx.chunks(points, mat, drill.global_position.x)
 	if player.global_position.distance_to(drill.global_position) < 260.0:
 		shake = maxf(shake, 0.18)
+
+
+## Water hit lava: hiss, steam, new rock.
+func _on_liquid_reacted(pos: Vector2) -> void:
+	fx.burst(pos, Color(0.9, 0.92, 0.95, 0.5), 8, 60.0, Vector2.UP, 60.0, 1.0, 4.0, false, -40.0)
+	Sfx.play("sizzle", pos, -4.0)
 
 
 func _on_sonar_used(p: Player) -> void:

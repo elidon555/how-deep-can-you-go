@@ -101,9 +101,10 @@ All art is generated, so it can be tweaked and rebuilt:
 | Parallax backgrounds | `python3 tools/gen_backgrounds.py` |
 | Miner sprite sheet + normal map (Blender) | `blender -b --factory-startup -P tools/miner_blender.py -- /tmp/miner && python3 tools/miner_sheet.py /tmp/miner` |
 | Crawler creature sheet + normal map + eye glow (Blender) | `blender -b --factory-startup -P tools/crawler_blender.py -- /tmp/crawler && python3 tools/crawler_sheet.py /tmp/crawler` |
-| Cave props, rope, boulder, camp stall + normal maps (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
-| Drill machine: hull, back wall, head, gripper braces, turrets, stations + normal maps (Blender) | `blender -b --factory-startup -P tools/drill_blender.py -- /tmp/drill && python3 tools/drill_sheet.py /tmp/drill` |
+| Cave props, rope, boulder, camp stall, ruined-camp props, lava pool + normal maps (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
+| Drill machine: hull, back wall, head, gripper braces, turrets, stations (helm, furnace, workbench, medkit, sonar, gunner, coolant) + normal maps (Blender) | `blender -b --factory-startup -P tools/drill_blender.py -- /tmp/drill && python3 tools/drill_sheet.py /tmp/drill` |
 | Burrowing worm: body segments + head in 16 directions + normal maps (Blender) | `blender -b --factory-startup -P tools/worm_blender.py -- /tmp/worm && python3 tools/worm_sheet.py /tmp/worm` |
+| Cave bat sheet + normal map + eye glow (Blender) | `blender -b --factory-startup -P tools/bat_blender.py -- /tmp/bat && python3 tools/bat_sheet.py /tmp/bat` |
 
 The character scripts take an optional anim list after the output dir to re-render only
 those rows (e.g. `-- /tmp/miner climb,hurt`); the sheet script still needs every frame in the dir.

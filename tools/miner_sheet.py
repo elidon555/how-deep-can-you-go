@@ -3,7 +3,7 @@
 
 Stepped (cel) shading from the clay pass, 1 px dark outline, unshaded headlamp and lantern.
 Writes assets/sprites/miner.png + miner_n.png (normal map, same layout; see
-tools/normal_maps.py), COLUMNS columns x 10 rows of 80x80, and miner.json.
+tools/normal_maps.py), COLUMNS columns x 12 rows of 80x80, and miner.json.
 Run:  python3 tools/miner_sheet.py <render_dir>
 """
 import json
@@ -23,7 +23,7 @@ CELL = 80
 COLUMNS = 12
 # the game times pickaxe hits on frame 5 of each dig row: those stay at 8 frames
 ORDER = [("idle", 8), ("run", 12), ("jump", 3), ("fall", 3), ("dig_side", 8), ("dig_down", 8), ("dig_up", 8),
-         ("land", 3), ("climb", 6), ("hurt", 3)]
+         ("land", 3), ("climb", 6), ("hurt", 3), ("roll", 6), ("swim", 6)]
 ROPE_X = 0.30      # climb rope x in miner_blender.py (world units right of the cell centre)
 OUTLINE = np.array([12, 9, 14, 255], dtype=np.uint8)
 UNLIT = [np.array(c) for c in ([255, 246, 192], [255, 179, 71])]   # headlamp, pack lantern

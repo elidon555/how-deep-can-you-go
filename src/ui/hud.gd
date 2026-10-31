@@ -25,6 +25,7 @@ var _toast := Label.new()
 var _prompt := Label.new()
 var _help := Label.new()
 var _hearts := Hearts.new()
+var _breath := Breath.new()
 var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
@@ -47,6 +48,8 @@ func _ready() -> void:
 	_label(_best, Vector2(28, 84), 24)
 	_hearts.position = Vector2(30, 122)
 	add_child(_hearts)
+	_breath.position = Vector2(30, 248)
+	add_child(_breath)
 	_label(_ore, Vector2(28, 150), 24, GOLD)
 	_label(_money, Vector2(28, 180), 24, Color("9fd88a"))
 	_label(_ropes, Vector2(28, 210), 24, Color("d9b98a"))
@@ -84,6 +87,12 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.health = health
 	_hearts.max_health = max_health
 	_hearts.queue_redraw()
+
+
+func set_breath(left: float) -> void:
+	if not is_equal_approx(left, _breath.left):
+		_breath.left = left
+		_breath.queue_redraw()
 
 
 func set_bag(p: Player) -> void:
@@ -162,6 +171,24 @@ class DrillPanel extends Control:
 		var bad := frac > 0.8 if high_is_bad else frac <= 0.25
 		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206 * clampf(frac, 0.0, 1.0), 14)),
 			Color("ff3a2a") if bad and fmod(Time.get_ticks_msec() / 1000.0, 0.5) < 0.25 else (c if not bad else Color("d04a3f")))
+
+
+## Air bubbles while underwater: they pop one by one; hidden when your breath is full.
+class Breath extends Control:
+	const BUBBLES := 8
+	var left := 1.0
+
+	func _draw() -> void:
+		if left >= 0.999:
+			return
+		for i in BUBBLES:
+			var full := float(i) < left * BUBBLES
+			var c := Vector2(i * 22 + 9, 9)
+			if full:
+				draw_circle(c, 8.0, Color(0.55, 0.8, 1.0, 0.9))
+				draw_circle(c + Vector2(-3, -3), 2.0, Color(1, 1, 1, 0.9))
+			else:
+				draw_arc(c, 7.0, 0.0, TAU, 16, Color(0.4, 0.55, 0.7, 0.5), 1.5)
 
 
 ## Pixel hearts, full or empty.
