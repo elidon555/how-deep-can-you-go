@@ -20,16 +20,19 @@ const JUMP_BUFFER := 0.12
 const CLIMB_SPEED := 110.0
 const INVULNERABLE := 1.0      # seconds after a hit
 const HALF_HEIGHT := 18.0
+const ROLL_SPEED := 270.0
+const ROLL_TIME := 0.32        # untouchable for the whole roll
+const ROLL_COOLDOWN := 0.55
 
 const SHEET := "res://assets/sprites/miner.png"
 const SHEET_INFO := "res://assets/sprites/miner.json"
 # fps and whether the animation loops; rows/frame counts come from miner.json
 const ANIM_SPEED := {
 	"idle": [4.0, true], "run": [13.0, true], "jump": [10.0, false], "fall": [6.0, true],
-	"land": [14.0, false], "climb": [9.0, true], "hurt": [10.0, false],
+	"land": [14.0, false], "climb": [9.0, true], "hurt": [10.0, false], "roll": [18.0, false],
 }
 # used while the sheet doesn't have an animation yet
-const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall"}
+const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land"}
 
 var world: World
 var pick := Pickaxe.new()
@@ -58,6 +61,9 @@ var _buffer_t := 0.0
 var _land_t := 0.0
 var _hurt_t := 0.0
 var _invuln_t := 0.0
+var _roll_t := 0.0
+var _roll_cool := 0.0
+var _roll_dir := 1
 var _last_step_frame := -1
 var _cone := PointLight2D.new()
 var _glow := PointLight2D.new()
@@ -93,11 +99,17 @@ func _physics_process(dt: float) -> void:
 		facing = int(sign(dir))
 	if rope == null and not frozen:
 		_try_grab_rope()
+	_roll_cool -= dt
+	if not frozen and rope == null and _roll_t <= 0.0 and _roll_cool <= 0.0 \
+			and Input.is_action_just_pressed("roll") and pick.kind == "":
+		_start_roll(dir)
 	if rope:
 		_climb(dt, dir)
+	elif _roll_t > 0.0:
+		_roll(dt)
 	else:
 		_move(dt, dir)
-	if not frozen:
+	if not frozen and _roll_t <= 0.0:
 		pick.update(dt, dir)
 		if Input.is_action_just_pressed("rope"):
 			rope_requested.emit(global_position + Vector2(0, HALF_HEIGHT))
@@ -136,6 +148,29 @@ func _move(dt: float, dir: float) -> void:
 		_land_t = 0.16
 		Sfx.play("land", global_position + Vector2(0, HALF_HEIGHT), -4.0 if fall_speed > 400 else -10.0)
 		kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), clampf(fall_speed / 350.0, 0.4, 1.5))
+
+
+## A quick dodge roll the way you're moving (or facing): fast, low, and nothing can hurt you.
+func _start_roll(dir: float) -> void:
+	_roll_dir = int(sign(dir)) if dir != 0 else facing
+	facing = _roll_dir
+	_roll_t = ROLL_TIME
+	_roll_cool = ROLL_TIME + ROLL_COOLDOWN
+	_anim_t = 0.0
+	Sfx.play("roll", global_position, -6.0)
+	kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), 0.6)
+
+
+func _roll(dt: float) -> void:
+	_roll_t -= dt
+	var k := _roll_t / ROLL_TIME             # fast at first, easing out
+	velocity.x = _roll_dir * ROLL_SPEED * (0.4 + 0.6 * k)
+	velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
+	move_and_slide()
+
+
+func is_rolling() -> bool:
+	return _roll_t > 0.0
 
 
 ## W / Up next to a rope grabs it (instead of jumping); so does Down while falling past one.
@@ -242,7 +277,7 @@ func lose_bag() -> void:
 # ---------------------------------------------------------------- health
 
 func hurt(damage: int, from: Vector2) -> void:
-	if _invuln_t > 0.0 or health <= 0:
+	if _invuln_t > 0.0 or _roll_t > 0.0 or health <= 0:
 		return
 	health = maxi(health - damage, 0)
 	_invuln_t = INVULNERABLE
@@ -332,6 +367,8 @@ func _animate(dt: float) -> void:
 		want = dig
 	elif _hurt_t > 0.0:
 		want = "hurt"
+	elif _roll_t > 0.0:
+		want = "roll"
 	elif rope:
 		want = "climb"
 	elif not is_on_floor():

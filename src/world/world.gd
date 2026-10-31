@@ -16,18 +16,25 @@ const C := 32                   # chunk size in cells (code uses >>5 / &31)
 const CHUNK_PX := C * CELL
 const WIDTH_PX := W * CELL
 const R_INT := 5                # how far (cells) the "deep inside rock" darkening reaches
-enum M { DIRT, STONE, HARD, BEDROCK }
-const HARDNESS := [1.0, 2.6, 5.5, INF]
-const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924")]
+enum M { DIRT, STONE, HARD, BEDROCK, CRYSTAL, MAGMA }
+const HARDNESS := [1.0, 2.6, 5.5, INF, 3.8, 6.5]
+const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924"), Color("7a58b0"), Color("3a2420")]
+const MAT_NAMES := ["dirt", "stone", "hard", "bedrock", "crystal", "magma"]
+# Depth layers (m). Their boundaries wander with noise, so every world is different.
+const CRYSTAL_FROM := 150.0     # the crystal caverns
+const CRYSTAL_TO := 300.0
+const MAGMA_FROM := 400.0       # the magma layer
+const LAYER_WOBBLE := 30.0      # how far (m) a boundary drifts up/down across the world
 # name, value, nugget colour, glow colour, found from depth (m). Metals sell; coal is drill fuel.
 const ORES := [
 	["copper", 1, Color("d9824a"), Color("ff9c5a"), 0.0],
 	["silver", 3, Color("c9d3e0"), Color("e8f2ff"), 40.0],
 	["gold", 8, Color("f2c14e"), Color("ffd36a"), 110.0],
+	["amethyst", 15, Color("b07ae8"), Color("e2b8ff"), 150.0],
 	["coal", 0, Color("26252b"), Color("9aa0ab"), 0.0],
 ]
-const METALS := 3      # ORES[0..2]
-const COAL := 3
+const METALS := 4      # ORES[0..3] sell; the rest are fuel
+const COAL := 4
 
 class Chunk:
 	var key: Vector2i
@@ -37,6 +44,9 @@ class Chunk:
 	var img: Image
 	var tex_fill: ImageTexture
 	var tex_mat: ImageTexture
+	var tex_mat2: ImageTexture        # second material map: crystal, magma
+	var glows := false                # has crystal / magma, gets a glow pass
+	var glow_rect: ColorRect
 	var rect: ColorRect
 	var shape: ConcavePolygonShape2D
 	var vis_dirty := false    # only fill values changed -> re-upload texture
@@ -57,6 +67,9 @@ var noise_surf := FastNoiseLite.new()
 var rng := RandomNumberGenerator.new()
 var terrain_shader: Shader = preload("res://src/world/terrain.gdshader")
 var tx := {}
+var glow_tx := {}
+var terrain_glow_shader: Shader = preload("res://src/world/terrain_glow.gdshader")
+var noise_layer := FastNoiseLite.new()
 var deco_tex := {}
 var props := {}                 # name -> [texture, glow texture or null]
 var flicker := []               # lantern lights
@@ -65,9 +78,14 @@ const PROP_NAMES := ["lantern", "beam", "crystal_p", "crystal_t", "skeleton", "r
 
 
 func _ready() -> void:
-	for n in ["dirt", "stone", "hard", "bedrock"]:
-		tx["t_" + n] = load("res://assets/terrain/%s.png" % n)
-		tx["n_" + n] = load("res://assets/terrain/%s_n.png" % n)
+	for n in MAT_NAMES:
+		var f: String = n if ResourceLoader.exists("res://assets/terrain/%s.png" % n) else "hard"   # art not made yet
+		var key: String = "bed" if n == "bedrock" else n                                          # shader names
+		tx["t_" + key] = load("res://assets/terrain/%s.png" % f)
+		tx["n_" + key] = load("res://assets/terrain/%s_n.png" % f)
+	for n in ["crystal", "magma"]:
+		var g := "res://assets/terrain/%s_glow.png" % n
+		glow_tx["g_" + n] = load(g) if ResourceLoader.exists(g) else null
 	_make_decor_textures()
 	for p in PROP_NAMES:
 		var g := "res://assets/props/%s_glow.png" % p
@@ -82,6 +100,8 @@ func _ready() -> void:
 	noise_mat.seed = rng.randi()
 	noise_mat.frequency = 0.006
 	noise_surf.seed = rng.randi()
+	noise_layer.seed = rng.randi()
+	noise_layer.frequency = 0.004
 	noise_surf.frequency = 0.01
 	ensure_generated(CHUNK_PX * 4)
 
@@ -117,6 +137,8 @@ func _gen_chunk(key: Vector2i) -> void:
 			var v := _gen_cell(key.x * C + i, key.y * C + j)
 			ch.fill[j * C + i] = v.x
 			ch.mat[j * C + i] = int(v.y)
+			if int(v.y) >= M.CRYSTAL:
+				ch.glows = true
 	ch.rect = ColorRect.new()
 	ch.rect.position = Vector2(key) * CHUNK_PX
 	ch.rect.size = Vector2(CHUNK_PX, CHUNK_PX)
@@ -128,6 +150,19 @@ func _gen_chunk(key: Vector2i) -> void:
 	mat.set_shader_parameter("origin", ch.rect.position)
 	ch.rect.material = mat
 	add_child(ch.rect)
+	if ch.glows:      # crystals and hot cracks glow: same shape, drawn again on the bloom layer
+		var g := ColorRect.new()
+		g.position = ch.rect.position
+		g.size = ch.rect.size
+		g.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var gm := ShaderMaterial.new()
+		gm.shader = terrain_glow_shader
+		for k in glow_tx:
+			gm.set_shader_parameter(k, glow_tx[k])
+		gm.set_shader_parameter("origin", ch.rect.position)
+		g.material = gm
+		glow_root.add_child(g)
+		ch.glow_rect = g
 	var body := StaticBody2D.new()
 	body.position = ch.rect.position
 	var cs := CollisionShape2D.new()
@@ -151,13 +186,26 @@ func _gen_cell(gx: int, gy: int) -> Vector2:
 	var t := 0.2 - minf(depth / 800.0, 0.08) + maxf(0.0, 8.0 - depth) * 0.15
 	var fill := clampf(0.5 + (t - noise_cave.get_noise_2d(px, py)) * 5.0, 0.0, 1.0)
 	fill = minf(fill, clampf((py - surf) / CELL + 0.5, 0.0, 1.0))
+	return Vector2(fill, _gen_mat(px, py, depth))
+
+
+## Rock type: soil turning to stone and hard rock with depth, then the crystal caverns, deep
+## basalt, and the magma layer. Layer boundaries wander with noise.
+func _gen_mat(px: float, py: float, depth: float) -> int:
 	var m := noise_mat.get_noise_2d(px, py) * 0.5 + 0.5
+	var d := depth + noise_layer.get_noise_1d(px) * LAYER_WOBBLE + noise_layer.get_noise_2d(px, py) * 8.0
+	if d >= MAGMA_FROM:
+		return M.HARD if m > 0.78 else M.MAGMA
+	if d >= CRYSTAL_TO:
+		return M.MAGMA if m < clampf((d - CRYSTAL_TO) / 400.0, 0.0, 0.2) else M.HARD
+	if d >= CRYSTAL_FROM:
+		return M.HARD if m > 0.72 else M.CRYSTAL
 	var mat := M.DIRT
 	if m < clampf((depth - 4.0) / 110.0, 0.0, 0.85):
 		mat = M.STONE
 	if m < clampf((depth - 50.0) / 250.0, 0.0, 0.7):
 		mat = M.HARD
-	return Vector2(fill, mat)
+	return mat
 
 
 ## Ore, bones, glowing mushrooms and worms.
@@ -562,8 +610,10 @@ func _build_images(ch: Chunk) -> void:
 			dist[k] = d
 	var data := PackedByteArray()
 	data.resize(n * n * 4)
-	var mdata := PackedByteArray()
+	var mdata := PackedByteArray()      # one-hot dirt, stone, hard, bedrock
 	mdata.resize(n * n * 4)
+	var mdata2 := PackedByteArray()     # one-hot crystal, magma
+	mdata2.resize(n * n * 4)
 	for j in n:
 		for i in n:
 			var gx := ch.key.x * C - 1 + i
@@ -573,17 +623,27 @@ func _build_images(ch: Chunk) -> void:
 			data[k + 1] = int(clampf((dist[(j + R_INT) * ext + i + R_INT] - 1.0) / R_INT, 0.0, 1.0) * 255.0)
 			data[k + 2] = int(_crack(get_fill(gx, gy), get_dmg(gx, gy)) * 255.0)
 			data[k + 3] = 255
-			mdata[k + get_mat(gx, gy)] = 255
+			var mt := get_mat(gx, gy)
+			if mt < M.CRYSTAL:
+				mdata[k + mt] = 255
+			else:
+				mdata2[k + mt - M.CRYSTAL] = 255
 	ch.img = Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, data)
 	var mimg := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, mdata)
+	var mimg2 := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, mdata2)
 	if ch.tex_fill == null:
 		ch.tex_fill = ImageTexture.create_from_image(ch.img)
 		ch.tex_mat = ImageTexture.create_from_image(mimg)
-		ch.rect.material.set_shader_parameter("fill_map", ch.tex_fill)
-		ch.rect.material.set_shader_parameter("mat_map", ch.tex_mat)
+		ch.tex_mat2 = ImageTexture.create_from_image(mimg2)
+		for r in [ch.rect, ch.glow_rect]:
+			if r:
+				r.material.set_shader_parameter("fill_map", ch.tex_fill)
+				r.material.set_shader_parameter("mat_map", ch.tex_mat)
+				r.material.set_shader_parameter("mat_map2", ch.tex_mat2)
 	else:
 		ch.tex_fill.update(ch.img)
 		ch.tex_mat.update(mimg)
+		ch.tex_mat2.update(mimg2)
 
 
 func _build_collision(ch: Chunk) -> void:

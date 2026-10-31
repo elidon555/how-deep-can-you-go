@@ -6,7 +6,7 @@ class_name Fx
 ## Where bursts go: `lit` is darkened by the cave lighting, `glow` blooms.
 var lit: Node
 var glow: Node
-const HIT_SOUND := ["hit_dirt", "hit_stone", "hit_hard", "bonk"]   # by World.M material
+const HIT_SOUND := ["hit_dirt", "hit_stone", "hit_hard", "bonk", "crystal_hit", "hit_hard"]   # by World.M
 
 var hitstop_enabled := true
 var _hitstop_id := 0
@@ -28,12 +28,17 @@ func impact(pos: Vector2, mat: int, broke: int, kind: String, facing: int) -> vo
 	var rock: Color = World.COLORS[mat]
 	burst(pos, rock.lightened(0.15), 4 + broke, 130.0, away, 55.0, 0.5, 2.5, false, 600.0, true)
 	flash(pos, Color(1.6, 1.4, 1.1) if kind != "bonk" else Color(1.0, 0.9, 0.8), 7.0 if broke > 0 else 5.0)
-	if mat == World.M.STONE or mat == World.M.HARD:
+	if mat == World.M.STONE or mat == World.M.HARD or mat == World.M.MAGMA:
 		var n := 3 if broke > 0 else 7     # pick bouncing off hard rock: more sparks
 		burst(pos, Color(2.4, 1.9, 1.1), n, 220.0, away, 70.0, 0.22, 1.0, true)
+	if mat == World.M.CRYSTAL:             # glowing shards
+		burst(pos, Color(1.6, 1.1, 2.6), 6 + broke, 180.0, away, 80.0, 0.5, 1.6, true, 400.0, true)
+	if mat == World.M.MAGMA and broke > 0:
+		burst(pos, Color(2.6, 1.0, 0.3), 4, 60.0, Vector2.UP, 50.0, 0.9, 1.4, true, -60.0)   # embers
+		Sfx.play("sizzle", pos, -8.0)
 	if broke > 0:
 		dust(pos, 1.0)
-		Sfx.play("break", pos, -6.0)
+		Sfx.play("crystal_break" if mat == World.M.CRYSTAL else "break", pos, -6.0)
 	Sfx.play("bonk" if kind == "bonk" else HIT_SOUND[mat], pos, -2.0)
 	hitstop(0.06 if broke > 0 else 0.035)
 

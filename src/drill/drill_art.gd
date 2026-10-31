@@ -26,6 +26,7 @@ var _heads := [PointLight2D.new(), PointLight2D.new()]
 var _smoke := CPUParticles2D.new()
 var _sparks := CPUParticles2D.new()   # off the cutters while biting rock
 var _grit := CPUParticles2D.new()     # rock dust blown up the gap beside the hull
+var _steam := CPUParticles2D.new()    # coolant flush
 
 
 func _ready() -> void:
@@ -108,6 +109,15 @@ func _ready() -> void:
 	_grit.initial_velocity_min = 20.0
 	_grit.initial_velocity_max = 50.0
 	_grit.gravity = Vector2(0, 20)
+	_particles(_steam, Vector2(0, Drill.TOP - 2), Vector2(70, 2), 60, 1.6, Color(0.9, 0.92, 0.95, 0.55), 6.0, false)
+	_steam.one_shot = true
+	_steam.explosiveness = 0.8
+	_steam.direction = Vector2(0, -1)
+	_steam.spread = 50.0
+	_steam.initial_velocity_min = 40.0
+	_steam.initial_velocity_max = 110.0
+	_steam.gravity = Vector2(0, -20)
+	drill.vented.connect(func(): _steam.restart())
 
 
 func _process(dt: float) -> void:
@@ -120,6 +130,9 @@ func _process(dt: float) -> void:
 	_smoke.emitting = drill.speed != Drill.Speed.STOP and drill.fuel > 0.0
 	_sparks.emitting = drill.drilling and (drill.chew_mat == World.M.STONE or drill.chew_mat == World.M.HARD)
 	position = drill.judder
+	# running hot: the hull glows red (a colour change, the art itself doesn't move)
+	var hot := clampf((drill.heat - 55.0) / 45.0, 0.0, 1.0)
+	_frame.modulate = Color(1.0 + hot * 0.6, 1.0 - hot * 0.25, 1.0 - hot * 0.35)
 	_grit.emitting = drill.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames

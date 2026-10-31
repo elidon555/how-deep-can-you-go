@@ -1,9 +1,8 @@
 shader_type canvas_item;
+#include "res://src/world/terrain_common.gdshaderinc"
 // Smooth terrain: the dig grid (fill_map, bilinear) becomes an organic contour.
 // Distance to the edge drives outline, mossy/lit top lips, dark undersides, bevels.
 
-uniform sampler2D fill_map : filter_linear, repeat_disable;  // R = fill, G = depth inside rock, B = cracks
-uniform sampler2D mat_map : filter_linear, repeat_disable;   // one-hot: dirt, stone, hard, bedrock
 uniform sampler2D t_dirt : filter_nearest, repeat_enable;
 uniform sampler2D t_stone : filter_nearest, repeat_enable;
 uniform sampler2D t_hard : filter_nearest, repeat_enable;
@@ -12,13 +11,11 @@ uniform sampler2D n_dirt : filter_nearest, repeat_enable;
 uniform sampler2D n_stone : filter_nearest, repeat_enable;
 uniform sampler2D n_hard : filter_nearest, repeat_enable;
 uniform sampler2D n_bed : filter_nearest, repeat_enable;
-uniform float cells = 32.0;
-uniform float cell_px = 8.0;
-uniform vec2 origin;
+uniform sampler2D t_crystal : filter_nearest, repeat_enable;
+uniform sampler2D n_crystal : filter_nearest, repeat_enable;
+uniform sampler2D t_magma : filter_nearest, repeat_enable;
+uniform sampler2D n_magma : filter_nearest, repeat_enable;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-vec2 fuv(vec2 local) { return (local / cell_px + 1.0) / (cells + 2.0); }
-float F(vec2 local) { return texture(fill_map, fuv(local)).r; }
 
 // Crack network: edges of a small Voronoi pattern. More damage = wider and more of it.
 float cracks(vec2 wp, float dmg) {
@@ -56,19 +53,21 @@ void fragment() {
 	vec2 n = gl > 0.0005 ? -g / gl : vec2(0.0, -1.0); // points toward open air (y down)
 
 	// pick one material per pixel (dithered at borders, keeps it crisp)
-	vec4 w = texture(mat_map, fuv(local));
-	float h = hash(floor(wp));
-	w += vec4(h, fract(h * 13.7), fract(h * 71.3), fract(h * 37.9)) * 0.3;
+	int mat = pick_mat(local, wp);
 	vec2 tuv = wp / 128.0;
 	vec3 col; vec3 nm; vec3 rim;
-	if (w.r >= w.g && w.r >= w.b && w.r >= w.a) {
+	if (mat == 0) {
 		col = texture(t_dirt, tuv).rgb; nm = texture(n_dirt, tuv).rgb; rim = vec3(0.25, 0.38, 0.16);
-	} else if (w.g >= w.b && w.g >= w.a) {
+	} else if (mat == 1) {
 		col = texture(t_stone, tuv).rgb; nm = texture(n_stone, tuv).rgb; rim = vec3(0.52, 0.58, 0.66);
-	} else if (w.b >= w.a) {
+	} else if (mat == 2) {
 		col = texture(t_hard, tuv).rgb; nm = texture(n_hard, tuv).rgb; rim = vec3(0.4, 0.3, 0.5);
-	} else {
+	} else if (mat == 3) {
 		col = texture(t_bed, tuv).rgb; nm = texture(n_bed, tuv).rgb; rim = vec3(0.16, 0.14, 0.2);
+	} else if (mat == 4) {
+		col = texture(t_crystal, tuv).rgb; nm = texture(n_crystal, tuv).rgb; rim = vec3(0.62, 0.46, 0.9);
+	} else {
+		col = texture(t_magma, tuv).rgb; nm = texture(n_magma, tuv).rgb; rim = vec3(0.5, 0.22, 0.12);
 	}
 
 	col *= mix(1.0, 0.38, s.g);   // rock gets darker deep inside

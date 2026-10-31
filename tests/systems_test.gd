@@ -26,6 +26,8 @@ func _ready() -> void:
 	await _drill_ride()
 	await _furnace_and_workbench()
 	await _breach()
+	await _heat()
+	_layers()
 	await _sonar_and_worm()
 	await _mouse_aim()
 	await _rope_climb()
@@ -137,6 +139,33 @@ func _breach() -> void:
 	_check("holding E repairs it", d.get_breaches().is_empty())
 
 
+func _heat() -> void:
+	var d: Drill = main.drill
+	d.speed = Drill.Speed.SLOW
+	d.heat = Drill.HEAT_MAX + 5.0
+	await _frames(5)
+	_check("overheated drill stalls", d.overheated and not d.drilling)
+	_station(Stations.Coolant).interact(p)
+	await _frames(5)
+	_check("venting coolant cools it and it restarts", d.heat < Drill.HEAT_RESUME and not d.overheated,
+		"heat %.0f" % d.heat)
+	d.speed = Drill.Speed.STOP
+
+
+## Layers are generated from noise: count the rock types in bands at different depths.
+func _layers() -> void:
+	var counts := {}
+	for band: float in [200.0, 460.0]:
+		var c := {}
+		for i in 400:
+			var px := randf_range(40.0, World.WIDTH_PX - 40.0)
+			var mat := w._gen_mat(px, band * World.METER + randf_range(-60, 60), band)
+			c[mat] = c.get(mat, 0) + 1
+		counts[band] = c
+	_check("crystal caverns around 200 m", counts[200.0].get(World.M.CRYSTAL, 0) > 200, str(counts[200.0]))
+	_check("magma layer around 460 m", counts[460.0].get(World.M.MAGMA, 0) > 200, str(counts[460.0]))
+
+
 func _sonar_and_worm() -> void:
 	var d: Drill = main.drill
 	_station(Stations.Sonar).interact(p)
@@ -167,7 +196,8 @@ func _sonar_and_worm() -> void:
 		await get_tree().physics_frame
 	Input.action_release("dig")
 	p.aim_override = Vector2.INF
-	_check("turret bolts kill the worm", not is_instance_valid(w) or w.state == Worm.State.DEAD)
+	_check("turret bolts kill the worm", not is_instance_valid(w) or w.state == Worm.State.DEAD,
+		"hull %.0f, breaches %d, heat %.0f" % [d.hull, d.get_breaches().size(), d.heat])
 	Input.action_press("interact")
 	await _frames(2)
 	Input.action_release("interact")
@@ -221,7 +251,12 @@ func _rope_climb() -> void:
 			why = "hp %d, on rope %s" % [p.health, p.rope != null]
 			break
 	Input.action_release("up")
-	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, %s" % [p.global_position.y, why])
+	var top := -1.0
+	for r in get_tree().get_nodes_in_group("rope"):
+		if not r is DrillLadder:
+			top = r.top_y()
+	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, floor %s ceil %s" % [
+		p.global_position.y, top, why, p.is_on_floor(), p.is_on_ceiling()])
 	await _hold(["right"], 0.5)
 	await _frames(30)
 	_check("stepped off onto the surface", p.rope == null and p.is_on_floor(), "y=%.0f" % p.global_position.y)
@@ -271,6 +306,18 @@ func _crawler_fight() -> void:
 		await get_tree().physics_frame
 	Input.action_release("dig")
 	_check("crawler dies to the pickaxe", not is_instance_valid(c) or c.state == Crawler.State.DEAD)
+	# a roll: fast, and nothing hurts you while rolling
+	await _frames(60)                     # (the last swing finishes, the hit's grace period ends)
+	var x0 := p.global_position.x
+	var hp2 := p.health
+	Input.action_press("roll")
+	await _frames(2)
+	Input.action_release("roll")
+	_check("rolling", p.is_rolling())
+	p.hurt(1, p.global_position + Vector2(20, 0))
+	_check("can't be hurt mid-roll", p.health == hp2)
+	await _frames(25)
+	_check("a roll covers ground", absf(p.global_position.x - x0) > 40.0, "%.0f px" % absf(p.global_position.x - x0))
 
 
 func _boulder() -> void:

@@ -3,10 +3,11 @@
 
 Pure numpy (scipy.signal.lfilter is used only to speed up filtering if installed).
 Fixed seeds, so every run writes identical files. One-shots get a short fade in/out
-and are peak-normalized to -3 dBFS. The loops (amb_cave, amb_deep, drill_loop,
-drill_idle, turret_turn, worm_burrow) are built periodic (every sine, LFO and noise spectrum has a whole number
-of cycles per loop), so they loop seamlessly; ambience peaks at -12 dBFS, drill_loop
-at -10, drill_idle at -16, turret_turn at -18, worm_burrow at -12.
+and are peak-normalized to -3 dBFS. Loops (amb_*, drill_loop, drill_idle, turret_turn,
+worm_burrow, bat_flap, lava_bubble, music_*) are built periodic: every sine, LFO and
+noise spectrum has a whole number of cycles per loop, events near the end wrap round
+to the start, and reverb runs in steady state, so they loop seamlessly. Each loop is
+normalized to its own quieter peak (see the finish_loop() call in its function).
 
 Run:  python3 tools/gen_sfx.py
 """
@@ -530,18 +531,34 @@ def loop_grains(n, rng, count, fmin, fmax, **kw):
     return g[:n] + g[n:]
 
 
-def bump(t, centre, width):
+def fold(x, n):
+    """Wrap a buffer longer than the loop back onto it (events near the end ring on into the start)."""
+    out = np.zeros(n)
+    for i in range(0, len(x), n):
+        seg = x[i:i + n]
+        out[:len(seg)] += seg
+    return out
+
+
+def periodic(x, effect):
+    """Run a non-circular effect (reverb, IIR filter) on a loop in steady state:
+    process three copies back to back and keep the last one."""
+    n = len(x)
+    return effect(np.tile(x, 3))[2 * n:]
+
+
+def bump(t, centre, width, T=LOOP):
     """Smooth event envelope that wraps around the loop boundary."""
-    d = (t - centre + LOOP / 2) % LOOP - LOOP / 2
+    d = (t - centre + T / 2) % T - T / 2
     return np.where(np.abs(d) < width / 2, np.cos(np.pi * d / width) ** 2, 0.0)
 
 
-def drone(t, rng, voices):
+def drone(t, rng, voices, T=LOOP):
     """Detuned low sines [(freq, amp, lfo cycles)], each slowly wobbling in pitch and level."""
     out = np.zeros(len(t))
     for f, a, m in voices:
         ph = rng.uniform(0, TAU)
-        out += a * np.sin(TAU * per(f) * t + ph + 0.2 * lfo(t, 1, ph)) * (0.65 + 0.35 * lfo(t, m, ph))
+        out += a * np.sin(TAU * per(f, T) * t + ph + 0.2 * lfo(t, 1, ph, T)) * (0.65 + 0.35 * lfo(t, m, ph, T))
     return unit(out)
 
 
@@ -903,6 +920,250 @@ def rumble(v=0):
     return finish(x, fade_out=0.2)
 
 
+# ----------------------------------------------------------------------------- bats / crystals / lava
+
+def pings(n, rng, count, t0, t1, fmin, fmax, decay=(0.01, 0.03), fade=1e9, skew=1.0):
+    """Little glassy tinks: a decaying partial plus a faint inharmonic overtone (kept below Nyquist)."""
+    out = np.zeros(n)
+    for _ in range(count):
+        tc = t0 + (t1 - t0) * rng.random() ** skew
+        f = np.exp(rng.uniform(np.log(fmin), np.log(fmax)))
+        d = rng.uniform(*decay)
+        a = rng.uniform(0.3, 1.0) * np.exp(-(tc - t0) / fade)
+        fs, ds, amps = [f, 2.7 * f], [d, 0.4 * d], [a, 0.3 * a]
+        keep = [i for i in range(2) if fs[i] < 18000]
+        out += modes(n, [fs[i] for i in keep], [ds[i] for i in keep], [amps[i] for i in keep], delay=tc)
+    return out
+
+
+def bat_screech(v=0):
+    rng = np.random.default_rng(5000 + v)
+    n = secs(0.35)
+    t = times(n)
+    chitter, tc, m = np.zeros(n), 0.0, secs(0.018)
+    while tc < 0.22:                                                   # fast downward chirps
+        f = rng.uniform(4000, 8000)
+        chirp = osc(glide(f, 0.65 * f, m, 0.015)) * env(m, 0.001, 0.005)
+        chirp += 0.3 * osc(glide(2 * f, 1.3 * f, m, 0.015)) * env(m, 0.001, 0.003)
+        chitter += rng.uniform(0.4, 1.0) * place(n, tc, chirp)
+        tc += rng.uniform(0.018, 0.04)
+    f0 = np.interp(t, [0, 0.08, 0.35], [2600, 3400, 2400]) * (1 + 0.15 * (v - 1))
+    f0 = f0 * (1 + 0.06 * np.sin(TAU * 55 * t) + 0.03 * wobble(n, rng, 120))
+    screech = biquad(harmonic(f0, tilt=0.8, fmax=14000), "bp", 5000, 1.2)
+    screech = np.tanh(2 * unit(screech)) * np.clip((t - 0.06) / 0.01, 0, 1) * np.exp(-np.maximum(t - 0.12, 0) / 0.06)
+    return finish(biquad(0.7 * unit(chitter) + 0.6 * screech, "hp", 1500), fade_out=0.04)
+
+
+def bat_flap(v=0):
+    rng = np.random.default_rng(5100 + v)
+    T = 0.6
+    n = secs(T)
+    buf, m = np.zeros(2 * n), secs(0.04)
+    for _ in range(9):                                                 # nine wings, each its own rate
+        rate = per(rng.uniform(8, 15), T)
+        phase, fc, a = rng.uniform(0, 1 / rate), rng.uniform(500, 1600), rng.uniform(0.4, 1.0)
+        for k in range(int(round(rate * T))):
+            tk = phase + k / rate + rng.uniform(-0.003, 0.003)
+            down = biquad(noise(m, rng) * env(m, 0.004, 0.012), "bp", fc * rng.uniform(0.9, 1.1), 0.8)
+            up = biquad(noise(m, rng) * env(m, 0.003, 0.006), "bp", 1.8 * fc, 1.0)
+            snap = biquad(noise(m, rng) * env(m, 0.0003, 0.001), "hp", 3000)
+            buf += a * (place(2 * n, tk, down + 0.25 * snap) + 0.4 * place(2 * n, tk + 0.5 / rate, up))
+    return finish_loop(fold(buf, n), -14.0)
+
+
+def crystal_hit(v=0):
+    rng = np.random.default_rng(5200 + v)
+    n = secs(0.6)
+    f = [1760, 1980, 2350][v] * np.array([1, 1.5, 2.76, 3.9, 5.4]) * (1 + rng.uniform(-0.01, 0.01, 5))
+    decays, amps = [0.45, 0.3, 0.22, 0.14, 0.08], np.array([1, 0.5, 0.6, 0.35, 0.25])
+    chime = unit(modes(n, f, decays, amps) + modes(n, f * 1.004, decays, 0.6 * amps))  # twins shimmer
+    crack = burst(n, rng, 0.0002, 0.003, "hp", 3000)
+    shards = unit(grains(n, rng, 12, 0.0, 0.06, 4000, 10000, length=(0.0005, 0.002), decay=0.03, q=3))
+    sparkle = unit(pings(n, rng, 12, 0.02, 0.4, 6000, 11000, decay=(0.015, 0.025), fade=0.2))
+    tap = osc(glide(400, 250, n, 0.02)) * env(n, 0.001, 0.015)
+    x = 0.7 * chime + 0.7 * crack + 0.3 * shards + 0.2 * sparkle + 0.2 * tap
+    return finish(reverb(x, size=1.2, fb=0.7, mix=0.3, damp=8000), fade_out=0.12)
+
+
+def crystal_break(v=0):
+    rng = np.random.default_rng(5300 + v)
+    n = secs(0.8)
+    crack = burst(n, rng, 0.0003, 0.01, "hp", 2000) + 0.6 * burst(n, rng, 0.0005, 0.03, "bp", 3500, 0.8)
+    shards = unit(pings(n, rng, 60, 0.0, 0.6, 3000, 11000, decay=(0.02, 0.08), fade=0.25, skew=1.6))
+    chunks = unit(pings(n, rng, 10, 0.0, 0.3, 1400, 3000, decay=(0.08, 0.2), fade=0.2, skew=1.3))
+    grit = unit(grains(n, rng, 40, 0.0, 0.5, 3000, 9000, length=(0.0005, 0.002), decay=0.2))
+    thud = osc(glide(200, 120, n, 0.03)) * env(n, 0.001, 0.03)
+    x = 0.8 * unit(crack) + 0.7 * shards + 0.5 * chunks + 0.25 * grit + 0.2 * thud
+    return finish(reverb(x, size=1.2, fb=0.7, mix=0.3, damp=8000), fade_out=0.15)
+
+
+def lava_bubble(v=0):
+    rng = np.random.default_rng(5400 + v)
+    T = 3.0
+    t = times(secs(T))
+    n = len(t)
+    buf = np.zeros(2 * n)
+    for _ in range(26):                                                # bubbles swell, then pop
+        t0, f, L = rng.uniform(0, T), rng.uniform(60, 180), rng.uniform(0.05, 0.12)
+        m = secs(L + 0.05)
+        tm = times(m)
+        blorp = osc(glide(f, 1.8 * f, m, L)) * np.clip(tm / L, 0, 1) ** 1.5 * np.clip((L + 0.005 - tm) / 0.005, 0, 1)
+        pop = burst(m, rng, 0.0005, 0.006, "bp", rng.uniform(800, 2000), 0.8, delay=L)
+        buf += rng.uniform(0.4, 1.0) * place(2 * n, t0, 0.8 * blorp + 0.5 * pop)
+    rumble = loop_noise(n, rng, lowband(60)) * (0.7 + 0.3 * lfo(t, 2, 0.0, T))
+    hiss = loop_noise(n, rng, band(5000, 1.0)) * (0.6 + 0.4 * loop_rough(n, rng, 3))
+    goop = loop_noise(n, rng, band(250, 0.5)) * loop_rough(n, rng, 6)  # thick churning
+    return finish_loop(unit(fold(buf, n)) + 0.35 * rumble + 0.06 * hiss + 0.2 * goop, -14.0)
+
+
+def sizzle(v=0):
+    rng = np.random.default_rng(5500 + v)
+    n = secs(0.5)
+    t = times(n)
+    amp = np.clip(t / 0.01, 0, 1) * np.exp(-t / 0.18) * (0.6 + 0.4 * rough(n, rng, 30))
+    hiss = biquad(biquad(noise(n, rng) * amp, "hp", 2500), "bp", 6000, 0.6)
+    fry = grains(n, rng, 80, 0.0, 0.4, 2500, 9000, length=(0.0005, 0.002), decay=0.15, q=1.0)
+    tss = burst(n, rng, 0.001, 0.02, "bp", 4000, 0.8)
+    return finish(unit(hiss) + 0.5 * unit(fry) + 0.3 * tss, fade_out=0.08)
+
+
+def steam_vent(v=0):
+    rng = np.random.default_rng(5600 + v)
+    n = secs(1.2)
+    t = times(n)
+    amp = np.clip(t / 0.02, 0, 1) * (1 - 0.3 * np.clip((t - 0.1) / 0.6, 0, 1)) * np.exp(-np.maximum(t - 0.7, 0) / 0.15)
+    src = noise(n, rng)
+    hiss = biquad(src, "hp", 1500) + 0.7 * biquad(src, "bp", 5000, 0.5)
+    whistle = svf(noise(n, rng), glide(3400, 3000, n, 1.0), q=15)       # pressure whistle
+    roar = biquad(noise(n, rng), "lp", 300)
+    valve = modes(n, [900, 1500, 2300], [0.04, 0.03, 0.02], [1.0, 0.6, 0.4]) + burst(n, rng, 0.0002, 0.002, "hp", 3000)
+    jet = (unit(hiss) + 0.25 * unit(whistle) + 0.2 * unit(roar)) * amp * (1 + 0.12 * wobble(n, rng, 20))
+    return finish(jet + 0.3 * unit(valve), fade_out=0.15)
+
+
+def heat_alarm(v=0):
+    n, m = secs(1.0), secs(0.055)
+    tm = times(m)
+    x = np.zeros(n)
+    for i in range(8):                                                 # eight beeps, climbing
+        f0 = 900 * 2 ** (i / 8) * (1 + 0.08 * tm / 0.055)
+        beep = np.tanh(2.5 * unit(harmonic(f0, tilt=1.0, fmax=9000)))
+        x += place(n, i * 0.11, beep * np.clip(tm / 0.003, 0, 1) * np.clip((0.055 - tm) / 0.005, 0, 1))
+    return finish(reverb(x, size=1.0, fb=0.5, mix=0.15), fade_out=0.05)
+
+
+# ----------------------------------------------------------------------------- player / items / ui
+
+def roll(v=0):
+    rng = np.random.default_rng(5700 + v)
+    n = secs(0.3)
+    p = np.arange(n) / n
+    amp = np.sin(np.pi * p ** 0.8) ** 2
+    whoosh = unit(svf(noise(n, rng) * amp * (0.6 + 0.4 * rough(n, rng, 40)), 400 + 1400 * np.sin(np.pi * p ** 0.9) ** 2, q=1.2))
+    gear = unit(grains(n, rng, 8, 0.05, 0.25, 2500, 6000, decay=1.0, q=5))       # buckles, tools
+    scuff = burst(n, rng, 0.002, 0.03, "bp", 2000, 0.8, delay=0.12) + 0.6 * burst(n, rng, 0.002, 0.03, "bp", 1700, 0.8, delay=0.22)
+    gravel = unit(grains(n, rng, 25, 0.1, 0.28, 800, 5000, decay=0.1))
+    m = n - secs(0.13)
+    thump = place(n, 0.13, osc(glide(120, 70, m, 0.03)) * env(m, 0.002, 0.03))
+    return finish(0.7 * whoosh + 0.2 * gear + 0.4 * scuff + 0.35 * gravel + 0.3 * thump, fade_out=0.05)
+
+
+def note_pickup(v=0):
+    rng = np.random.default_rng(5800 + v)
+    n = secs(0.6)
+    rustle = biquad(noise(n, rng) * env(n, 0.02, 0.12) * rough(n, rng, 40) ** 2, "bp", 3500, 0.7)
+    crinkle = grains(n, rng, 20, 0.0, 0.3, 3000, 9000, length=(0.0005, 0.002), decay=0.15, q=2)
+    tone = (osc(220, n) + 0.6 * osc(261.63, n) + 0.15 * osc(440, n)) * env(n, 0.06, 0.25, delay=0.08)  # A3 + C4
+    x = 0.6 * unit(rustle) + 0.3 * unit(crinkle) + 0.5 * unit(tone)
+    return finish(reverb(x, size=1.5, fb=0.7, mix=0.3), fade_out=0.1)
+
+
+def crate_open(v=0):
+    rng = np.random.default_rng(5900 + v)
+    n, pop_t = secs(0.6), 0.27
+    t = times(n)
+    clicks, tc = np.zeros(n), 0.02                                     # nails creaking out
+    while tc < 0.25:
+        clicks[secs(tc)] += rng.uniform(0.4, 1.0)
+        tc += 1 / ((30 + 90 * tc / 0.25) * rng.uniform(0.7, 1.3))
+    creak = formants(clicks, [(350 * (1 + 0.2 * t), 8, 1.0), (900 * (1 + 0.15 * t), 10, 0.6), (1800, 10, 0.25)])
+    pop = modes(n, [300, 720, 1150], [0.04, 0.025, 0.015], [1.0, 0.6, 0.3], delay=pop_t)
+    pop = unit(pop) + burst(n, rng, 0.0005, 0.01, "bp", 900, 1.0, delay=pop_t)
+    rattle = np.zeros(n)
+    for _ in range(3):                                                 # coins and odds inside
+        f = rng.uniform(2800, 3800) * np.array([1, 1.47, 2.13])
+        rattle += rng.uniform(0.3, 0.7) * modes(n, f, [0.06, 0.04, 0.03], [1.0, 0.6, 0.4], delay=rng.uniform(0.32, 0.5))
+        tk = rng.uniform(0.3, 0.5)
+        rattle += rng.uniform(0.3, 0.7) * (modes(n, [rng.uniform(500, 900)], [0.02], [1.0], delay=tk)
+                                           + 0.5 * burst(n, rng, 0.0005, 0.004, "bp", 1200, 1.0, delay=tk))
+    return finish(reverb(0.6 * unit(creak) + 0.8 * unit(pop) + 0.4 * unit(rattle), mix=0.15), fade_out=0.08)
+
+
+def ui_soft(seed, dur, notes, sweep):
+    """Gentle menu blip: two soft sine notes [(t0, Hz)] over a breathy whoosh."""
+    rng = np.random.default_rng(seed)
+    n = secs(dur)
+    x = np.zeros(n)
+    for t0, f in notes:
+        m = n - secs(t0)
+        x += place(n, t0, (osc(f, m) + 0.2 * osc(2 * f, m)) * env(m, 0.005, 0.05))
+    whoosh = unit(svf(noise(n, rng) * env(n, 0.03, 0.05), glide(sweep[0], sweep[1], n, dur * 0.6), q=1.0))
+    return finish(biquad(unit(x) + 0.25 * whoosh, "lp", 5000), fade_out=0.06)
+
+
+def ui_open(v=0):
+    return ui_soft(6000 + v, 0.3, [(0.0, 523.25), (0.06, 783.99)], (600, 2500))
+
+
+def ui_close(v=0):
+    return ui_soft(6100 + v, 0.25, [(0.0, 783.99), (0.06, 523.25)], (2500, 600))
+
+
+# ----------------------------------------------------------------------------- music loops
+
+MUSIC_LOOP = 32.0  # seconds
+
+
+def bell(f, decay=4.0):
+    """Distant church-ish bell (hum, prime, minor tierce, quint, nominal, ...) as a 12 s strike."""
+    ratios = np.array([0.5, 1.0, 1.2, 1.5, 2.0, 2.74])
+    decays = decay * np.array([1.2, 1.0, 0.7, 0.5, 0.4, 0.2])
+    return modes(secs(12), f * ratios, decays, [0.4, 1.0, 0.5, 0.3, 0.45, 0.2])
+
+
+def music_title(v=0):
+    rng = np.random.default_rng(6200 + v)
+    T = MUSIC_LOOP
+    t = times(secs(T))
+    n = len(t)
+    hum = drone(t, rng, [(55.0, 1.0, 1), (55.0625, 0.7, 2), (82.41, 0.45, 3), (110.0, 0.12, 1)], T)
+    buf = np.zeros(2 * n)
+    for t0, f, a in [(1.0, 440.0, 1.0), (5.0, 523.25, 0.8), (8.0, 659.25, 0.7),     # A4 C5 E5
+                     (14.0, 587.33, 0.75), (21.0, 493.88, 0.7), (25.5, 440.0, 0.85)]:  # D5 B4 A4
+        buf += a * place(2 * n, t0, bell(f))
+    bells = spectral(fold(buf, n), lowband(2500))                     # far away
+    bells = periodic(bells, lambda x: reverb(x, size=3.0, fb=0.8, mix=0.8, damp=2500))
+    wind = (loop_noise(n, rng, band(600, 0.7)) * (0.5 + 0.5 * lfo(t, 3, 1.0, T)) ** 3
+            + loop_noise(n, rng, band(1400, 0.4)) * (0.5 + 0.5 * lfo(t, 5, 2.0, T)) ** 4)
+    return finish_loop(hum + 0.45 * unit(bells) + 0.08 * unit(wind), -14.0)
+
+
+def music_deep(v=0):
+    rng = np.random.default_rng(6300 + v)
+    T = MUSIC_LOOP
+    t = times(secs(T))
+    n = len(t)
+    sub = drone(t, rng, [(36.71, 1.0, 1), (36.84, 0.8, 2), (55.0, 0.3, 1), (73.42, 0.12, 3)], T)
+    swells = np.zeros(n)
+    for c, w, chord in [(9.0, 8.0, [146.83, 155.56, 207.65]),         # D3 Eb3 Ab3
+                        (24.0, 7.0, [110.0, 116.54, 164.81])]:        # A2 Bb2 E3
+        tones = sum(np.sin(TAU * per(f, T) * t + 0.3 * lfo(t, 2, i, T)) + 0.15 * np.sin(TAU * 2 * per(f, T) * t)
+                    for i, f in enumerate(chord))
+        swells += tones * bump(t, c, w, T) ** 1.5
+    breath = loop_noise(n, rng, band(200, 0.6)) * (0.5 + 0.5 * lfo(t, 4, 0.3, T)) ** 4
+    return finish_loop(sub + 0.3 * unit(swells) + 0.05 * breath, -16.0)
+
+
 # ----------------------------------------------------------------------------- table / main
 
 def variants(name, fn, count):
@@ -951,6 +1212,21 @@ SOUNDS = {
     "worm_hit": worm_hit,
     "worm_die": worm_die,
     "rumble": rumble,
+    **variants("bat_screech", bat_screech, 3),
+    "bat_flap": bat_flap,
+    **variants("crystal_hit", crystal_hit, 3),
+    "crystal_break": crystal_break,
+    "lava_bubble": lava_bubble,
+    "sizzle": sizzle,
+    "steam_vent": steam_vent,
+    "heat_alarm": heat_alarm,
+    "roll": roll,
+    "note_pickup": note_pickup,
+    "crate_open": crate_open,
+    "ui_open": ui_open,
+    "ui_close": ui_close,
+    "music_title": music_title,
+    "music_deep": music_deep,
 }
 
 

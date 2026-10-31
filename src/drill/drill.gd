@@ -5,7 +5,8 @@ class_name Drill
 ## front gives way; side reamers widen the shaft so there's a gap beside the hull. Braces grip
 ## the walls while it's still. The ladders fold away when everyone is aboard and telescope down
 ## when anyone is outside. Carries whoever is inside; burns fuel; falls if it breaks into a
-## cave (and crashes if it falls far).
+## cave (and crashes if it falls far). It heats up with depth and while chewing hard rock or
+## magma; overheated it stalls and its hull cooks until someone vents coolant.
 ## Damage (boulders, crawlers, crashes) opens hull breaches that leak until repaired.
 ## All of the machine's state lives here and stations only call these methods, so co-op can
 ## sync it from one place later.
@@ -18,6 +19,7 @@ signal chewed(points: Array, mat: int)   # rock that just broke off at the cutte
 signal sonar_used(player: Player)
 signal gunner_changed(player: Player)    # someone sat down at / got up from the turrets (or null)
 signal bolt_hit(pos: Vector2, on_rock: bool)
+signal vented                            # coolant flushed (steam)
 
 enum Speed { STOP, SLOW, FULL }
 const SPEED_NAMES := ["Stopped", "Slow", "Full"]
@@ -45,6 +47,14 @@ const BITE := 1.0 / 7.0        # the cutters bite in pulses (s), not a smooth er
 # side reamers at the hull's bottom corners widen the shaft beyond the hull (the crew's gap)
 const REAMERS := [Vector2(-104, 60), Vector2(104, 60)]
 const REAMER_R := 16.0
+# heat: ambient heat rises with depth; cutting adds heat (per rock type); overheated it stalls
+const HEAT_MAX := 100.0
+const HEAT_RESUME := 65.0      # an overheated drill restarts once it's back under this
+const HEAT_FROM_CUTTING := [0.6, 1.2, 2.2, 0.0, 2.0, 6.0]   # per second, by World.M rock
+const COOLING := 1.6           # per second, toward the ambient heat
+const OVERHEAT_DAMAGE := 1.5   # hull per second while overheated
+const VENT := 45.0             # what one coolant flush takes off
+const VENT_RECHARGE := 6.0
 const BRACE_TIME := 0.35       # seconds for the braces to grip / let go
 const LADDER_TIME := 0.9       # seconds for the ladders to fold away / come down
 const MAX_BREACHES := 4
@@ -68,6 +78,10 @@ var _bite_power := 0.0         # cutting power saved up until the next bite
 var _bite_clock := 0.0
 var judder := Vector2.ZERO     # the hull shakes a pixel when a bite breaks rock (art reads it)
 var chew_mat := -1             # what the cutters are biting (sparks only off stone)
+var heat := 0.0
+var overheated := false
+var vent_ready_at := 0.0       # seconds (Time) when the coolant can flush again
+var _alarm_t := 0.0
 var gunner: Player = null      # who is on the turrets
 var _seated_at := 0            # msec; the key that sat you down mustn't also stand you up
 var turrets: Array[Turret] = []
@@ -100,12 +114,13 @@ func _ready() -> void:
 	add_child(head)
 	art.drill = self
 	add_child(art)
-	_add_station(Stations.Furnace.new(), Vector2(-64, FLOOR))
-	_add_station(Stations.Workbench.new(), Vector2(-30, FLOOR))
-	_add_station(Stations.Medkit.new(), Vector2(-30, -16))
-	_add_station(Stations.Sonar.new(), Vector2(2, FLOOR))
-	_add_station(Stations.GunnerSeat.new(), Vector2(30, FLOOR))
-	_add_station(Stations.Helm.new(), Vector2(62, FLOOR))
+	_add_station(Stations.Furnace.new(), Vector2(-66, FLOOR))
+	_add_station(Stations.Workbench.new(), Vector2(-36, FLOOR))
+	_add_station(Stations.Medkit.new(), Vector2(-36, -16))
+	_add_station(Stations.Sonar.new(), Vector2(-6, FLOOR))
+	_add_station(Stations.GunnerSeat.new(), Vector2(18, FLOOR))
+	_add_station(Stations.Coolant.new(), Vector2(42, FLOOR))
+	_add_station(Stations.Helm.new(), Vector2(68, FLOOR))
 	for side in [-1, 1]:          # harpoon turrets on the hull's sides, above the doors
 		var t := Turret.new()
 		t.side = side
@@ -154,7 +169,8 @@ func apply_upgrades() -> void:
 func _physics_process(dt: float) -> void:
 	if is_wrecked:
 		return
-	var running := speed != Speed.STOP and fuel > 0.0
+	_update_heat(dt)
+	var running := speed != Speed.STOP and fuel > 0.0 and not overheated
 	_bite_t -= dt
 	judder = Vector2.ZERO
 	if running:
@@ -186,6 +202,43 @@ func _physics_process(dt: float) -> void:
 	var leaks := get_breaches().size()
 	if leaks > 0:
 		damage_quietly(BREACH_LEAK * leaks * dt)
+
+
+## Ambient heat grows with depth (none until ~200 m, about 60 down in the magma); cutting adds
+## heat by rock type; it cools toward ambient. Past HEAT_MAX it stalls and the hull cooks.
+func _update_heat(dt: float) -> void:
+	var depth := global_position.y / World.METER
+	var ambient := clampf((depth - 200.0) / 350.0, 0.0, 1.0) * 60.0
+	if drilling and chew_mat >= 0:
+		heat += HEAT_FROM_CUTTING[chew_mat] * (2.0 if speed == Speed.FULL else 1.0) * dt
+	heat = move_toward(heat, ambient, COOLING * dt)
+	heat = clampf(heat, 0.0, HEAT_MAX)
+	if heat >= HEAT_MAX and not overheated:
+		overheated = true
+		Sfx.play("drill_stall", global_position)
+		changed.emit()
+	elif overheated and heat < HEAT_RESUME:
+		overheated = false
+		changed.emit()
+	if overheated:
+		damage_quietly(OVERHEAT_DAMAGE * dt)
+	_alarm_t -= dt
+	if heat > 80.0 and _alarm_t <= 0.0:
+		_alarm_t = 2.5
+		Sfx.play("heat_alarm", global_position, -6.0, 0.0)
+
+
+## The coolant station: a big flush of steam takes the heat down, then it recharges.
+func vent_coolant() -> bool:
+	var now := Time.get_ticks_msec() / 1000.0
+	if now < vent_ready_at:
+		return false
+	vent_ready_at = now + VENT_RECHARGE
+	heat = maxf(heat - VENT, 0.0)
+	Sfx.play("steam_vent", global_position)
+	vented.emit()
+	changed.emit()
+	return true
 
 
 ## Grinding while it bites rock, idling while it runs without, silent when stopped.

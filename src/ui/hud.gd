@@ -129,35 +129,39 @@ class DrillPanel extends Control:
 		if drill == null:
 			return
 		var font := get_theme_default_font()
-		draw_rect(Rect2(0, 0, 280, 128), Color(0.04, 0.035, 0.05, 0.75))
-		draw_rect(Rect2(0, 0, 280, 128), Color("8a6a42"), false, 2.0)
+		draw_rect(Rect2(0, 0, 280, 146), Color(0.04, 0.035, 0.05, 0.75))
+		draw_rect(Rect2(0, 0, 280, 146), Color("8a6a42"), false, 2.0)
 		var depth := maxi(0, int(drill.global_position.y / World.METER))
 		draw_string(font, Vector2(12, 26), "DRILL  %d m" % depth, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color("f4e3c1"))
 		var sp: String = Drill.SPEED_NAMES[drill.speed]
 		if drill.fuel <= 0.0:
 			sp = "NO FUEL"
+		elif drill.overheated:
+			sp = "OVERHEATED"
 		draw_string(font, Vector2(150, 26), sp, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
-			Color("d04a3f") if drill.fuel <= 0.0 else Color("3fd0c0"))
+			Color("d04a3f") if drill.fuel <= 0.0 or drill.overheated else Color("3fd0c0"))
 		if Drill.infinite_fuel():
 			draw_string(font, Vector2(12, 56), "Fuel   unlimited", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e0a23a"))
 		else:
 			_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
 		_bar(Vector2(12, 66), "Hull", drill.hull / drill.max_hull, Color("c8c8d0"))
+		_bar(Vector2(12, 88), "Heat", drill.heat / Drill.HEAT_MAX, Color("e05a3a"), true)
 		var leaks := drill.get_breaches().size()
 		if leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:
-			draw_string(font, Vector2(12, 112), "BREACH x%d — hold E on it to repair" % leaks,
+			draw_string(font, Vector2(12, 132), "BREACH x%d — hold E on it to repair" % leaks,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff5a4a"))
 		elif absf(away) > 3.0:
 			var where := "above" if away < 0.0 else "below"
-			draw_string(font, Vector2(12, 112), "You are %d m %s the drill" % [absi(int(away)), where],
+			draw_string(font, Vector2(12, 132), "You are %d m %s the drill" % [absi(int(away)), where],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9c9b0"))
 
-	func _bar(at: Vector2, label: String, frac: float, c: Color) -> void:
+	func _bar(at: Vector2, label: String, frac: float, c: Color, high_is_bad := false) -> void:
 		var font := get_theme_default_font()
 		draw_string(font, at + Vector2(0, 16), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("d9c9b0"))
 		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206, 14)), Color(0.1, 0.1, 0.12))
+		var bad := frac > 0.8 if high_is_bad else frac <= 0.25
 		draw_rect(Rect2(at + Vector2(50, 4), Vector2(206 * clampf(frac, 0.0, 1.0), 14)),
-			c if frac > 0.25 else Color("d04a3f"))
+			Color("ff3a2a") if bad and fmod(Time.get_ticks_msec() / 1000.0, 0.5) < 0.25 else (c if not bad else Color("d04a3f")))
 
 
 ## Pixel hearts, full or empty.

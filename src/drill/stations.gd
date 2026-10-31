@@ -236,3 +236,32 @@ class GunnerSeat extends Station:
 		draw_rect(Rect2(-8, -24, 4, 10), Color("4a3320"))        # backrest
 		draw_rect(Rect2(3, -46, 3, 26), Color("3a3f47"))         # periscope
 		draw_rect(Rect2(-2, -24, 12, 3), Color("59606b"))        # grips
+
+
+## Flushes coolant through the drill: heat down, a burst of steam, then it recharges.
+class Coolant extends Station:
+	var _tex: Texture2D = Art.lit(Stations.DIR + "coolant.png") if ResourceLoader.exists(Stations.DIR + "coolant.png") else null
+
+	func prompt(_p: Player) -> String:
+		var wait := drill.vent_ready_at - Time.get_ticks_msec() / 1000.0
+		if wait > 0.0:
+			return "Coolant recharging (%ds)" % ceili(wait)
+		return "E: vent coolant (heat %d%%)" % int(drill.heat)
+
+	func interact(_p: Player) -> void:
+		drill.vent_coolant()
+
+	func _process(_dt: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var gauge := Vector2(0, -30)       # where the gauge face sits on the tank
+		if _tex:
+			Stations.stand(self, _tex)
+		else:
+			draw_rect(Rect2(-9, -38, 18, 38), Color("3f6070"))
+			draw_rect(Rect2(-9, -38, 18, 38), Color("0c0a0e"), false, 1.0)
+			draw_circle(gauge, 4.0, Color("d8d4cc"))
+		var a := lerpf(PI * 0.75, PI * 2.25, drill.heat / Drill.HEAT_MAX)     # needle: cold .. hot
+		var col := Color("c8322a") if drill.heat > 80.0 else Color("1a1a1e")
+		draw_line(gauge, gauge + Vector2(cos(a), sin(a)) * 3.5, col, 1.0)
