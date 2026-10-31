@@ -2,8 +2,8 @@
 
 A 2D side-view game about a crew boring toward the Earth's core in a giant drilling machine,
 "Barotrauma, but a drill": keep the machine running, go outside to dig for coal and ore,
-repair the hull, and don't get left behind. Single player for now; co-op is planned and the
-code is built for it (no system assumes there's only one player).
+repair the hull, and don't get left behind. Local co-op works (a second player on a controller);
+online co-op is next, and no system assumes there's only one player.
 
 Built with **Godot 4.7**.
 
@@ -26,6 +26,11 @@ Or open `project.godot` in the Godot editor and press F5.
 | Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
 | Use a station (helm, furnace, workbench, medkit) / hold to repair a breach | E | B |
 | Restart | R | Back |
+
+**Local co-op:** a second player presses **Start** on a controller to join (that controller is
+theirs; player one keeps keyboard + mouse). The camera frames both. A downed player is back in
+the drill after a few seconds while the other plays on; the run ends when everyone is down or
+the drill is wrecked. Menus answer either player.
 
 Bindings live in `src/game/controls.gd`.
 
@@ -86,6 +91,7 @@ All game code is in `src/` (one system per file):
 | `player.gd` | Movement, roll, ropes/ladders, swimming + breath, health, bag, animation, lamp |
 | `pickaxe.gd` | Swings: aim (mouse direction or keys), room check, impact, hitting creatures |
 | `interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
+| `player_input.gd` | One player's controls (action prefix, mouse or not); all player input goes through it |
 | **creatures/** | `crawler.gd`, `bat.gd`, `worm.gd`, `watcher.gd`, `spawner.gd` (who spawns where) |
 | **fx/** | `fx.gd` (particles, impacts, hit-stop), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
 | **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / run summary / notes), `ui_style.gd` |

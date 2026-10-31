@@ -57,7 +57,7 @@ func show_note(id: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if event.is_action_pressed("interact") or event.is_action_pressed("ui_cancel") \
+	if Controls.any_pressed(event, "interact") or Controls.any_pressed(event, "ui_cancel") \
 			or (event is InputEventMouseButton and event.pressed):
 		visible = false
 		get_tree().paused = false

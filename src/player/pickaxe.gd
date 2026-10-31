@@ -63,9 +63,11 @@ func anim() -> String:
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion or event is InputEventMouseButton:
+	if not player.input.uses_mouse:
+		mouse_aim = false
+	elif event is InputEventMouseMotion or event is InputEventMouseButton:
 		mouse_aim = true
-	elif event.is_action_pressed("dig"):        # J or a controller button
+	elif player.input.is_event(event, "dig"):   # J or a controller button
 		mouse_aim = false
 
 
@@ -123,16 +125,16 @@ func _has_room() -> bool:
 ## What the held keys aim at while the dig button is down, or "" for nothing.
 ## A click counts too, even if released within the same frame.
 func _intent(dir: float) -> String:
-	if not (Input.is_action_pressed("dig") or Input.is_action_just_pressed("dig")):
+	if not (player.input.pressed("dig") or player.input.just_pressed("dig")):
 		return ""
 	if mouse_aim:
 		return _kind_towards(_target - (player.global_position + SHOULDER))
-	var down := Input.is_action_pressed("down")
+	var down := player.input.pressed("down")
 	if down and dir != 0:
 		return "dig_diag"
 	if down:
 		return "dig_down"
-	if Input.is_action_pressed("up"):
+	if player.input.pressed("up"):
 		return "dig_up"
 	return "dig_side"
 

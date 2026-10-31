@@ -27,6 +27,7 @@ var _help := Label.new()
 var _hearts := Hearts.new()
 var _breath := Breath.new()
 var _boss := BossBar.new()
+var _p2 := _p2_label()
 var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
@@ -91,6 +92,25 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.health = health
 	_hearts.max_health = max_health
 	_hearts.queue_redraw()
+
+
+## Player two's status (top right, under the drill panel).
+func set_p2(p: Player) -> void:
+	_p2.visible = true
+	_p2.text = "P2  %s   Ore %d ($%d)  Coal %d" % ["♥".repeat(maxi(p.health, 0)) if p.health > 0 else "down",
+		p.ore_count, p.ore_value, p.coal]
+
+
+func _p2_label() -> Label:
+	var l := Label.new()
+	l.visible = false
+	l.position = Vector2(1280 - 300, 176)
+	l.add_theme_font_size_override("font_size", 20)
+	l.add_theme_color_override("font_color", Color("9fd8ff"))
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 6)
+	add_child(l)
+	return l
 
 
 ## A boss health bar at the bottom of the screen; name "" hides it.

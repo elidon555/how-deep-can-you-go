@@ -49,7 +49,7 @@ func show_run(stats: Dictionary) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# Esc pauses, unless something else used it first (shop, sonar, the turret seat) or a menu
 	# is already up
-	if event.is_action_pressed("ui_cancel") and not title.visible and not pause.visible \
+	if Controls.any_pressed(event, "ui_cancel") and not title.visible and not pause.visible \
 			and not note_view.visible and not game_over.visible and can_pause.call():
 		pause.open()
 		get_viewport().set_input_as_handled()

@@ -43,6 +43,8 @@ const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll":
 var world: World
 var pick := Pickaxe.new()
 var interactor := Interactor.new()
+var input := PlayerInput.new()   # whose controls drive this player (set before adding)
+var number := 1                  # player 1, 2 ...
 # what you carry (each player has their own bag)
 var ore_count := 0
 var ore_value := 0
@@ -62,6 +64,7 @@ var anim := "idle"
 var _anims := {}               # name -> [row, frames]
 var _rope_x := 0.0             # where the hands hold the rope, px right of the sprite centre
 var _rope_last_y := 0.0
+var _snagged := false
 var _anim_t := 0.0
 var _coyote_t := 0.0
 var _buffer_t := 0.0
@@ -105,14 +108,14 @@ func _ready() -> void:
 
 
 func _physics_process(dt: float) -> void:
-	var dir := 0.0 if frozen else Input.get_axis("left", "right")
+	var dir := 0.0 if frozen else input.axis("left", "right")
 	if dir != 0:
 		facing = int(sign(dir))
 	if rope == null and not frozen:
 		_try_grab_rope()
 	_roll_cool -= dt
 	if not frozen and rope == null and _roll_t <= 0.0 and _roll_cool <= 0.0 \
-			and Input.is_action_just_pressed("roll") and pick.kind == "":
+			and input.just_pressed("roll") and pick.kind == "":
 		_start_roll(dir)
 	_liquids(dt)
 	if rope:
@@ -123,7 +126,7 @@ func _physics_process(dt: float) -> void:
 		_move(dt, dir)
 	if not frozen and _roll_t <= 0.0:
 		pick.update(dt, dir)
-		if Input.is_action_just_pressed("rope"):
+		if input.just_pressed("rope"):
 			rope_requested.emit(global_position + Vector2(0, HALF_HEIGHT))
 	_update_lamp(dt)
 	_invuln_t -= dt
@@ -139,19 +142,19 @@ func _move(dt: float, dir: float) -> void:
 	var was_on_floor := is_on_floor()
 	if in_water:          # floaty: slow sinking, hold jump to swim up
 		velocity.y = minf(velocity.y + GRAVITY * 0.25 * dt, 70.0)
-		if not frozen and Input.is_action_pressed("jump"):
+		if not frozen and input.pressed("jump"):
 			velocity.y = move_toward(velocity.y, SWIM_UP, 900.0 * dt)
 	else:
 		velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
 	_coyote_t = COYOTE if is_on_floor() else _coyote_t - dt
-	_buffer_t = JUMP_BUFFER if (not frozen and Input.is_action_just_pressed("jump")) else _buffer_t - dt
+	_buffer_t = JUMP_BUFFER if (not frozen and input.just_pressed("jump")) else _buffer_t - dt
 	if _buffer_t > 0 and _coyote_t > 0:
 		velocity.y = JUMP_V
 		_buffer_t = 0
 		_coyote_t = 0
 		Sfx.play("jump", global_position, -8.0)
 		kicked_dust.emit(global_position + Vector2(0, HALF_HEIGHT), 0.5)
-	if Input.is_action_just_released("jump") and velocity.y < 0:
+	if input.just_released("jump") and velocity.y < 0:
 		velocity.y *= 0.5
 	if _hurt_t > 0.0:
 		pass                       # knocked back: no control for a moment
@@ -229,8 +232,8 @@ func is_rolling() -> bool:
 
 ## W / Up next to a rope grabs it (instead of jumping); so does Down while falling past one.
 func _try_grab_rope() -> void:
-	var up := Input.is_action_pressed("up")
-	var down := Input.is_action_pressed("down") and not is_on_floor()
+	var up := input.pressed("up")
+	var down := input.pressed("down") and not is_on_floor()
 	if not (up or down):
 		return
 	for r: Rope in get_tree().get_nodes_in_group("rope"):
@@ -243,17 +246,25 @@ func _try_grab_rope() -> void:
 
 
 func _climb(dt: float, dir: float) -> void:
-	var v := 0.0 if frozen else Input.get_axis("up", "down")
+	var v := 0.0 if frozen else input.axis("up", "down")
 	velocity = Vector2(0, v * CLIMB_SPEED)
 	var hold_x := rope.global_position.x - _rope_x * facing     # rope in the hands, not through the body
-	global_position.x = move_toward(global_position.x, hold_x, 200.0 * dt)
+	if not _snagged:      # (snagged on a rock lip: let the slide below move him round it)
+		global_position.x = move_toward(global_position.x, hold_x, 200.0 * dt)
 	global_position.y += rope.global_position.y - _rope_last_y   # ride along if it moves (drill ladders)
 	_rope_last_y = rope.global_position.y
+	var y0 := global_position.y
 	move_and_slide()
+	# caught on the shaft wall: shift sideways (away from the rock, staying by the rope) next time
+	_snagged = v < 0.0 and global_position.y > y0 - 0.2 and get_slide_collision_count() > 0
+	if _snagged:
+		var n := get_slide_collision(0).get_normal()
+		global_position.x = clampf(global_position.x + signf(n.x) * 1.5, rope.global_position.x - 12.0,
+			rope.global_position.x + 12.0)
 	# you can climb until your feet are level with the anchor, so you can step off at the top
 	if global_position.y < rope.top_y() - HALF_HEIGHT - 6.0:
 		global_position.y = rope.top_y() - HALF_HEIGHT - 6.0
-	var jump_off := Input.is_action_just_pressed("jump") and not Input.is_action_pressed("up")
+	var jump_off := input.just_pressed("jump") and not input.pressed("up")
 	var off_bottom := global_position.y > rope.bottom_y() and v > 0
 	var step_off := dir != 0 and v == 0
 	var at_top := global_position.y < rope.top_y() - HALF_HEIGHT + 4.0
@@ -272,15 +283,20 @@ var aim_override := Vector2.INF   # tests / remote players aim without the local
 
 
 func aim_point() -> Vector2:
-	return aim_override if aim_override != Vector2.INF else get_global_mouse_position()
+	if aim_override != Vector2.INF:
+		return aim_override
+	if input.uses_mouse:
+		return get_global_mouse_position()
+	var d := Vector2(input.axis("left", "right"), input.axis("up", "down"))   # stick aims
+	return global_position + (d.normalized() if d.length() > 0.2 else Vector2(facing, 0)) * 300.0
 
 
 func wants_fire() -> bool:
-	return Input.is_action_pressed("dig")
+	return input.pressed("dig")
 
 
 func wants_leave() -> bool:
-	return Input.is_action_just_pressed("interact") or Input.is_action_just_pressed("ui_cancel")
+	return input.just_pressed("interact") or input.just_pressed("ui_cancel")
 
 
 # ---------------------------------------------------------------- bag
@@ -400,9 +416,9 @@ func _setup_lamp() -> void:
 
 func _update_lamp(dt: float) -> void:
 	var aim := 0.0 if facing > 0 else PI
-	if Input.is_action_pressed("down"):
+	if input.pressed("down"):
 		aim = PI / 2
-	elif Input.is_action_pressed("up"):
+	elif input.pressed("up"):
 		aim = -PI / 2
 	var reach := Progress.lamp_scale()
 	_cone.rotation = lerp_angle(_cone.rotation, aim, 10.0 * dt)

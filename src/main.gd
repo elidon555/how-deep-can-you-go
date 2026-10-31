@@ -34,6 +34,9 @@ var drill := Drill.new()
 var liquids := Liquids.new()
 var eye: TheEye = null              # what lives at the bottom (spawned when the world reaches it)
 var ending := false
+var players: Array[Player] = []     # player one first; a second joins with Start on a controller
+var _menu_user: Player = null       # who opened the shop / sonar (unfrozen when it closes)
+const RESPAWN_TIME := 8.0
 var notes_read := 0
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
@@ -81,18 +84,10 @@ func _ready() -> void:
 	drill.sonar_used.connect(_on_sonar_used)
 	drill.guns.bolt_hit.connect(_on_bolt_hit)
 
-	player = Player.new()
-	player.world = world
-	player.position = drill.position + Vector2(-34, Drill.FLOOR - Player.HALF_HEIGHT - 1)
-	add_child(player)
-	player.pick.struck.connect(_on_struck)
-	player.pick.hit_thing.connect(_on_hit_thing)
-	player.rope_requested.connect(_on_rope_requested)
+	player = _add_player(PlayerInput.new())
 	player.health_changed.connect(hud.set_health)
-	player.died.connect(_on_died)
 	player.bag_changed.connect(_update_bag)
 	player.breath_changed.connect(hud.set_breath)
-	player.kicked_dust.connect(fx.dust)
 	player.interactor.prompt_changed.connect(hud.set_prompt)
 	Sfx.listener = player
 
@@ -127,8 +122,8 @@ func _ready() -> void:
 	hud.add_child(sonar)
 	sonar.drill = drill
 	sonar.world = world
-	sonar.closed.connect(func(): player.frozen = false)
-	shop.closed.connect(func(): player.frozen = false)
+	sonar.closed.connect(func(): if _menu_user: _menu_user.frozen = false)
+	shop.closed.connect(func(): if _menu_user: _menu_user.frozen = false)
 	Progress.changed.connect(_on_progress_changed)
 	hud.set_health(player.health, player.max_health)
 	_update_bag()
@@ -138,6 +133,7 @@ func _ready() -> void:
 
 func _process(dt: float) -> void:
 	time += dt
+	_frame_camera(dt)
 	var depth_m := player.position.y / World.METER
 	var depth := maxi(0, int(floor(depth_m)))
 	world.ensure_generated(player.position.y + 900.0)
@@ -160,10 +156,6 @@ func _process(dt: float) -> void:
 			hud.toast(MILESTONES[m])
 	_update_light(depth, dt)
 	hud.set_drill(drill, depth_m)
-	var inside := drill.contains(player.global_position)
-	var want_zoom := ZOOM_GUNNER if drill.guns.gunner == player else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
-	var z := lerpf(cam.zoom.x, want_zoom, 3.0 * dt)
-	cam.zoom = Vector2(z, z)
 
 	shake = maxf(shake - dt * 6.0, 0.0)
 	cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake * 3.0
@@ -207,6 +199,81 @@ func _update_bag() -> void:
 
 func note_read() -> void:
 	notes_read += 1
+
+
+# ---------------------------------------------------------------- players (local co-op)
+
+## A player with every game hook wired up, standing in the drill.
+func _add_player(input: PlayerInput) -> Player:
+	var p := Player.new()
+	p.world = world
+	p.input = input
+	p.number = players.size() + 1
+	p.position = drill.position + Vector2(-34 + 24 * players.size(), Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	add_child(p)
+	if not input.uses_mouse:
+		p.pick.mouse_aim = false
+	p.pick.struck.connect(_on_struck)
+	p.pick.hit_thing.connect(_on_hit_thing)
+	p.rope_requested.connect(_on_rope_requested)
+	p.died.connect(_on_player_died.bind(p))
+	p.kicked_dust.connect(fx.dust)
+	players.append(p)
+	return p
+
+
+## Start on a controller adds player two (on that controller).
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_START \
+			and players.size() < 2 and not menus.on_title() and not run_over:
+		Controls.add_pad_player("p2_", event.device)
+		var p2 := _add_player(PlayerInput.new("p2_", false))
+		p2.health_changed.connect(func(h, m): hud.set_p2(p2))
+		p2.bag_changed.connect(func(): hud.set_p2(p2))
+		hud.set_p2(p2)
+		hud.toast("Player 2 joined!", 1.5)
+		get_viewport().set_input_as_handled()
+
+
+## One player: the camera rides along. Several: it frames them all, zooming out as they spread.
+func _frame_camera(dt: float) -> void:
+	var inside := drill.contains(player.global_position)
+	var want := ZOOM_GUNNER if drill.guns.gunner != null else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
+	if players.size() > 1:
+		if cam.get_parent() != self:
+			cam.reparent(self)
+		var lo := players[0].global_position
+		var hi := lo
+		for p in players:
+			lo = lo.min(p.global_position)
+			hi = hi.max(p.global_position)
+		cam.global_position = (lo + hi) / 2.0
+		var vs := get_viewport_rect().size
+		var spread := (hi - lo) + Vector2(160, 120)
+		want = minf(want, minf(vs.x / spread.x, vs.y / spread.y))
+		want = maxf(want, 0.9)
+	var z := lerpf(cam.zoom.x, want, 3.0 * dt)
+	cam.zoom = Vector2(z, z)
+
+
+## Down: if anyone else is still standing, you're back in the drill shortly (your bag is lost);
+## if nobody is, the run is over.
+func _on_player_died(p: Player) -> void:
+	p.lose_bag()
+	if players.all(func(q): return q.health <= 0):
+		_game_over("You died. The ore you carried is lost.")
+		return
+	hud.toast("Player %d is down. Back in the drill in %d s." % [p.number, int(RESPAWN_TIME)], 2.5)
+	p.frozen = true
+	p.visible = false
+	await get_tree().create_timer(RESPAWN_TIME).timeout
+	if run_over or not is_instance_valid(p):
+		return
+	p.global_position = drill.global_position + Vector2(0, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	p.velocity = Vector2.ZERO
+	p.heal_full()
+	p.visible = true
+	p.frozen = false
 
 
 # ---------------------------------------------------------------- the bottom
@@ -322,6 +389,7 @@ func _on_liquid_reacted(pos: Vector2) -> void:
 
 
 func _on_sonar_used(p: Player) -> void:
+	_menu_user = p
 	sonar.open()
 	p.frozen = true
 
@@ -360,6 +428,7 @@ func _on_crawler_killed(pos: Vector2) -> void:
 
 
 func _on_workbench_used(p: Player) -> void:
+	_menu_user = p
 	shop.open()
 	p.frozen = true
 	Sfx.play("ui_click", Vector2.INF)
@@ -388,11 +457,6 @@ func _on_rope_requested(feet: Vector2) -> void:
 	world.add_child(Rope.hang(world, feet))
 	Sfx.play("rope", feet)
 	_update_bag()
-
-
-func _on_died() -> void:
-	player.lose_bag()
-	_game_over("You died. The ore you carried is lost.")
 
 
 func _game_over(reason: String) -> void:

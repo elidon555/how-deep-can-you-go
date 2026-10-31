@@ -30,13 +30,13 @@ func _physics_process(dt: float) -> void:
 	var text: String = target.prompt(player)
 	var need: float = target.hold_time()
 	if need > 0.0:
-		_hold = _hold + dt if Input.is_action_pressed("interact") else 0.0
+		_hold = _hold + dt if player.input.pressed("interact") else 0.0
 		if _hold > 0.0:
 			text += "  " + "▮".repeat(int(_hold / need * 10.0)) + "▯".repeat(10 - int(_hold / need * 10.0))
 		if _hold >= need:
 			_hold = 0.0
 			target.interact(player)
-	elif Input.is_action_just_pressed("interact"):
+	elif player.input.just_pressed("interact"):
 		target.interact(player)
 	_set_prompt(text)
 

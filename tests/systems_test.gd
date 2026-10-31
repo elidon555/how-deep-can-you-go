@@ -36,6 +36,7 @@ func _ready() -> void:
 	await _liquids()
 	await _gas()
 	await _crawler_fight()
+	await _coop()
 	await _the_bottom()
 	await _boulder()
 	Progress.money = saved_money
@@ -289,12 +290,16 @@ func _rope_climb() -> void:
 	for r in get_tree().get_nodes_in_group("rope"):
 		if not r is DrillLadder:
 			top = r.top_y()
+	var cols := []
+	for i in p.get_slide_collision_count():
+		var col := p.get_slide_collision(i)
+		cols.append("%s n%s at %s" % [col.get_collider().get_class() + ":" + str(col.get_collider().name), col.get_normal().round(), (col.get_position() - p.global_position).round()])
 	var above := ""
 	for dy in [-24, -32, -40]:
 		var c := w.cell_at(p.global_position + Vector2(0, dy))
 		above += "%.1f/%d " % [w.get_fill(c.x, c.y), w.get_mat(c.x, c.y)]
-	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, ceil %s, above %s" % [
-		p.global_position.y, top, why, p.is_on_ceiling(), above])
+	_check("climbed to the top", p.global_position.y < 0.0, "y=%.0f, rope top %.0f, %s, ceil %s, above %s, frozen %s, on rope %s, hp %d, vel %s" % [
+		p.global_position.y, top, why, p.is_on_ceiling(), above, p.frozen, p.rope != null, p.health, str(cols)])
 	await _hold(["right"], 0.5)
 	await _frames(30)
 	_check("stepped off onto the surface", p.rope == null and p.is_on_floor(), "y=%.0f" % p.global_position.y)
@@ -474,6 +479,39 @@ func _flooding() -> void:
 	for k in [c, c2]:
 		for dy in range(-6, 6):
 			w.set_liquid(k.x, k.y + dy, 0.0, Liquids.NONE)
+
+
+## Local co-op: Start on a controller adds player two, who moves on their own; the camera frames
+## both; a downed player comes back in the drill while the other plays on.
+func _coop() -> void:
+	var d: Drill = main.drill
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	p.heal_full()
+	await _frames(10)
+	var start := InputEventJoypadButton.new()
+	start.button_index = JOY_BUTTON_START
+	start.device = 0
+	start.pressed = true
+	Input.parse_input_event(start)
+	await _frames(5)
+	_check("Start on a controller adds player two", main.players.size() == 2)
+	if main.players.size() < 2:
+		return
+	var p2: Player = main.players[1]
+	var x1 := p.global_position.x
+	var x2 := p2.global_position.x
+	Input.action_press("p2_right")
+	await _frames(30)
+	Input.action_release("p2_right")
+	_check("player two moves on their own", p2.global_position.x > x2 + 10.0 and absf(p.global_position.x - x1) < 1.0)
+	_check("the camera frames both", main.cam.get_parent() == main)
+	p2.hurt(99, p2.global_position + Vector2(10, 0))
+	await _frames(5)
+	_check("a downed player waits while the other plays on", not main.run_over and p2.frozen)
+	await get_tree().create_timer(8.5).timeout
+	_check("and comes back in the drill", p2.health > 0 and d.contains(p2.global_position))
+	main.players.erase(p2)
+	p2.queue_free()
 
 
 ## The bottom: the Floor can't be cut; the drill knocking on it wakes the Eye; veins shield it;

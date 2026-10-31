@@ -44,6 +44,12 @@ func _ready() -> void:
 func open() -> void:
 	visible = true
 	_refresh()
+	await get_tree().process_frame
+	for row in _rows.get_children():                # focus the first button (controllers)
+		var b: Button = row.get_child(row.get_child_count() - 1)
+		if not b.disabled:
+			b.grab_focus()
+			break
 
 
 func close() -> void:
@@ -55,7 +61,7 @@ func close() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if event.is_action_pressed("interact") or event.is_action_pressed("ui_cancel"):
+	if Controls.any_pressed(event, "interact") or Controls.any_pressed(event, "ui_cancel"):
 		close()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and not event.echo:
@@ -99,7 +105,7 @@ func _refresh() -> void:
 		b.text = "MAX" if cost < 0 else "$%d" % cost
 		b.disabled = cost < 0 or not Progress.can_afford(cost)
 		b.custom_minimum_size = Vector2(80, 0)
-		b.focus_mode = Control.FOCUS_NONE
+		b.focus_mode = Control.FOCUS_ALL        # a controller can move between the buttons
 		b.pressed.connect(_buy.bind(id))
 		row.add_child(b)
 		_rows.add_child(row)
