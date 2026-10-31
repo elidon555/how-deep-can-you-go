@@ -23,3 +23,8 @@ func interact(_p: Player) -> void:
 ## Seconds to hold E (0 = a single press).
 func hold_time() -> float:
 	return 0.0
+
+
+## Urgent things (breaches) win over stations when both are in reach.
+func priority() -> int:
+	return 0

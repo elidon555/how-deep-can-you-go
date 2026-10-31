@@ -26,6 +26,7 @@ func _ready() -> void:
 	await _drill_ride()
 	await _furnace_and_workbench()
 	await _breach()
+	await _sonar_and_worm()
 	await _mouse_aim()
 	await _rope_climb()
 	await _crawler_fight()
@@ -78,7 +79,7 @@ func _drill_ride() -> void:
 	_check("ladders fold away with everyone aboard", d.ladders_out == 0.0)
 	var down := (d.global_position.y - y0) / World.METER
 	_check("drill bores down", down > 2.0, "%.1f m in 8 s" % down)
-	if Drill.INFINITE_FUEL:
+	if Drill.infinite_fuel():
 		_check("fuel never runs out (infinite for now)", d.fuel == fuel0)
 	else:
 		_check("drill burns fuel", d.fuel < fuel0, "%.0f -> %.0f" % [fuel0, d.fuel])
@@ -136,6 +137,47 @@ func _breach() -> void:
 	_check("holding E repairs it", d.get_breaches().is_empty())
 
 
+func _sonar_and_worm() -> void:
+	var d: Drill = main.drill
+	_station(Stations.Sonar).interact(p)
+	await _frames(5)
+	_check("sonar screen opens", main.sonar.visible and p.frozen)
+	main.sonar.close()
+	await _frames(5)
+	_check("sonar closes", not main.sonar.visible and not p.frozen)
+	for b in d.get_breaches():
+		d.repair(b)
+	await _frames(2)
+	d.hull = d.max_hull
+	var w: Worm = main.spawner.spawn_worm()
+	var h := d.hull
+	for i in 60 * 20:
+		await get_tree().physics_frame
+		if d.hull < h - 5.0:
+			break
+	_check("the worm burrows over and rams the drill", d.hull < h - 5.0, "hull %.0f -> %.0f" % [h, d.hull])
+	_station(Stations.GunnerSeat).interact(p)
+	await _frames(20)
+	_check("gunner seat takes the turrets", d.gunner == p and p.frozen)
+	Input.action_press("dig")
+	for i in 60 * 25:
+		if not is_instance_valid(w) or w.state == Worm.State.DEAD:
+			break
+		p.aim_override = w.body[0]
+		await get_tree().physics_frame
+	Input.action_release("dig")
+	p.aim_override = Vector2.INF
+	_check("turret bolts kill the worm", not is_instance_valid(w) or w.state == Worm.State.DEAD)
+	Input.action_press("interact")
+	await _frames(2)
+	Input.action_release("interact")
+	await _frames(5)
+	_check("getting up from the turrets", d.gunner == null and not p.frozen)
+	for b in d.get_breaches():
+		d.repair(b)
+	d.hull = d.max_hull
+
+
 ## Mouse aiming: the cursor sets the direction (here: far off, down and to the right); the swing
 ## hits the first rock that way, and nothing in other directions.
 func _mouse_aim() -> void:
@@ -167,7 +209,8 @@ func _rope_climb() -> void:
 	Input.action_press("rope")
 	await _frames(2)
 	Input.action_release("rope")
-	_check("threw a rope", p.ropes == ropes - 1 and get_tree().get_nodes_in_group("rope").size() > 2)
+	var used := 0 if GameConfig.infinite_resources() else 1
+	_check("threw a rope", p.ropes == ropes - used and get_tree().get_nodes_in_group("rope").size() > 2)
 	await _hold(["up"], 0.1)
 	_check("grabbed the rope", p.rope != null)
 	Input.action_press("up")

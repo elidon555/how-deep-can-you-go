@@ -39,12 +39,17 @@ func cost(id: String) -> int:
 
 func buy(id: String) -> bool:
 	var c := cost(id)
-	if c < 0 or money < c:
+	if c < 0 or not can_afford(c):
 		return false
-	money -= c
+	if not GameConfig.infinite_resources():
+		money -= c
 	levels[id] = level(id) + 1
 	save()
 	return true
+
+
+func can_afford(price: int) -> bool:
+	return GameConfig.infinite_resources() or money >= price
 
 
 func add_money(amount: int) -> void:
@@ -96,7 +101,7 @@ func rope_capacity() -> int:
 # ---------------------------------------------------------------- saving
 
 func save() -> void:
-	if dry_run:
+	if dry_run or GameConfig.infinite_resources():   # free stuff doesn't stick to the real save
 		changed.emit()
 		return
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)

@@ -43,12 +43,13 @@ func _physics_process(dt: float) -> void:
 
 func _nearest() -> Node2D:
 	var best: Node2D = null
-	var best_d := REACH
+	var best_score := INF
 	for n: Node2D in get_tree().get_nodes_in_group("interactable"):
 		var d := n.global_position.distance_to(player.global_position)
-		if d < best_d and n.prompt(player) != "":
+		var score: float = d - n.priority() * 100.0       # urgent things first, then the closest
+		if d < REACH and score < best_score and n.prompt(player) != "":
 			best = n
-			best_d = d
+			best_score = score
 	return best
 
 

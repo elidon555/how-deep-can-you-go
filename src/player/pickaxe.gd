@@ -217,7 +217,8 @@ func _dig_side(c: Vector2, dir: float, amount: float) -> Dictionary:
 
 
 static func _merge(a: Dictionary, b: Dictionary) -> Dictionary:
-	return {"hit": a.hit or b.hit, "mat": a.mat if a.hit else b.mat, "broke": a.broke + b.broke}
+	return {"hit": a.hit or b.hit, "mat": a.mat if a.hit else b.mat, "broke": a.broke + b.broke,
+		"points": a.points + b.points}
 
 
 ## Swoosh behind the pick head for the strike + impact frames.

@@ -75,7 +75,7 @@ class Furnace extends Station:
 	func prompt(p: Player) -> String:
 		if p.coal > 0:
 			return "E: shovel in %d coal (+%d fuel)" % [p.coal, int(p.coal * Drill.FUEL_PER_COAL)]
-		if Drill.INFINITE_FUEL:
+		if Drill.infinite_fuel():
 			return ""
 		return "Furnace: dig up coal to fuel the drill" if drill.fuel < drill.max_fuel * 0.5 else ""
 
@@ -171,6 +171,9 @@ class Breach extends Station:
 	func hold_time() -> float:
 		return REPAIR_TIME
 
+	func priority() -> int:
+		return 1
+
 	func interact(_p: Player) -> void:
 		drill.repair(self)
 
@@ -186,3 +189,50 @@ class Breach extends Station:
 			for i in 3:
 				var a := randf() * TAU
 				draw_line(Vector2.ZERO, Vector2(cos(a), sin(a)) * randf_range(3, 8), Color(2.0, 1.6, 0.6), 1.0)
+
+
+## Opens the sonar screen: pings show caves, ore and creatures around the drill.
+class Sonar extends Station:
+	var _tex: Texture2D = Art.lit(Stations.DIR + "sonar.png") if ResourceLoader.exists(Stations.DIR + "sonar.png") else null
+	var _t := 0.0
+
+	func prompt(_p: Player) -> String:
+		return "E: sonar"
+
+	func interact(p: Player) -> void:
+		drill.sonar_used.emit(p)
+
+	func _process(dt: float) -> void:
+		_t += dt
+		queue_redraw()
+
+	func _draw() -> void:
+		if _tex:
+			Stations.stand(self, _tex)
+		else:
+			draw_rect(Rect2(-12, -30, 24, 30), Color("2b2f36"))
+			draw_rect(Rect2(-12, -30, 24, 30), Color("0c0a0e"), false, 1.0)
+		var c := Vector2(0, -20)          # the screen: a slow idle sweep
+		draw_circle(c, 7.0, Color("06120f"))
+		var a := _t * 2.0
+		draw_line(c, c + Vector2(cos(a), sin(a)) * 7.0, Color(0.3, 1.4, 1.0), 1.0)
+
+
+## The gunner's seat: take control of the hull turrets (mouse aims, click fires, E gets up).
+class GunnerSeat extends Station:
+	var _tex: Texture2D = Art.lit(Stations.DIR + "gunner.png") if ResourceLoader.exists(Stations.DIR + "gunner.png") else null
+
+	func prompt(_p: Player) -> String:
+		return "" if drill.gunner else "E: man the turrets"
+
+	func interact(p: Player) -> void:
+		drill.take_turrets(p)
+
+	func _draw() -> void:
+		if _tex:
+			Stations.stand(self, _tex)
+			return
+		draw_rect(Rect2(-8, -14, 16, 14), Color("4a3320"))       # seat
+		draw_rect(Rect2(-8, -24, 4, 10), Color("4a3320"))        # backrest
+		draw_rect(Rect2(3, -46, 3, 26), Color("3a3f47"))         # periscope
+		draw_rect(Rect2(-2, -24, 12, 3), Color("59606b"))        # grips

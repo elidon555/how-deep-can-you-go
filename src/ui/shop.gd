@@ -74,7 +74,7 @@ func _buy(id: String) -> void:
 
 
 func _refresh() -> void:
-	_money.text = "You have $%d" % Progress.money
+	_money.text = "Unlimited money (playtest mode)" if GameConfig.infinite_resources() else "You have $%d" % Progress.money
 	for c in _rows.get_children():
 		c.queue_free()
 	var i := 1
@@ -97,7 +97,7 @@ func _refresh() -> void:
 		var b := Button.new()
 		var cost := Progress.cost(id)
 		b.text = "MAX" if cost < 0 else "$%d" % cost
-		b.disabled = cost < 0 or cost > Progress.money
+		b.disabled = cost < 0 or not Progress.can_afford(cost)
 		b.custom_minimum_size = Vector2(80, 0)
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(_buy.bind(id))

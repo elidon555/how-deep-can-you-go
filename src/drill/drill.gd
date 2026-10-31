@@ -14,6 +14,10 @@ signal changed                 # fuel / hull / speed / breaches changed (HUD)
 signal wrecked
 signal workbench_used(player: Player)
 signal damaged(amount: float)
+signal chewed(points: Array, mat: int)   # rock that just broke off at the cutters (for debris)
+signal sonar_used(player: Player)
+signal gunner_changed(player: Player)    # someone sat down at / got up from the turrets (or null)
+signal bolt_hit(pos: Vector2, on_rock: bool)
 
 enum Speed { STOP, SLOW, FULL }
 const SPEED_NAMES := ["Stopped", "Slow", "Full"]
@@ -22,6 +26,7 @@ const FUEL_BURN := [0.0, 0.5, 1.2]     # fuel per second while the head turns
 const HEAD_POWER := [0.0, 0.5, 1.0]
 const FUEL_PER_COAL := 12.0
 const INFINITE_FUEL := true    # for now the drill never runs dry (furnace / coal stay for later)
+
 
 # shape, in local px (y down). Inside: floor at FLOOR, roof underside at ROOF.
 const HW := 96.0               # half the hull's width
@@ -36,6 +41,7 @@ const HEAD := [Vector2(-84, 56), Vector2(84, 56), Vector2(34, 92), Vector2(0, 10
 const FACE := [Vector2(-86, 54), Vector2(-34, 93), Vector2(0, 106), Vector2(34, 93), Vector2(86, 54)]
 const CUTTER_R := 6.0
 const CUTTER_REACH := 3.0      # how far in front of the face the cutters chew
+const BITE := 1.0 / 7.0        # the cutters bite in pulses (s), not a smooth erosion
 # side reamers at the hull's bottom corners widen the shaft beyond the hull (the crew's gap)
 const REAMERS := [Vector2(-104, 60), Vector2(104, 60)]
 const REAMER_R := 16.0
@@ -58,11 +64,23 @@ var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls
 var ladders_out := 1.0         # 0 = folded away, 1 = all the way down
 var moving := false            # sinking this frame
 var _ladders: Array[DrillLadder] = []
+var _bite_power := 0.0         # cutting power saved up until the next bite
+var _bite_clock := 0.0
+var judder := Vector2.ZERO     # the hull shakes a pixel when a bite breaks rock (art reads it)
+var chew_mat := -1             # what the cutters are biting (sparks only off stone)
+var gunner: Player = null      # who is on the turrets
+var _seated_at := 0            # msec; the key that sat you down mustn't also stand you up
+var turrets: Array[Turret] = []
 var _fall_v := 0.0
 var _bite_t := 0.0          # keeps "drilling" steady between frames that touch rock
 var art := DrillArt.new()
 var _engine := AudioStreamPlayer2D.new()
 var _sounds := {}           # engine loop name -> stream
+
+
+## Fuel never runs out (for now, or with [game] infinite_resources in project.godot).
+static func infinite_fuel() -> bool:
+	return INFINITE_FUEL or GameConfig.infinite_resources()
 
 
 func _ready() -> void:
@@ -82,10 +100,20 @@ func _ready() -> void:
 	add_child(head)
 	art.drill = self
 	add_child(art)
-	_add_station(Stations.Helm.new(), Vector2(58, FLOOR))
-	_add_station(Stations.Furnace.new(), Vector2(-62, FLOOR))
-	_add_station(Stations.Workbench.new(), Vector2(-16, FLOOR))
-	_add_station(Stations.Medkit.new(), Vector2(22, FLOOR - 28))
+	_add_station(Stations.Furnace.new(), Vector2(-64, FLOOR))
+	_add_station(Stations.Workbench.new(), Vector2(-30, FLOOR))
+	_add_station(Stations.Medkit.new(), Vector2(-30, -16))
+	_add_station(Stations.Sonar.new(), Vector2(2, FLOOR))
+	_add_station(Stations.GunnerSeat.new(), Vector2(30, FLOOR))
+	_add_station(Stations.Helm.new(), Vector2(62, FLOOR))
+	for side in [-1, 1]:          # harpoon turrets on the hull's sides, above the doors
+		var t := Turret.new()
+		t.side = side
+		t.world = world
+		t.position = Vector2(side * (HW + 6.0), -30.0)
+		t.bolt_hit.connect(bolt_hit.emit)
+		add_child(t)
+		turrets.append(t)
 	for side in [-1, 1]:          # ladders outside, next to each door
 		var l := DrillLadder.new()
 		l.position = Vector2(side * (HW + 9.0), 0)
@@ -113,6 +141,7 @@ func place(at_x: float) -> void:
 	for i in 4:
 		world.dig(pit_a, pit_b, 40.0, 10.0, false)
 		_cut_reamers(10.0)
+	_bite_clock = BITE
 
 
 func apply_upgrades() -> void:
@@ -127,13 +156,23 @@ func _physics_process(dt: float) -> void:
 		return
 	var running := speed != Speed.STOP and fuel > 0.0
 	_bite_t -= dt
+	judder = Vector2.ZERO
 	if running:
-		if not INFINITE_FUEL:
+		if not infinite_fuel():
 			fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
-		var power: float = Progress.drill_power() * HEAD_POWER[speed] * dt
-		if _cut_face(power):
-			_bite_t = 0.3
-		_cut_reamers(power * 0.8)
+		_bite_power += Progress.drill_power() * HEAD_POWER[speed] * dt
+		_bite_clock -= dt
+		if _bite_clock <= 0.0:         # a bite: all the saved-up cutting at once
+			_bite_clock = BITE
+			var bite := _cut_face(_bite_power)
+			_cut_reamers(_bite_power * 0.8)
+			_bite_power = 0.0
+			if bite.hit:
+				_bite_t = 0.3
+				chew_mat = bite.mat
+			if bite.points.size() > 0:
+				judder = Vector2(randf_range(-1, 1), randf_range(0, 1)).round()
+				chewed.emit(bite.points, bite.mat)
 		if fuel == 0.0:
 			Sfx.play("drill_stall", global_position)
 			changed.emit()
@@ -142,6 +181,7 @@ func _physics_process(dt: float) -> void:
 	if not _fall(dt):
 		_sink(dt, running)
 	_update_braces_and_ladders(dt)
+	_man_turrets()
 	_engine_sound(running)
 	var leaks := get_breaches().size()
 	if leaks > 0:
@@ -244,8 +284,9 @@ func _face_points() -> Array:
 
 
 ## The cutters chew only the rock just in front of the face (cracks first, then it crumbles).
-func _cut_face(amount: float) -> bool:
-	var hit := false
+## Returns {hit, mat, points: where rock broke off}.
+func _cut_face(amount: float) -> Dictionary:
+	var out_res := {"hit": false, "mat": -1, "points": []}
 	for i in FACE.size() - 1:
 		var a: Vector2 = FACE[i]
 		var b: Vector2 = FACE[i + 1]
@@ -253,9 +294,12 @@ func _cut_face(amount: float) -> bool:
 		if out.y < 0.0:
 			out = -out
 		var off := out * CUTTER_REACH
-		if world.dig(global_position + a + off, global_position + b + off, CUTTER_R, amount, false).hit:
-			hit = true      # (ore it grinds through is lost)
-	return hit
+		var r := world.dig(global_position + a + off, global_position + b + off, CUTTER_R, amount, false)
+		if r.hit:      # (ore it grinds through is lost)
+			out_res.hit = true
+			out_res.mat = r.mat
+			out_res.points.append_array(r.points)
+	return out_res
 
 
 func _cut_reamers(amount: float) -> void:
@@ -265,6 +309,31 @@ func _cut_reamers(amount: float) -> void:
 
 
 # ---------------------------------------------------------------- crew actions (stations)
+
+func take_turrets(p: Player) -> void:
+	gunner = p
+	_seated_at = Time.get_ticks_msec()
+	p.frozen = true
+	Sfx.play("lever", global_position, -6.0)
+	gunner_changed.emit(p)
+
+
+## Whoever sits at the gunner's seat aims (the turret on the side they point at) and fires.
+func _man_turrets() -> void:
+	if gunner == null:
+		return
+	var settled := Time.get_ticks_msec() - _seated_at > 250
+	if (settled and gunner.wants_leave()) or gunner.health <= 0:
+		gunner.frozen = false
+		gunner = null
+		gunner_changed.emit(null)
+		return
+	var aim := gunner.aim_point()
+	var t: Turret = turrets[1] if aim.x >= global_position.x else turrets[0]
+	t.aim_at(aim)
+	if gunner.wants_fire():
+		t.fire()
+
 
 func cycle_speed() -> void:
 	speed = ((speed + 1) % 3) as Speed

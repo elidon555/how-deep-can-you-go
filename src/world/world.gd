@@ -393,7 +393,7 @@ func is_diggable(p: Vector2) -> bool:
 
 ## One pickaxe hit on a capsule (segment a-b, radius r): damages rock, strongest at the
 ## centre, and breaks cells whose damage is enough. Already-open cells get cleaned up too.
-## Returns {hit: touched rock, mat: its material, broke: cells broken}.
+## Returns {hit: touched rock, mat: its material, broke: cells broken, points: where they broke}.
 ## collect = false grinds up any ore it breaks (the drill's head) instead of handing it out.
 func dig(a: Vector2, b: Vector2, r: float, amount: float, collect := true) -> Dictionary:
 	_collect = collect
@@ -402,6 +402,7 @@ func dig(a: Vector2, b: Vector2, r: float, amount: float, collect := true) -> Di
 	var hit := false
 	var hit_mat := -1
 	var broke := 0
+	var points := []
 	for gy in range(lo.y, hi.y + 1):
 		for gx in range(lo.x, hi.x + 1):
 			var p := Vector2(gx * CELL + 4, gy * CELL + 4)
@@ -421,10 +422,11 @@ func dig(a: Vector2, b: Vector2, r: float, amount: float, collect := true) -> Di
 			if f - d < 0.5:
 				if f >= 0.5:
 					broke += 1
+					points.append(Vector2(gx * CELL + 4, gy * CELL + 4))
 				_set_fill(gx, gy, maxf(0.0, f - d), f)
 			else:
 				_set_dmg(gx, gy, d)
-	return {"hit": hit, "mat": hit_mat, "broke": broke}
+	return {"hit": hit, "mat": hit_mat, "broke": broke, "points": points}
 
 
 func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:

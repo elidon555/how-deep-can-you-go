@@ -176,6 +176,24 @@ func _climb(dt: float, dir: float) -> void:
 			velocity = Vector2(dir * SPEED, JUMP_V * 0.55)   # little hop onto the ledge
 
 
+# ---------------------------------------------------------------- controls for stations
+# (what this player is pointing at / pressing; per player so co-op can feed them from the network)
+
+var aim_override := Vector2.INF   # tests / remote players aim without the local mouse
+
+
+func aim_point() -> Vector2:
+	return aim_override if aim_override != Vector2.INF else get_global_mouse_position()
+
+
+func wants_fire() -> bool:
+	return Input.is_action_pressed("dig")
+
+
+func wants_leave() -> bool:
+	return Input.is_action_just_pressed("interact") or Input.is_action_just_pressed("ui_cancel")
+
+
 # ---------------------------------------------------------------- bag
 
 func add_ore(kind: int) -> void:

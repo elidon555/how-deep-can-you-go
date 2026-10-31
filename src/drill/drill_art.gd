@@ -118,7 +118,8 @@ func _process(dt: float) -> void:
 	var alarm := drill.get_breaches().size() > 0 or drill.hull < drill.max_hull * 0.25
 	_beacon.enabled = alarm and fmod(Time.get_ticks_msec() / 1000.0, 0.6) < 0.3
 	_smoke.emitting = drill.speed != Drill.Speed.STOP and drill.fuel > 0.0
-	_sparks.emitting = drill.drilling
+	_sparks.emitting = drill.drilling and (drill.chew_mat == World.M.STONE or drill.chew_mat == World.M.HARD)
+	position = drill.judder
 	_grit.emitting = drill.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames

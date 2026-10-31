@@ -1,21 +1,27 @@
 extends Node
 class_name Spawner
-## Brings the caves to life around the player: glowing eyes that watch from the dark, and
-## crawlers that hunt on cave floors. Only spawns in natural caves, never in your own tunnels,
-## and out of view; despawns crawlers that are left far behind.
+## Brings the caves to life around the player: glowing eyes that watch from the dark, crawlers
+## that hunt on cave floors (only in natural caves, out of view; despawned when left far
+## behind), and every so often deep down, a worm that burrows toward the drill.
 
 signal crawler_killed(pos: Vector2)
+signal worm_coming(worm: Worm)
+signal worm_killed(pos: Vector2)
 
 const WATCHERS_FROM := 15.0    # meters
 const CRAWLERS_FROM := 25.0
 const DESPAWN_DIST := 800.0
+const WORMS_FROM := 40.0       # meters (drill depth)
+const WORM_EVERY := Vector2(70.0, 130.0)   # seconds between worms
 
 var world: World
 var player: Player
+var drill: Drill
 var lit_parent: Node           # creatures go here (lit by the lamp)
 var glow_parent: Node          # glowing eyes go here (bloom)
 var _watch_t := 5.0
 var _crawl_t := 4.0
+var _worm_t := 35.0
 
 
 func _process(dt: float) -> void:
@@ -34,6 +40,27 @@ func _process(dt: float) -> void:
 	for c: Node2D in get_tree().get_nodes_in_group("creature"):
 		if c.global_position.distance_to(player.global_position) > DESPAWN_DIST:
 			c.queue_free()
+	if drill.global_position.y / World.METER > WORMS_FROM and get_tree().get_nodes_in_group("worm").is_empty():
+		_worm_t -= dt
+		if _worm_t <= 0.0:
+			_worm_t = randf_range(WORM_EVERY.x, WORM_EVERY.y)
+			spawn_worm()
+
+
+## A worm starts burrowing toward the drill from ~16 m away, off to one side and below.
+func spawn_worm() -> Worm:
+	var a := randf_range(0.15, PI - 0.15)                 # somewhere below the horizon
+	var at := drill.global_position + Vector2(cos(a), sin(a)) * 380.0
+	at.x = clampf(at.x, 40.0, World.WIDTH_PX - 40.0)
+	var w := Worm.new()
+	w.world = world
+	w.drill = drill
+	w.position = at
+	w.heading = (drill.global_position - at).normalized()
+	w.killed.connect(worm_killed.emit)
+	lit_parent.add_child(w)
+	worm_coming.emit(w)
+	return w
 
 
 func _spawn_watcher() -> void:

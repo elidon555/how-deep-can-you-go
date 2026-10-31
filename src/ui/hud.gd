@@ -89,7 +89,7 @@ func set_health(health: int, max_health: int) -> void:
 func set_bag(p: Player) -> void:
 	_ore.text = ("Ore: %d ($%d)" % [p.ore_count, p.ore_value] if p.ore_count > 0 else "Ore: 0") \
 		+ "   Coal: %d" % p.coal
-	_ropes.text = "Ropes: %d" % p.ropes
+	_ropes.text = "Ropes: unlimited" if GameConfig.infinite_resources() else "Ropes: %d" % p.ropes
 
 
 func set_drill(d: Drill, player_depth: float) -> void:
@@ -99,7 +99,7 @@ func set_drill(d: Drill, player_depth: float) -> void:
 
 
 func set_money(money: int) -> void:
-	_money.text = "$%d" % money
+	_money.text = "$ unlimited" if GameConfig.infinite_resources() else "$%d" % money
 
 
 func set_prompt(text: String) -> void:
@@ -138,7 +138,7 @@ class DrillPanel extends Control:
 			sp = "NO FUEL"
 		draw_string(font, Vector2(150, 26), sp, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
 			Color("d04a3f") if drill.fuel <= 0.0 else Color("3fd0c0"))
-		if Drill.INFINITE_FUEL:
+		if Drill.infinite_fuel():
 			draw_string(font, Vector2(12, 56), "Fuel   unlimited", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e0a23a"))
 		else:
 			_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))

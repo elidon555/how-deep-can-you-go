@@ -10,6 +10,8 @@ const MILESTONES := {
 }
 const ZOOM_INSIDE := 1.6        # see the whole drill while you're in it
 const ZOOM_OUTSIDE := 2.0
+const ZOOM_GUNNER := 1.1         # see far around the drill while on the turrets
+const WORM_BOUNTY := 15
 
 var world: World
 var player: Player
@@ -20,6 +22,7 @@ var backdrop := Backdrop.new()
 var fx := Fx.new()
 var hud := Hud.new()
 var shop := Shop.new()
+var sonar := SonarView.new()
 var drill := Drill.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
@@ -54,6 +57,9 @@ func _ready() -> void:
 	drill.workbench_used.connect(_on_workbench_used)
 	drill.wrecked.connect(_on_drill_wrecked)
 	drill.damaged.connect(func(amount): shake = maxf(shake, minf(amount / 10.0, 1.2)))
+	drill.chewed.connect(_on_drill_chewed)
+	drill.sonar_used.connect(_on_sonar_used)
+	drill.bolt_hit.connect(_on_bolt_hit)
 
 	player = Player.new()
 	player.world = world
@@ -84,6 +90,9 @@ func _ready() -> void:
 
 	spawner.world = world
 	spawner.player = player
+	spawner.drill = drill
+	spawner.worm_coming.connect(_on_worm_coming)
+	spawner.worm_killed.connect(_on_worm_killed)
 	spawner.lit_parent = self
 	spawner.glow_parent = glow_layer
 	spawner.crawler_killed.connect(_on_crawler_killed)
@@ -91,6 +100,10 @@ func _ready() -> void:
 
 	add_child(hud)
 	hud.add_child(shop)
+	hud.add_child(sonar)
+	sonar.drill = drill
+	sonar.world = world
+	sonar.closed.connect(func(): player.frozen = false)
 	shop.closed.connect(func(): player.frozen = false)
 	Progress.changed.connect(_on_progress_changed)
 	hud.set_health(player.health, player.max_health)
@@ -116,7 +129,8 @@ func _process(dt: float) -> void:
 	_update_light(depth, dt)
 	hud.set_drill(drill, depth_m)
 	var inside := drill.contains(player.global_position)
-	var z := lerpf(cam.zoom.x, ZOOM_INSIDE if inside else ZOOM_OUTSIDE, 3.0 * dt)
+	var want_zoom := ZOOM_GUNNER if drill.gunner == player else (ZOOM_INSIDE if inside else ZOOM_OUTSIDE)
+	var z := lerpf(cam.zoom.x, want_zoom, 3.0 * dt)
 	cam.zoom = Vector2(z, z)
 
 	shake = maxf(shake - dt * 6.0, 0.0)
@@ -188,6 +202,40 @@ func _on_boulder_shattered(pos: Vector2) -> void:
 	fx.impact(pos, World.M.STONE, 3, "dig_down", player.facing)
 
 
+## The cutters broke rock: debris, and a little rumble if you're near the drill.
+func _on_drill_chewed(points: Array, mat: int) -> void:
+	fx.chunks(points, mat, drill.global_position.x)
+	if player.global_position.distance_to(drill.global_position) < 260.0:
+		shake = maxf(shake, 0.18)
+
+
+func _on_sonar_used(p: Player) -> void:
+	sonar.open()
+	p.frozen = true
+
+
+func _on_bolt_hit(pos: Vector2, on_rock: bool) -> void:
+	if on_rock:
+		fx.impact(pos, world.mat_at(pos) if world.is_diggable(pos) else World.M.STONE, 1, "dig_side", 1)
+	else:
+		fx.flesh(pos, 1)
+
+
+func _on_worm_coming(_w: Worm) -> void:
+	Sfx.play("rumble", Vector2.INF, -2.0, 0.0)
+	shake = maxf(shake, 0.6)
+	hud.toast("Something big is burrowing toward the drill...", 3.0)
+
+
+func _on_worm_killed(pos: Vector2) -> void:
+	fx.gore(pos)
+	shake = maxf(shake, 1.2)
+	var p := _nearest_player(pos)
+	if p:
+		p.add_value(WORM_BOUNTY)
+	hud.toast("The worm is dead. + $%d" % WORM_BOUNTY, 2.0)
+
+
 func _on_crawler_killed(pos: Vector2) -> void:
 	fx.gore(pos)
 	var p := _nearest_player(pos)
@@ -221,7 +269,8 @@ func _on_rope_requested(feet: Vector2) -> void:
 	if p.ropes <= 0:
 		hud.toast("No ropes left. More at the drill's workbench.", 1.2)
 		return
-	p.ropes -= 1
+	if not GameConfig.infinite_resources():
+		p.ropes -= 1
 	world.add_child(Rope.hang(world, feet))
 	Sfx.play("rope", feet)
 	_update_bag()

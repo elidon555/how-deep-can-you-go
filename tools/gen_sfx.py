@@ -4,9 +4,9 @@
 Pure numpy (scipy.signal.lfilter is used only to speed up filtering if installed).
 Fixed seeds, so every run writes identical files. One-shots get a short fade in/out
 and are peak-normalized to -3 dBFS. The loops (amb_cave, amb_deep, drill_loop,
-drill_idle) are built periodic (every sine, LFO and noise spectrum has a whole number
+drill_idle, turret_turn, worm_burrow) are built periodic (every sine, LFO and noise spectrum has a whole number
 of cycles per loop), so they loop seamlessly; ambience peaks at -12 dBFS, drill_loop
-at -10 and drill_idle at -16.
+at -10, drill_idle at -16, turret_turn at -18, worm_burrow at -12.
 
 Run:  python3 tools/gen_sfx.py
 """
@@ -759,6 +759,150 @@ def lever(v=0):
     return finish(latch + thump + 0.5 * body + 0.5 * knock + 0.15 * rattle, fade_out=0.04)
 
 
+# ----------------------------------------------------------------------------- turret / sonar
+
+def sonar_ping(v=0):
+    rng = np.random.default_rng(4100 + v)
+    n = secs(1.6)
+    f = glide(1200, 1185, n, 1.2)                                      # sags a touch: eerie
+    tone = osc(f) + 0.35 * osc(f * 1.0025) + 0.08 * osc(2 * f)        # slow beating shimmer
+    ping = tone * env(n, 0.003, 0.25)
+    m = n - secs(0.7)
+    echo = place(n, 0.7, biquad(osc(f[:m] * 0.99) * env(m, 0.01, 0.2), "lp", 2000))
+    x = ping + 0.3 * echo + 0.02 * burst(n, rng, 0.0005, 0.004, "lp", 4000)
+    return finish(reverb(x, size=2.0, fb=0.8, mix=0.4, damp=3000), fade_out=0.25)
+
+
+def turret_fire(v=0):
+    rng = np.random.default_rng(4200 + v)
+    n, p = secs(0.5), 1 + 0.06 * (v - 1)
+    thump = osc(glide(120 * p, 45 * p, n, 0.06)) * env(n, 0.001, 0.08)
+    blast = burst(n, rng, 0.001, 0.04, "lp", 400 * p)
+    air = burst(n, rng, 0.002, 0.07, "bp", 900 * p, 0.6)                # pneumatic "pfff"
+    clack = unit(modes(n, np.array([1100, 1850, 2700, 3900]) * p * (1 + rng.uniform(-0.03, 0.03, 4)),
+                       [0.06, 0.045, 0.035, 0.025], [1.0, 0.7, 0.5, 0.3], delay=0.005))
+    reload = unit(modes(n, np.array([1700, 2900, 4300]) * p, [0.03, 0.02, 0.015], [1.0, 0.6, 0.4],
+                        delay=0.17 + rng.uniform(0, 0.03)))
+    whoosh = unit(svf(noise(n, rng) * env(n, 0.01, 0.07, delay=0.02), glide(3000, 600, n, 0.25), q=1.5))
+    x = np.tanh(1.6 * (thump + 0.6 * blast + 0.35 * air + 0.5 * clack)) + 0.25 * reload + 0.35 * whoosh
+    return finish(x, fade_out=0.06)
+
+
+def turret_turn(v=0):
+    rng = np.random.default_rng(4300 + v)
+    T = 1.0
+    t = times(secs(T))
+    n = len(t)
+    phase = TAU * per(880, T) * t + 0.6 * lfo(t, 2, 0.0, T)            # servo whine, gently wavering
+    whine = np.sin(phase) + 0.3 * np.sin(2 * phase) + 0.12 * np.sin(3 * phase)
+    teeth = (0.5 + 0.5 * np.cos(TAU * per(43, T) * t)) ** 3             # gear mesh
+    gears = loop_noise(n, rng, band(2500, 0.6)) * teeth
+    hum = np.sin(TAU * per(120, T) * t) + 0.4 * np.sin(TAU * per(240, T) * t)
+    x = 0.5 * whine * (0.85 + 0.15 * lfo(t, 3, 1.0, T)) + 0.35 * gears + 0.3 * hum
+    return finish_loop(x, -18.0)
+
+
+def bolt_hit(v=0):
+    rng = np.random.default_rng(4400 + v)
+    n = secs(0.4)
+    crack = burst(n, rng, 0.0005, 0.012, "bp", 2200, 0.8)
+    thump = osc(glide(140, 60, n, 0.05)) * env(n, 0.001, 0.05)
+    debris = unit(grains(n, rng, 35, 0.005, 0.3, 500, 5000, decay=0.1))
+    f = rng.uniform(3000, 3500)
+    ping = osc(glide(f, f * 0.8, n, 0.2)) * env(n, 0.002, 0.12, delay=0.012)  # ricochet whine
+    ping += 0.3 * osc(glide(2.7 * f, 2.7 * f * 0.8, n, 0.2)) * env(n, 0.002, 0.05, delay=0.012)
+    x = 0.8 * crack + 0.7 * thump + 0.5 * debris + 0.3 * ping
+    return finish(reverb(x, mix=0.15), fade_out=0.06)
+
+
+# ----------------------------------------------------------------------------- the worm
+
+def worm_voice(f0, rng, fmax=1500.0):
+    """Huge gravelly voice: buzzy harmonics with vocal-fry flutter through low, wobbly formants."""
+    n = len(f0)
+    src = harmonic(f0, tilt=0.9, fmax=fmax) * (0.35 + 0.65 * rough(n, rng, 35))
+    return unit(formants(src, [(250 * (1 + 0.15 * wobble(n, rng, 2)), 3, 1.0),
+                               (520 * (1 + 0.2 * wobble(n, rng, 2)), 4, 0.6), (900, 5, 0.25)]))
+
+
+def heavy_impact(n, rng, t0, amp=1.0):
+    """Massive body hitting rock: sub thump, dull slap, rubble."""
+    m = n - secs(t0)
+    thump = place(n, t0, osc(glide(80, 35, m, 0.1)) * env(m, 0.003, 0.12))
+    slap = burst(n, rng, 0.002, 0.05, "lp", 400, delay=t0)
+    rubble = unit(grains(n, rng, 20, t0 + 0.01, t0 + 0.4, 300, 3000, decay=0.15))
+    return amp * (thump + 0.6 * slap + 0.3 * rubble)
+
+
+def worm_roar(v=0):
+    rng = np.random.default_rng(4500 + v)
+    n = secs(2.0)
+    t = times(n)
+    f0 = np.interp(t, [0, 0.6, 2.0], [32, 45, 30]) * (1 + 0.1 * wobble(n, rng, 3) + 0.04 * wobble(n, rng, 40))
+    voice = worm_voice(f0, rng)
+    grind = unit(biquad(noise(n, rng) * rough(n, rng, 18), "bp", 600, 0.8))
+    gravel = unit(grains(n, rng, 160, 0.1, 1.8, 300, 2500, decay=1e9, skew=1.0))
+    amp = np.clip(t / 0.25, 0, 1) * np.clip((2.0 - t) / 0.6, 0, 1)
+    x = (np.tanh(2.0 * voice) + 0.3 * grind + 0.25 * gravel) * amp
+    x = biquad(biquad(x, "lp", 900), "lp", 900)                         # heard through rock
+    return finish(reverb(x, size=2.0, fb=0.75, mix=0.3, damp=800), fade_out=0.15)
+
+
+def worm_burrow(v=0):
+    rng = np.random.default_rng(4600 + v)
+    T = 3.0
+    t = times(secs(T))
+    n = len(t)
+    heave = (0.5 + 0.5 * np.cos(TAU * per(4 / 3, T) * t)) ** 2         # 4 peristaltic pushes per loop
+    heave *= 0.8 + 0.2 * lfo(t, 1, 0.5, T)
+    rumble = loop_noise(n, rng, lowband(90)) * (0.5 + 0.5 * heave)
+    drone = np.sin(TAU * per(31, T) * t) + 0.6 * np.sin(TAU * per(46.33, T) * t + 0.4 * lfo(t, 1, 0.0, T))
+    grind = loop_noise(n, rng, band(500, 0.7)) * loop_rough(n, rng, 12) * heave
+    gravel = loop_grains(n, rng, 300, 300, 4000) * (0.3 + 0.7 * heave) * loop_rough(n, rng, 25)
+    x = unit(rumble) + 0.4 * drone * (0.6 + 0.4 * heave) + 0.4 * unit(grind) + 0.35 * unit(gravel)
+    return finish_loop(spectral(x, lowband(2500)), -12.0)
+
+
+def worm_hit(v=0):
+    rng = np.random.default_rng(4700 + v)
+    n = secs(0.6)
+    t = times(n)
+    thump = osc(glide(90, 35, n, 0.08)) * env(n, 0.002, 0.1)
+    wet = biquad(noise(n, rng), "lp", 1500) * env(n, 0.002, 0.06)
+    splat = unit(svf(wet, np.interp(t, [0, 0.04, 0.2], [300, 1500, 250]), q=3))
+    blobs = unit(bubbles(n, rng, 5, 0.01, 0.2, 80, 200))
+    f0 = glide(55, 40, n, 0.5) * (1 + 0.05 * np.sin(TAU * 5 * t))
+    groan = worm_voice(f0, rng, fmax=2000) * env(n, 0.05, 0.25, delay=0.06)
+    x = np.tanh(1.5 * (thump + 0.6 * splat + 0.3 * blobs + 0.8 * groan))
+    return finish(biquad(x, "lp", 1500), fade_out=0.08)
+
+
+def worm_die(v=0):
+    rng = np.random.default_rng(4800 + v)
+    n = secs(2.5)
+    t = times(n)
+    f0 = glide(50, 22, n, 2.0) * (1 + 0.08 * wobble(n, rng, 4))
+    groan = np.tanh(2.0 * worm_voice(f0, rng)) * np.clip(t / 0.1, 0, 1) * np.exp(-np.maximum(t - 0.6, 0) / 0.6)
+    thrash = sum(heavy_impact(n, rng, t0, a) for t0, a in
+                 [(0.3, 1.0), (0.65, 0.8), (0.9, 0.9), (1.25, 0.6), (1.6, 0.45)])
+    settle = unit(grains(n, rng, 40, 1.6, 2.4, 400, 4000, decay=0.5)) * 0.25
+    x = biquad(0.8 * groan + unit(thrash) + settle, "lp", 2500)
+    return finish(reverb(x, size=2.0, fb=0.7, mix=0.25, damp=1500), fade_out=0.2)
+
+
+def rumble(v=0):
+    rng = np.random.default_rng(4900 + v)
+    n = secs(2.5)
+    p = np.arange(n) / n
+    swell = np.sin(np.pi * p ** 1.2) ** 2                               # builds to ~1.4 s, then ebbs
+    quake = unit(biquad(biquad(noise(n, rng), "lp", 80), "lp", 80)) + 0.5 * unit(biquad(noise(n, rng), "bp", 40, 1.0))
+    sub = osc(28, n) * rough(n, rng, 4)
+    rattles = unit(grains(n, rng, 60, 0.2, 2.3, 2000, 6000, length=(0.001, 0.003), decay=1e9, skew=1.0, q=4))
+    pebbles = unit(grains(n, rng, 25, 0.3, 2.2, 600, 2500, decay=1e9, skew=1.0))
+    x = (unit(quake) + 0.4 * sub) * swell + (0.12 * rattles + 0.12 * pebbles) * swell ** 1.5
+    return finish(x, fade_out=0.2)
+
+
 # ----------------------------------------------------------------------------- table / main
 
 def variants(name, fn, count):
@@ -798,6 +942,15 @@ SOUNDS = {
     "repair": repair,
     "furnace": furnace,
     "lever": lever,
+    "sonar_ping": sonar_ping,
+    **variants("turret_fire", turret_fire, 3),
+    "turret_turn": turret_turn,
+    **variants("bolt_hit", bolt_hit, 2),
+    "worm_roar": worm_roar,
+    "worm_burrow": worm_burrow,
+    "worm_hit": worm_hit,
+    "worm_die": worm_die,
+    "rumble": rumble,
 }
 
 

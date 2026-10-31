@@ -45,6 +45,18 @@ func flesh(pos: Vector2, facing: int) -> void:
 	hitstop(0.07)
 
 
+## Rock the drill's cutters just broke off: chunks spat out sideways and up the gap beside the
+## hull, with dust. `points` are where cells broke; a few are picked so it stays light.
+func chunks(points: Array, mat: int, drill_x: float) -> void:
+	var rock: Color = World.COLORS[clampi(mat, 0, World.COLORS.size() - 1)]
+	for i in mini(points.size(), 4):
+		var p: Vector2 = points[randi() % points.size()]
+		var out := Vector2(signf(p.x - drill_x), -1.6).normalized()
+		burst(p, rock.lightened(0.1), 3, 150.0, out, 35.0, 0.7, 2.6, false, 500.0, true)
+		burst(p, rock.darkened(0.3), 2, 90.0, out, 60.0, 0.5, 1.8, false, 500.0, true)
+	dust(points[0], 0.6)
+
+
 ## A crawler dies: pale chunks, dark ichor, a puff.
 func gore(pos: Vector2) -> void:
 	burst(pos, Color("c9bfc8"), 12, 160.0, Vector2.UP, 120.0, 0.7, 3.0, false, 600.0, true)
