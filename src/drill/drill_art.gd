@@ -2,8 +2,8 @@ extends Node2D
 class_name DrillArt
 ## How the drill looks: Blender-rendered pieces (assets/drill, tools/drill_blender.py) layered
 ## as a cutaway — back wall, crew + stations, hull frame in front, spinning head below — plus
-## what moves in play: the head riding out on its rams, braces gripping / pulling in (cut from
-## the frame sprite), spinning side reamers, lights, the alarm beacon, smoke, sparks.
+## what moves in play: braces gripping / pulling in (cut from the frame sprite), spinning side
+## reamers, lights, the alarm beacon, smoke, sparks. (The ladders draw themselves: DrillLadder.)
 
 
 const DIR := "res://assets/drill/"
@@ -121,8 +121,6 @@ func _process(dt: float) -> void:
 	_grit.emitting = drill.drilling
 	_interior.energy = 1.1 if drill.fuel > 0.0 else 0.5 + 0.2 * sin(Time.get_ticks_msec() * 0.01)
 	_head.frame = int(_spin) % _head_frames
-	_head.position = HEAD_AT + Vector2(0, drill.stroke)
-	_sparks.position.y = 100.0 + drill.stroke
 	for b: Sprite2D in _braces:
 		b.scale.x = lerpf(BRACE_IN, 1.0, drill.grip)
 	queue_redraw()
@@ -130,27 +128,8 @@ func _process(dt: float) -> void:
 
 func _draw() -> void:
 	draw_texture(_back, BACK_AT)
-	_draw_rams()
 	for r: Vector2 in Drill.REAMERS:
 		_draw_reamer(r)
-
-
-## Hydraulic rams + the drive shaft between the hull and the head, longer as the head rams out.
-func _draw_rams() -> void:
-	var y0 := Drill.BOTTOM - 4.0
-	var y1 := Drill.BOTTOM + 2.0 + drill.stroke
-	if y1 - y0 < 3.0:
-		return
-	for x in [-46.0, 46.0]:
-		draw_rect(Rect2(x - 4, y0, 8, minf(10.0, y1 - y0)), Color("3a3f47"))      # cylinder
-		draw_rect(Rect2(x - 2, y0, 4, y1 - y0), Color("c9ccd1"))                  # chrome rod
-		draw_rect(Rect2(x - 2, y0, 1, y1 - y0), Color("eef0f2"))
-	draw_rect(Rect2(-6, y0, 12, y1 - y0), Color("2b2f36"))                      # drive shaft
-	var k := fmod(_spin * 3.0, 6.0)
-	var y := y0 + k
-	while y < y1:                                                              # spinning shaft bands
-		draw_rect(Rect2(-6, y, 12, 1), Color("59606b"))
-		y += 6.0
 
 
 ## A side reamer: a toothed disc spinning at the hull's bottom corner.

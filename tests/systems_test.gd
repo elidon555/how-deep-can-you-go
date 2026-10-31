@@ -70,23 +70,31 @@ func _drill_ride() -> void:
 	_station(Stations.Helm).interact(p)
 	_station(Stations.Helm).interact(p)
 	_check("helm sets full speed", d.speed == Drill.Speed.FULL)
-	var phases := {}
 	var min_grip := 1.0
-	var max_stroke := 0.0
 	for i in 60 * 8:
 		await get_tree().physics_frame
-		phases[d.phase] = true
 		min_grip = minf(min_grip, d.grip)
-		max_stroke = maxf(max_stroke, d.stroke)
-	_check("goes through grip, bore, release and advance", phases.size() == 4, str(phases.keys()))
-	_check("head rams out a full stroke", max_stroke >= Drill.STROKE - 0.5, "%.0f px" % max_stroke)
-	_check("braces let go and ladders fold while the hull moves", min_grip <= 0.0)
+	_check("braces let go while it sinks", min_grip <= 0.0)
+	_check("ladders fold away with everyone aboard", d.ladders_out == 0.0)
 	var down := (d.global_position.y - y0) / World.METER
 	_check("drill bores down", down > 2.0, "%.1f m in 8 s" % down)
-	_check("drill burns fuel", d.fuel < fuel0, "%.0f -> %.0f" % [fuel0, d.fuel])
+	if Drill.INFINITE_FUEL:
+		_check("fuel never runs out (infinite for now)", d.fuel == fuel0)
+	else:
+		_check("drill burns fuel", d.fuel < fuel0, "%.0f -> %.0f" % [fuel0, d.fuel])
 	_check("crew rides along inside", d.contains(p.global_position))
 	_station(Stations.Helm).interact(p)
 	_check("helm stops it", d.speed == Drill.Speed.STOP)
+	await _frames(40)
+	_check("braces grip when it stops", d.grip >= 1.0)
+	var back := p.global_position
+	p.global_position = d.global_position + Vector2(Drill.HW + 20.0, Drill.FLOOR - 30.0)   # step outside
+	await _frames(70)
+	_check("ladders come down when someone is outside", d.ladders_out == 1.0)
+	p.global_position = back
+	p.velocity = Vector2.ZERO
+	await _frames(70)
+	_check("and fold away again once they're back in", d.ladders_out == 0.0)
 
 
 func _furnace_and_workbench() -> void:

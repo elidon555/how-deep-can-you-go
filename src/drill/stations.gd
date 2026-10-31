@@ -75,6 +75,8 @@ class Furnace extends Station:
 	func prompt(p: Player) -> String:
 		if p.coal > 0:
 			return "E: shovel in %d coal (+%d fuel)" % [p.coal, int(p.coal * Drill.FUEL_PER_COAL)]
+		if Drill.INFINITE_FUEL:
+			return ""
 		return "Furnace: dig up coal to fuel the drill" if drill.fuel < drill.max_fuel * 0.5 else ""
 
 	func interact(p: Player) -> void:

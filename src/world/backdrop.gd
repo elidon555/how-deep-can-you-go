@@ -69,7 +69,7 @@ func follow(cam: Camera2D, depth_m: float) -> void:
 	_fill.color = Color("4a5663").lerp(zc[0], clampf(depth_m / 6.0, 0.0, 1.0))
 	for L in _sky:
 		var t: TextureRect = L[0]
-		var bottom: float = vs.y / 2.0 - center.y * z * L[2] + 40.0
+		var bottom: float = vs.y / 2.0 - center.y * z * L[2] + 64.0   # tucks under the ground line
 		t.position = Vector2(-fposmod(center.x * L[1], 1024.0) * 2.0, bottom - 320.0)
 		t.modulate = L[3]
 	for L in _cave:

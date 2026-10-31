@@ -138,7 +138,10 @@ class DrillPanel extends Control:
 			sp = "NO FUEL"
 		draw_string(font, Vector2(150, 26), sp, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
 			Color("d04a3f") if drill.fuel <= 0.0 else Color("3fd0c0"))
-		_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
+		if Drill.INFINITE_FUEL:
+			draw_string(font, Vector2(12, 56), "Fuel   unlimited", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("e0a23a"))
+		else:
+			_bar(Vector2(12, 40), "Fuel", drill.fuel / drill.max_fuel, Color("e0a23a"))
 		_bar(Vector2(12, 66), "Hull", drill.hull / drill.max_hull, Color("c8c8d0"))
 		var leaks := drill.get_breaches().size()
 		if leaks > 0 and fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55:

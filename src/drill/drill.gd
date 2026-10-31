@@ -1,11 +1,11 @@
 extends AnimatableBody2D
 class_name Drill
-## The crew's drilling machine. Bores straight down like a real tunnel-boring machine, in
-## strokes: GRIP (braces push on the shaft walls, ladders out) -> BORE (the spinning head rams
-## forward, chewing only the rock its cutters touch) -> RELEASE (braces in, ladders fold up) ->
-## ADVANCE (the hull slides down to the head; side reamers widen the shaft so there's a gap
-## beside the hull). Carries whoever is inside; burns fuel; falls if it breaks into a cave
-## (and crashes if it falls far).
+## The crew's drilling machine. Bores straight down: the spinning head chews only the rock its
+## cutters touch (cracks, then it crumbles) and the whole machine sinks as fast as the rock in
+## front gives way; side reamers widen the shaft so there's a gap beside the hull. Braces grip
+## the walls while it's still. The ladders fold away when everyone is aboard and telescope down
+## when anyone is outside. Carries whoever is inside; burns fuel; falls if it breaks into a
+## cave (and crashes if it falls far).
 ## Damage (boulders, crawlers, crashes) opens hull breaches that leak until repaired.
 ## All of the machine's state lives here and stations only call these methods, so co-op can
 ## sync it from one place later.
@@ -17,10 +17,11 @@ signal damaged(amount: float)
 
 enum Speed { STOP, SLOW, FULL }
 const SPEED_NAMES := ["Stopped", "Slow", "Full"]
-const DESCENT := [0.0, 0.45, 1.2]      # m/s the head rams forward when the rock gives way
+const DESCENT := [0.0, 0.35, 0.9]      # m/s it sinks at when the rock in front gives way
 const FUEL_BURN := [0.0, 0.5, 1.2]     # fuel per second while the head turns
 const HEAD_POWER := [0.0, 0.5, 1.0]
 const FUEL_PER_COAL := 12.0
+const INFINITE_FUEL := true    # for now the drill never runs dry (furnace / coal stay for later)
 
 # shape, in local px (y down). Inside: floor at FLOOR, roof underside at ROOF.
 const HW := 96.0               # half the hull's width
@@ -38,12 +39,8 @@ const CUTTER_REACH := 3.0      # how far in front of the face the cutters chew
 # side reamers at the hull's bottom corners widen the shaft beyond the hull (the crew's gap)
 const REAMERS := [Vector2(-104, 60), Vector2(104, 60)]
 const REAMER_R := 16.0
-# the stroke cycle
-enum Phase { GRIP, BORE, RELEASE, ADVANCE }
-const STROKE := 24.0           # px the head rams out per stroke (1 m)
-const GRIP_TIME := 0.35
-const RELEASE_TIME := 0.3
-const ADVANCE_SPEED := 55.0    # px/s the hull slides down to catch up
+const BRACE_TIME := 0.35       # seconds for the braces to grip / let go
+const LADDER_TIME := 0.9       # seconds for the ladders to fold away / come down
 const MAX_BREACHES := 4
 const BREACH_LEAK := 0.35      # hull per second per open breach
 const FALL_GRAVITY := 700.0
@@ -57,12 +54,10 @@ var hull := 100.0
 var max_hull := 100.0
 var drilling := false          # the head is turning and biting rock
 var is_wrecked := false
-var phase := Phase.GRIP
-var stroke := 0.0              # how far the head is rammed out below the hull (px)
-var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls (ladders follow)
-var _phase_t := 0.0
-var _ladders: Array[Rope] = []
-var _head_shape := CollisionShape2D.new()
+var grip := 1.0                # braces: 0 = pulled in, 1 = against the walls
+var ladders_out := 1.0         # 0 = folded away, 1 = all the way down
+var moving := false            # sinking this frame
+var _ladders: Array[DrillLadder] = []
 var _fall_v := 0.0
 var _bite_t := 0.0          # keeps "drilling" steady between frames that touch rock
 var art := DrillArt.new()
@@ -80,10 +75,11 @@ func _ready() -> void:
 	_add_box(Rect2(-HW, TOP, HW * 2.0, ROOF - TOP))                    # roof
 	_add_box(Rect2(-HW, TOP, WALL, DOOR_TOP - TOP))                    # left wall above the door
 	_add_box(Rect2(HW - WALL, TOP, WALL, DOOR_TOP - TOP))              # right wall
+	var head := CollisionShape2D.new()
 	var poly := ConvexPolygonShape2D.new()
 	poly.points = PackedVector2Array(HEAD)
-	_head_shape.shape = poly
-	add_child(_head_shape)
+	head.shape = poly
+	add_child(head)
 	art.drill = self
 	add_child(art)
 	_add_station(Stations.Helm.new(), Vector2(58, FLOOR))
@@ -91,11 +87,9 @@ func _ready() -> void:
 	_add_station(Stations.Workbench.new(), Vector2(-16, FLOOR))
 	_add_station(Stations.Medkit.new(), Vector2(22, FLOOR - 28))
 	for side in [-1, 1]:          # ladders outside, next to each door
-		var l := Rope.new()
-		l.ladder = true
+		var l := DrillLadder.new()
 		l.position = Vector2(side * (HW + 9.0), 0)
 		l.top = DOOR_TOP
-		l.bottom = BOTTOM + 30.0
 		add_child(l)
 		_ladders.append(l)
 	for n in ["drill_loop", "drill_idle"]:
@@ -134,7 +128,8 @@ func _physics_process(dt: float) -> void:
 	var running := speed != Speed.STOP and fuel > 0.0
 	_bite_t -= dt
 	if running:
-		fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
+		if not INFINITE_FUEL:
+			fuel = maxf(fuel - FUEL_BURN[speed] * dt, 0.0)
 		var power: float = Progress.drill_power() * HEAD_POWER[speed] * dt
 		if _cut_face(power):
 			_bite_t = 0.3
@@ -143,8 +138,10 @@ func _physics_process(dt: float) -> void:
 			Sfx.play("drill_stall", global_position)
 			changed.emit()
 	drilling = running and _bite_t > 0.0
+	moving = false
 	if not _fall(dt):
-		_stroke_cycle(dt, running)
+		_sink(dt, running)
+	_update_braces_and_ladders(dt)
 	_engine_sound(running)
 	var leaks := get_breaches().size()
 	if leaks > 0:
@@ -164,36 +161,34 @@ func _engine_sound(running: bool) -> void:
 		_engine.stop()
 
 
-## GRIP -> BORE -> RELEASE -> ADVANCE, over and over while running. Stopping finishes the
-## hull's slide first, then holds with the braces out and the ladders down.
-func _stroke_cycle(dt: float, running: bool) -> void:
-	_phase_t -= dt
-	match phase:
-		Phase.GRIP:
-			grip = move_toward(grip, 1.0, dt / GRIP_TIME)
-			if grip >= 1.0 and running:
-				phase = Phase.BORE
-		Phase.BORE:
-			if running:     # rams forward only as fast as the rock in front gives way
-				var push: float = DESCENT[speed] * World.METER * dt
-				_set_stroke(stroke + minf(push, _free_below_face(push + 1.0)))
-			if stroke >= STROKE and not _anyone_on_ladders():
-				phase = Phase.RELEASE
-				Sfx.play("lever", global_position, -6.0)
-		Phase.RELEASE:
-			grip = move_toward(grip, 0.0, dt / RELEASE_TIME)
-			if grip <= 0.0:
-				phase = Phase.ADVANCE
-		Phase.ADVANCE:
-			var step := minf(minf(ADVANCE_SPEED * dt, stroke), _free_below_reamers(ADVANCE_SPEED * dt + 1.0))
-			position.y += step
-			_set_stroke(stroke - step)       # the head stays put while the hull catches up
-			if stroke <= 0.0:
-				phase = Phase.GRIP
-				Sfx.play("lever", global_position, -6.0)
-	for l in _ladders:                    # ladders fold up while the braces are in
-		l.bottom = lerpf(DOOR_TOP + 10.0, BOTTOM + 30.0, grip)
-		l.queue_redraw()
+## Sinks as far as the rock in front of the head and under the reamers allows.
+func _sink(dt: float, running: bool) -> void:
+	if not running:
+		return
+	var push: float = DESCENT[speed] * World.METER * dt
+	var step := minf(push, minf(_free_below_face(push + 1.0), _free_below_reamers(push + 1.0)))
+	if step > 0.0:
+		position.y += step
+		moving = true
+
+
+## Braces let go while it sinks and grip when it holds still. Ladders come down whenever a
+## crew member is outside (so nobody gets locked out) and fold away once everyone is aboard.
+func _update_braces_and_ladders(dt: float) -> void:
+	grip = move_toward(grip, 0.0 if moving else 1.0, dt / BRACE_TIME)
+	var want := 1.0 if _anyone_outside() else 0.0
+	if want != ladders_out and (ladders_out == 0.0 or ladders_out == 1.0):
+		Sfx.play("lever", global_position, -8.0)          # the fold / unfold starts
+	ladders_out = move_toward(ladders_out, want, dt / LADDER_TIME)
+	for l in _ladders:
+		l.extend = ladders_out
+
+
+func _anyone_outside() -> bool:
+	for p: Player in get_tree().get_nodes_in_group("player"):
+		if not contains(p.global_position) or p.rope in _ladders:
+			return true
+	return false
 
 
 ## Free-falls (head, hull and all) when it breaks into a cave with nothing under it.
@@ -208,18 +203,6 @@ func _fall(dt: float) -> bool:
 	if _fall_v > CRASH_SPEED:     # crashed onto a cave floor (a drop of ~3.5 m or more)
 		damage((_fall_v - CRASH_SPEED + 30.0) * 0.12, global_position + Vector2(randf_range(-40, 40), BOTTOM))
 	_fall_v = 0.0
-	return false
-
-
-func _set_stroke(s: float) -> void:
-	stroke = clampf(s, 0.0, STROKE)
-	_head_shape.position.y = stroke
-
-
-func _anyone_on_ladders() -> bool:
-	for p: Player in get_tree().get_nodes_in_group("player"):
-		if p.rope in _ladders:
-			return true
 	return false
 
 
@@ -247,7 +230,7 @@ func _free_below(points: Array, limit: float) -> float:
 	return limit
 
 
-## Points along the cutting face (local, with the head's current stroke), every ~8 px.
+## Points along the cutting face (local), every ~8 px.
 func _face_points() -> Array:
 	var pts := []
 	for i in FACE.size() - 1:
@@ -255,8 +238,8 @@ func _face_points() -> Array:
 		var b: Vector2 = FACE[i + 1]
 		var n := int(ceil(a.distance_to(b) / 8.0))
 		for k in n:
-			pts.append(a.lerp(b, float(k) / n) + Vector2(0, stroke))
-	pts.append(FACE[-1] + Vector2(0, stroke))
+			pts.append(a.lerp(b, float(k) / n))
+	pts.append(FACE[-1])
 	return pts
 
 
@@ -269,7 +252,7 @@ func _cut_face(amount: float) -> bool:
 		var out := (b - a).orthogonal().normalized()    # points away from the head (down/out)
 		if out.y < 0.0:
 			out = -out
-		var off := Vector2(0, stroke) + out * CUTTER_REACH
+		var off := out * CUTTER_REACH
 		if world.dig(global_position + a + off, global_position + b + off, CUTTER_R, amount, false).hit:
 			hit = true      # (ore it grinds through is lost)
 	return hit
