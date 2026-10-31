@@ -17,6 +17,8 @@ func prompt(p: Player) -> String:
 		return ""
 	if downed.carried_by:
 		return ""
+	if downed is Survivor:
+		return "Tap E: carry the survivor to the drill"
 	return "Hold E: help %s up · tap E: carry" % downed.tag_name()
 
 

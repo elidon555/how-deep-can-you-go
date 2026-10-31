@@ -28,6 +28,7 @@ var _hearts := Hearts.new()
 var _breath := Breath.new()
 var _boss := BossBar.new()
 var _crew := _crew_label()
+var _jobs := Label.new()
 var _drill := DrillPanel.new()
 var _vignette := ColorRect.new()
 var _toast_tween: Tween
@@ -58,6 +59,7 @@ func _ready() -> void:
 	_label(_ore, Vector2(28, 150), 24, GOLD)
 	_label(_money, Vector2(28, 180), 24, Color("9fd88a"))
 	_label(_ropes, Vector2(28, 210), 24, Color("d9b98a"))
+	_label(_jobs, Vector2(28, 250), 18, Color("e8d48a"))
 	_drill.position = Vector2(1280 - 300, 20)
 	add_child(_drill)
 	_label(_toast, Vector2(0, 150), 36, Color("d9c9b0"))
@@ -92,6 +94,15 @@ func set_health(health: int, max_health: int) -> void:
 	_hearts.health = health
 	_hearts.max_health = max_health
 	_hearts.queue_redraw()
+
+
+## Jobs from the surface (Contracts), under your bag. Online, the host's list shows everywhere.
+func set_contracts(lines: Array) -> void:
+	var text := "\n".join(lines)
+	if text == _jobs.text:
+		return
+	Net.echo(&"hud", &"set_contracts", [lines])
+	_jobs.text = text
 
 
 ## The rest of the crew (top right, under the drill panel): one line per other miner.

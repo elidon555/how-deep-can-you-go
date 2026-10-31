@@ -46,6 +46,8 @@ var tips := Tips.new()
 var spawner := Spawner.new()
 var motes := CPUParticles2D.new()
 var session: NetSession = null       # online: this machine's side of the shared run
+var contracts := Contracts.new()     # jobs from the surface (host)
+var quakes := Quakes.new()           # the ground shifting (host)
 var _self_bound := false             # client: our own miner has been matched to the host's
 
 var shake := 0.0
@@ -144,6 +146,11 @@ func _ready() -> void:
 	tips.main = self
 	if not Progress.dry_run:
 		add_child(tips)
+	if not Net.is_client():              # (a client sees the host's)
+		contracts.main = self
+		add_child(contracts)
+		quakes.main = self
+		add_child(quakes)
 	if Net.is_online():
 		go_online()
 	_autotest()

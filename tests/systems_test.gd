@@ -37,6 +37,8 @@ func _ready() -> void:
 	_calm()
 	await _gear()
 	_calm()
+	await _jobs_and_quakes()
+	_calm()
 	_layers()
 	await _sonar_and_worm()
 	_calm()
@@ -714,6 +716,61 @@ func _gear() -> void:
 	p.ore_count = p.bag_space() + p.ore_count
 	_check("a full bag takes no more", not p.add_ore(0))
 	p.ore_count = 0
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+	await _frames(10)
+
+
+## Radio jobs (sell, hunt, rescue a trapped miner) and a quake.
+func _jobs_and_quakes() -> void:
+	var d: Drill = main.drill
+	var c: Contracts = main.contracts
+	c.jobs.clear()
+	var money := Progress.money
+	c._offer()
+	_check("the radio brings a job", c.jobs.size() == 1, str(c.jobs))
+	for j in c.jobs:
+		if j.kind == "rescue":
+			j.survivor.queue_free()
+	c.jobs.clear()
+	c.jobs.append({"kind": "sell", "text": "Sell", "goal": 20, "base": c._sold(), "reward": 12, "until": 9999.0})
+	c.jobs.append({"kind": "hunt", "text": "Hunt", "goal": 4, "base": main.kills, "reward": 24, "until": 9999.0})
+	p.sold_value += 999
+	main.kills += 99
+	await _frames(3)
+	_check("selling and hunting finish them", c.jobs.is_empty() and Progress.money > money, str(c.jobs.size()))
+	p.sold_value -= 999
+	var s: Survivor = c._place_survivor(d.global_position.y / World.METER + 40.0)
+	_check("a trapped miner is placed in a cave below", s != null)
+	if s:
+		c.jobs.append({"kind": "rescue", "text": "Rescue", "goal": 1, "base": 0, "survivor": s, "reward": 10,
+			"until": 9999.0})
+		p.global_position = s.global_position + Vector2(-12, 0)
+		await _frames(4)
+		_check("they can be carried", p.interactor.prompt_text().begins_with("Tap E: carry"), p.interactor.prompt_text())
+		await _hold(["interact"], 0.1)
+		await _frames(3)
+		_check("and are", p.carrying == s)
+		p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
+		await _frames(5)
+		_check("carried into the drill, they're rescued", not is_instance_valid(s) or s.is_queued_for_deletion())
+		_check("and your hands are free again", p.carrying == null)
+	# a quake: a tunnel near the miner fills back in, and the shaft above the drill caves in
+	var t := d.global_position + Vector2(-300, 200)
+	w.dig(t, t + Vector2(120, 0), 14.0, 99.0)
+	p.global_position = t + Vector2(-140, 0)
+	var open_before := 0
+	for x in range(0, 120, 8):
+		open_before += int(w.is_air(t + Vector2(x, 0)))
+	var shaft := d.global_position + Vector2(0, Drill.TOP - 135.0)
+	main.quakes.quake()
+	var open_after := 0
+	for x in range(0, 120, 8):
+		open_after += int(w.is_air(t + Vector2(x, 0)))
+	_check("a quake fills tunnels back in", open_after < open_before, "%d -> %d open" % [open_before, open_after])
+	var blocked := 0
+	for dy in range(-50, 50, 4):
+		blocked += int(not w.is_air(shaft + Vector2(0, dy)))
+	_check("and caves in the shaft above the drill", blocked > 0)
 	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	await _frames(10)
 

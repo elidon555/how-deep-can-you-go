@@ -16,7 +16,7 @@ const LOOKAHEAD := 0.2         # s of velocity to extrapolate at most
 
 ## kind, class, where clients put it ("world" or "main", like the host does)
 static var TYPES := [
-	["player", Player, "main"], ["bat", Bat, "main"], ["crawler", Crawler, "main"],
+	["survivor", Survivor, "main"], ["player", Player, "main"], ["bat", Bat, "main"], ["crawler", Crawler, "main"],
 	["worm", Worm, "main"], ["eye", TheEye, "main"], ["vein", TheEye.Vein, "main"],
 	["orb", TheEye.Orb, "main"], ["bolt", Turret.Bolt, "main"], ["gas", GasCloud, "main"],
 	["boulder", Boulder, "world"], ["crate", CampItems.LootCrate, "world"],
