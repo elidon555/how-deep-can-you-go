@@ -13,7 +13,7 @@ var wide := randi() % 2 + 3
 
 func _process(dt: float) -> void:
 	life -= dt
-	if not gone and (life <= 0.0 or global_position.distance_to(player.global_position) < 70.0):
+	if not gone and (life <= 0.0 or global_position.distance_to(player.global_position) < 130.0):
 		gone = true
 	fade = move_toward(fade, 0.0 if gone else 1.0, dt * (4.0 if gone else 0.6))
 	if gone and fade <= 0.0:
@@ -28,5 +28,5 @@ func _draw() -> void:
 	if blink < 0.0:
 		return
 	var c := Color(tint.r, tint.g, tint.b, fade)
-	draw_rect(Rect2(-wide, 0, 2, 1), c)
-	draw_rect(Rect2(wide - 1, 0, 2, 1), c)
+	draw_rect(Rect2(-wide * 2, 0, 3, 2), c)
+	draw_rect(Rect2(wide * 2 - 2, 0, 3, 2), c)

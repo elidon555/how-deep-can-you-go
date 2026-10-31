@@ -2,45 +2,26 @@ extends CharacterBody2D
 class_name Player
 ## The little digger. Tight platformer controls + directional digging + helmet lamp.
 
-signal digging(cell: Vector2i)   # every frame while chipping at a tile
+signal digging(pos: Vector2, mat: int)   # every frame while digging
 
-const SPEED := 110.0
-const ACCEL := 1000.0
-const FRICTION := 1400.0
-const GRAVITY := 900.0
-const JUMP_V := -270.0
-const MAX_FALL := 420.0
+const SPEED := 150.0
+const ACCEL := 1300.0
+const FRICTION := 1800.0
+const GRAVITY := 1100.0
+const JUMP_V := -390.0
+const MAX_FALL := 560.0
 const COYOTE := 0.1
 const JUMP_BUFFER := 0.12
 
-# pixel-art frames, facing right. 12 wide x 14 tall, feet on the last row.
-const PAL := {
-	"o": Color("0c090e"), "h": Color("e8b13a"), "H": Color("9c6a1c"), "L": Color("fff6d0"),
-	"s": Color("d99a74"), "e": Color("140c10"), "c": Color("35536a"), "d": Color("223646"),
-	"b": Color("3a2a20"), "B": Color("5a4130"),
+const SHEET := preload("res://assets/sprites/miner.png")
+const ANIMS := {   # row, frames, fps (from assets/sprites/miner.json)
+	"idle": [0, 4, 4.0], "run": [1, 8, 13.0], "jump": [2, 1, 1.0], "fall": [3, 1, 1.0],
+	"dig_side": [4, 6, 14.0], "dig_down": [5, 6, 14.0], "dig_up": [6, 6, 14.0],
 }
-const BODY := [
-	"...oooooo...",
-	"..ohhhhhhoo.",
-	"..ohhhhhhLLo",
-	".oHHHHHHHHo.",
-	"..ossssseo..",
-	"..osssssso..",
-	"..ocdcccco..",
-	".occdcccccoo",
-	".occdccccsso",
-	".occdcccco..",
-	"..oddBdddo..",
-]
-const LEGS := {
-	"idle": ["..occo.oco..", "..obbo.obbo.", "..ooo...ooo."],
-	"run1": [".occo...occo", ".obbo...obo.", ".ooo....ooo."],
-	"run2": ["...occooco..", "...obbobbo..", "...oooooo..."],
-	"jump": ["..occoocco..", ".obbo..obbo.", ".ooo....ooo."],
-}
+const FEET_BELOW_CENTER := 26.5
 
 var world: World
-var dig_power := 4.0   # damage per second (dirt has 1 HP, hard rock 5.5)
+var dig_power := 3.0   # fill removed per second at the centre of the dig (dirt)
 var light_mul := 1.0   # set by main for flicker
 var lamp_on := false
 var coyote_t := 0.0
@@ -48,25 +29,40 @@ var buffer_t := 0.0
 var facing := 1
 var squash := Vector2.ONE
 var dig_anim := 0.0
-var run_t := 0.0
+var sprite := Sprite2D.new()
+var anim := "idle"
+var anim_t := 0.0
+var dig_kind := ""
 var cone := PointLight2D.new()
 var glow := PointLight2D.new()
 
 
 func _ready() -> void:
+	floor_max_angle = deg_to_rad(50)
+	floor_snap_length = 6.0
 	var col := CollisionShape2D.new()
-	var shape := RectangleShape2D.new()
-	shape.size = Vector2(10, 14)
+	var shape := CapsuleShape2D.new()
+	shape.radius = 7.0
+	shape.height = 36.0
 	col.shape = shape
 	add_child(col)
+	sprite.texture = SHEET
+	sprite.hframes = 8
+	sprite.vframes = 7
+	sprite.position = Vector2(0, 18)                 # feet
+	sprite.offset = Vector2(0, -FEET_BELOW_CENTER)    # so scaling squashes from the feet
+	var unlit := CanvasItemMaterial.new()
+	unlit.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED   # always readable, like Dead Cells
+	sprite.material = unlit
+	add_child(sprite)
 
 	# helmet flashlight cone + small glow around the miner
 	cone.texture = _cone_texture()
-	cone.texture_scale = 1.35
+	cone.texture_scale = 2.3
 	cone.color = Color("ffd9a0")
 	cone.energy = 1.5
-	cone.height = 90.0
-	cone.position = Vector2(0, -3)
+	cone.height = 140.0
+	cone.position = Vector2(0, -12)
 	add_child(cone)
 	var g := Gradient.new()
 	g.set_color(0, Color(1, 1, 1, 1))
@@ -77,10 +73,10 @@ func _ready() -> void:
 	gt.fill_from = Vector2(0.5, 0.5)
 	gt.fill_to = Vector2(1.0, 0.5)
 	glow.texture = gt
-	glow.texture_scale = 0.55
+	glow.texture_scale = 1.0
 	glow.color = Color("ffcf99")
 	glow.energy = 0.8
-	glow.height = 60.0
+	glow.height = 90.0
 	add_child(glow)
 
 
@@ -114,28 +110,44 @@ func _physics_process(dt: float) -> void:
 	_handle_dig(dt, dir)
 	_update_lamp(dt)
 	squash = squash.lerp(Vector2.ONE, 12 * dt)
-	run_t += dt * absf(velocity.x) / SPEED
-	queue_redraw()
+	_animate(dt)
 
 
 func _handle_dig(dt: float, dir: float) -> void:
-	var target := Vector2i(-99999, 0)
-	if Input.is_action_pressed("down") and is_on_floor():
-		target = world.local_to_map(world.to_local(global_position + Vector2(0, 10)))
-		# slide to the middle of the tile so you fall cleanly into the hole
-		var cx := world.to_global(world.map_to_local(target)).x
-		velocity.x = (cx - global_position.x) * 12.0
-	elif Input.is_action_pressed("up"):
-		target = world.local_to_map(world.to_local(global_position + Vector2(0, -10)))
-	elif dir != 0 and is_on_wall():
-		target = world.local_to_map(world.to_local(global_position + Vector2(facing * 9, 0)))
-
-	if target.x == -99999 or world.get_type(target) == -1:
+	var down := Input.is_action_pressed("down")
+	var up := Input.is_action_pressed("up")
+	var c := global_position
+	var a := Vector2.ZERO
+	var b := Vector2.ZERO
+	var r := 0.0
+	dig_kind = ""
+	if down and dir != 0:                       # diagonal, down-left / down-right
+		a = c + Vector2(dir * 12, 16)
+		b = a
+		r = 12.0
+	elif down:
+		a = c + Vector2(0, 21)
+		b = a
+		r = 13.0
+	elif up:
+		a = c + Vector2(0, -21)
+		b = a
+		r = 13.0
+	elif dir != 0 and is_on_wall():           # tunnel sideways, as tall as you
+		a = c + Vector2(dir * 13, -10)
+		b = c + Vector2(dir * 13, 8)
+		r = 10.0
+	else:
 		dig_anim = 0
 		return
-	dig_anim += dt
-	digging.emit(target)
-	world.dig(target, dig_power * dt)
+	dig_kind = "dig_up" if up and not down else ("dig_side" if not down else "dig_down")
+	var res := world.dig(a, b, r, dig_power * dt)
+	if res.hit:
+		dig_anim += dt
+		digging.emit(a.lerp(b, 0.5), res.mat)
+	else:
+		dig_anim = 0
+		dig_kind = ""
 
 
 func _update_lamp(dt: float) -> void:
@@ -145,36 +157,32 @@ func _update_lamp(dt: float) -> void:
 	elif Input.is_action_pressed("up"):
 		aim = -PI / 2
 	cone.rotation = lerp_angle(cone.rotation, aim, 10.0 * dt)
+	cone.position = Vector2(4 * facing, -20)
 	cone.enabled = lamp_on
 	glow.enabled = lamp_on
 	cone.energy = 2.4 * light_mul
 	glow.energy = 1.1 * light_mul
 
 
-func _draw() -> void:
-	draw_set_transform(Vector2(0, 7), 0, squash)   # anchor at the feet
-	var legs: Array = LEGS.idle
-	if not is_on_floor():
-		legs = LEGS.jump
-	elif absf(velocity.x) > 10:
-		legs = LEGS.run1 if int(run_t * 8.0) % 2 == 0 else LEGS.run2
-	var rows: Array = BODY + legs
-	for y in rows.size():
-		var row: String = rows[y]
-		for x in row.length():
-			var ch := row[x]
-			if ch == ".":
-				continue
-			var px := x - 6 if facing > 0 else 5 - x
-			draw_rect(Rect2(px, y - rows.size(), 1, 1), PAL[ch])
-	# pickaxe (outline first, then wood + iron)
-	var swing := sin(dig_anim * 30.0) * 0.9 if dig_anim > 0 else 0.0
-	draw_set_transform(Vector2(facing * 4, 1), (0.5 + swing) * facing, squash)
-	draw_rect(Rect2(-1, -9, 3, 11), PAL.o)
-	draw_rect(Rect2(-4, -10, 9, 4), PAL.o)
-	draw_rect(Rect2(0, -8, 1, 9), Color("7a5636"))
-	draw_rect(Rect2(-3, -9, 7, 2), Color("aab2c0"))
-	draw_rect(Rect2(-3, -9, 7, 1), Color("d8dee8"))
+func _animate(dt: float) -> void:
+	var want := "idle"
+	if dig_kind != "":
+		want = dig_kind
+	elif not is_on_floor():
+		want = "jump" if velocity.y < 0 else "fall"
+	elif absf(velocity.x) > 15:
+		want = "run"
+	if want != anim:
+		anim = want
+		anim_t = 0.0
+	var a: Array = ANIMS[anim]
+	var speed := 1.0
+	if anim == "run":
+		speed = clampf(absf(velocity.x) / SPEED, 0.4, 1.2)
+	anim_t += dt * a[2] * speed
+	sprite.frame = a[0] * 8 + int(anim_t) % int(a[1])
+	sprite.flip_h = facing < 0
+	sprite.scale = squash
 
 
 static func _cone_texture() -> ImageTexture:

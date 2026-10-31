@@ -1,479 +1,482 @@
-extends TileMapLayer
+extends Node2D
 class_name World
-## Endless diggable ground, generated in chunks as the player goes down.
-## 1 tile = 1 meter. Row 0 is the surface.
-## Art is generated procedurally: every tile type has variants x 16 edge shapes
-## (which sides touch air), so terrain gets outlines, lit lips and dark interiors.
+## Endless smooth diggable ground. Under the hood: a fine grid of "fill" values
+## (8 px cells, 1 = solid rock, 0 = air). The terrain shader draws the 0.5
+## contour as smooth organic rock; collision uses the same contour (marching squares).
+## Generated in 32x32-cell chunks as the player goes down. 24 px = 1 meter.
 
-signal tile_broken(cell: Vector2i, type: int)
+signal ore_found(pos: Vector2)
 
-const TILE := 16
-const WIDTH := 48          # tiles across (outer columns are unbreakable walls)
-const CHUNK := 32          # rows generated at a time
-const AHEAD := 80          # keep this many rows generated below the player
-const VARIANTS := 3
+const CELL := 8
+const METER := 24.0
+const W := 128                  # cells across (outer 2 columns are bedrock)
+const C := 32                   # chunk size in cells (code uses >>5 / &31)
+const CHUNK_PX := C * CELL
+const WIDTH_PX := W * CELL
+const R_INT := 5                # how far (cells) the "deep inside rock" darkening reaches
+enum M { DIRT, STONE, HARD, BEDROCK }
+const HARDNESS := [1.0, 2.6, 5.5, INF]
+const COLORS := [Color("5a3c27"), Color("566275"), Color("3d3350"), Color("1d1924")]
 
-enum T { DIRT, STONE, HARD, ORE, BEDROCK, GRASS, FOSSIL }
-enum G { ORE, MUSHROOM, WORM }   # rows of the glow (unlit, bloomed) layer
+class Chunk:
+	var key: Vector2i
+	var fill := PackedFloat32Array()
+	var mat := PackedByteArray()
+	var img: Image
+	var tex_fill: ImageTexture
+	var tex_mat: ImageTexture
+	var rect: ColorRect
+	var shape: ConcavePolygonShape2D
+	var vis_dirty := false    # only fill values changed -> re-upload texture
+	var int_dirty := false    # rock/air changed -> rebuild images (depth darkening)
+	var col_dirty := false    # rock/air changed -> rebuild collision
 
-const HP := {T.DIRT: 1.0, T.GRASS: 1.0, T.FOSSIL: 1.5, T.STONE: 2.5, T.HARD: 5.5,
-	T.ORE: 2.0, T.BEDROCK: INF}
-const COLORS := {   # particle colours
-	T.DIRT: Color("5a3a26"), T.GRASS: Color("4a6b34"), T.FOSSIL: Color("d8cfb8"),
-	T.STONE: Color("56606e"), T.HARD: Color("3a3247"), T.ORE: Color("f2c14e"),
-	T.BEDROCK: Color("15131a"),
-}
-const PAL := {   # dark, mid, light, accent
-	"dirt": [Color("2e1d13"), Color("4a3120"), Color("654431"), Color("805c41")],
-	"stone": [Color("232834"), Color("404a5a"), Color("586577"), Color("78879c")],
-	"hard": [Color("18131f"), Color("2d263a"), Color("3f3552"), Color("594c6f")],
-	"bedrock": [Color("07060a"), Color("100e15"), Color("17141e"), Color("201c2a")],
-	"wall": [Color("1c1511"), Color("281f19"), Color("33281f"), Color("403228")],
-}
-const OUTLINE := Color("09070b")
-const UP := Vector2i(0, -1)
-const DOWN := Vector2i(0, 1)
-
-var types := {}            # Vector2i -> T
-var dug := {}              # cells the player dug out (not natural caves)
-var damage := {}           # Vector2i -> damage dealt so far
-var generated_rows := 0
-var glow := TileMapLayer.new()   # glowing decor; main puts it on an unlit layer
+var chunks := {}                # Vector2i -> Chunk
+var next_row := -2              # next chunk row to generate (rows < -2 are open sky)
+var dug := {}                   # cells the player carved (not natural caves)
+var ores := {}                  # cell -> [lit Sprite2D, glow Sprite2D]
+var decor := {}                 # anchor cell -> Array[Node2D]
+var glow_root := Node2D.new()   # main moves this onto the unlit glow layer
 var noise_cave := FastNoiseLite.new()
 var noise_mat := FastNoiseLite.new()
+var noise_surf := FastNoiseLite.new()
 var rng := RandomNumberGenerator.new()
-var cracks := Node2D.new()
-var ore_specks := []       # per variant: Array[Vector2i]
+var terrain_shader: Shader = preload("res://terrain.gdshader")
+var tx := {}
+var deco_tex := {}
 
 
 func _ready() -> void:
-	var r := RandomNumberGenerator.new()
-	r.seed = 99
-	for v in VARIANTS:
-		var s := []
-		for k in 4 + v:
-			s.append(Vector2i(2 + r.randi() % 11, 2 + r.randi() % 11))
-		ore_specks.append(s)
-	tile_set = _make_tileset()
-	glow.tile_set = _make_glow_tileset()
-	glow.modulate = Color(1.7, 1.7, 1.7)   # >1 = blooms with HDR glow
-
+	for n in ["dirt", "stone", "hard", "bedrock"]:
+		tx["t_" + n] = load("res://assets/terrain/%s.png" % n)
+		tx["n_" + n] = load("res://assets/terrain/%s_n.png" % n)
+	_make_decor_textures()
 	rng.randomize()
 	noise_cave.seed = rng.randi()
-	noise_cave.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	noise_cave.frequency = 0.07
+	noise_cave.frequency = 0.0045
+	noise_cave.fractal_octaves = 4
 	noise_mat.seed = rng.randi()
-	noise_mat.frequency = 0.05
-	# side walls above the surface so you can't walk off the world
-	for y in range(-30, 0):
-		types[Vector2i(0, y)] = T.BEDROCK
-		types[Vector2i(WIDTH - 1, y)] = T.BEDROCK
-	for y in range(-30, 0):
-		_refresh(Vector2i(0, y))
-		_refresh(Vector2i(WIDTH - 1, y))
-	ensure_generated(AHEAD)
-	cracks.z_index = 1
-	add_child(cracks)
-	cracks.draw.connect(_draw_cracks)
+	noise_mat.frequency = 0.006
+	noise_surf.seed = rng.randi()
+	noise_surf.frequency = 0.01
+	ensure_generated(CHUNK_PX * 4)
 
 
 # ---------------------------------------------------------------- generation
 
-func ensure_generated(row: int) -> void:
-	while generated_rows < row:
-		var g := generated_rows
-		for y in range(g, g + CHUNK):
-			_gen_row(y)
-		generated_rows += CHUNK
-		for y in range(maxi(g - 1, 0), g + CHUNK):
-			for x in WIDTH:
-				_refresh(Vector2i(x, y))
-		_decorate(g)
+func ensure_generated(y_px: float) -> void:
+	var want := int(floor(y_px / CHUNK_PX)) + 1
+	while next_row <= want:
+		for cx in W / C:
+			_gen_chunk(Vector2i(cx, next_row))
+		for cx in W / C:
+			_populate(chunks[Vector2i(cx, next_row)])
+		# the row above can now see this row (margins, collision across the seam)
+		for cx in W / C:
+			for r in [next_row - 1, next_row]:
+				var ch: Chunk = chunks.get(Vector2i(cx, r))
+				if ch:
+					ch.int_dirty = true
+					ch.col_dirty = true
+		next_row += 1
+	_flush()
 
 
-func _gen_row(y: int) -> void:
-	for x in WIDTH:
-		var c := Vector2i(x, y)
-		if x == 0 or x == WIDTH - 1:
-			types[c] = T.BEDROCK
-			continue
-		if y == 0:
-			types[c] = T.GRASS
-			continue
-		var depth := float(y)
-		# caves start a bit below the surface and get bigger deeper
-		if y > 8 and noise_cave.get_noise_2d(x, y) > 0.5 - minf(depth / 500.0, 0.15):
-			continue
-		var m := noise_mat.get_noise_2d(x, y) * 0.5 + 0.5
-		var t := T.DIRT
-		if m < clampf((depth - 5.0) / 120.0, 0.0, 0.85):
-			t = T.STONE
-		if m < clampf((depth - 60.0) / 250.0, 0.0, 0.7):
-			t = T.HARD
-		if t != T.DIRT and rng.randf() < 0.035:
-			t = T.ORE
-		if t == T.DIRT and y > 6 and rng.randf() < 0.012:
-			t = T.FOSSIL
-		types[c] = t
+func _gen_chunk(key: Vector2i) -> void:
+	var ch := Chunk.new()
+	ch.key = key
+	ch.fill.resize(C * C)
+	ch.mat.resize(C * C)
+	for j in C:
+		for i in C:
+			var v := _gen_cell(key.x * C + i, key.y * C + j)
+			ch.fill[j * C + i] = v.x
+			ch.mat[j * C + i] = int(v.y)
+	ch.rect = ColorRect.new()
+	ch.rect.position = Vector2(key) * CHUNK_PX
+	ch.rect.size = Vector2(CHUNK_PX, CHUNK_PX)
+	ch.rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = terrain_shader
+	for k in tx:
+		mat.set_shader_parameter(k, tx[k])
+	mat.set_shader_parameter("origin", ch.rect.position)
+	ch.rect.material = mat
+	add_child(ch.rect)
+	var body := StaticBody2D.new()
+	body.position = ch.rect.position
+	var cs := CollisionShape2D.new()
+	ch.shape = ConcavePolygonShape2D.new()
+	cs.shape = ch.shape
+	body.add_child(cs)
+	add_child(body)
+	chunks[key] = ch
 
 
-func _decorate(g: int) -> void:
-	for y in range(maxi(g, 2), g + CHUNK):
-		for x in range(1, WIDTH - 1):
-			var c := Vector2i(x, y)
-			var solid := types.has(c)
-			var above := types.has(c + UP)
-			if solid and types[c] == T.ORE:
-				glow.set_cell(c, 0, Vector2i(_variant(c), G.ORE))
-			elif solid and not above and y > 10 and rng.randf() < 0.14:
-				glow.set_cell(c + UP, 0, Vector2i(_variant(c), G.MUSHROOM))   # on cave floors
-			elif not solid and above and y > 25 and rng.randf() < 0.10:
-				glow.set_cell(c, 0, Vector2i(_variant(c), G.WORM))            # hanging from ceilings
+func _gen_cell(gx: int, gy: int) -> Vector2:
+	if gx < 2 or gx >= W - 2:
+		return Vector2(1.0, M.BEDROCK)
+	var px := gx * CELL + 4.0
+	var py := gy * CELL + 4.0
+	var surf := noise_surf.get_noise_1d(px) * 10.0          # gentle bumps at the surface
+	if py < surf:
+		return Vector2(0.0, M.DIRT)
+	var depth := py / METER
+	# caves: none right under the grass, bigger the deeper you go
+	var t := 0.2 - minf(depth / 800.0, 0.08) + maxf(0.0, 8.0 - depth) * 0.15
+	var fill := clampf(0.5 + (t - noise_cave.get_noise_2d(px, py)) * 5.0, 0.0, 1.0)
+	fill = minf(fill, clampf((py - surf) / CELL + 0.5, 0.0, 1.0))
+	var m := noise_mat.get_noise_2d(px, py) * 0.5 + 0.5
+	var mat := M.DIRT
+	if m < clampf((depth - 4.0) / 110.0, 0.0, 0.85):
+		mat = M.STONE
+	if m < clampf((depth - 50.0) / 250.0, 0.0, 0.7):
+		mat = M.HARD
+	return Vector2(fill, mat)
 
 
-func _variant(c: Vector2i) -> int:
-	return absi((c.x * 73856093) ^ (c.y * 19349663)) % VARIANTS
+## Ore, bones, glowing mushrooms and worms.
+func _populate(ch: Chunk) -> void:
+	for j in C:
+		for i in C:
+			var gx := ch.key.x * C + i
+			var gy := ch.key.y * C + j
+			if gx < 3 or gx >= W - 3 or gy < 2:
+				continue
+			var f := ch.fill[j * C + i]
+			var m := ch.mat[j * C + i]
+			var depth := gy * CELL / METER
+			var pos := Vector2(gx * CELL + 4, gy * CELL + 4)
+			if f >= 0.5:
+				if (m == M.STONE or m == M.HARD) and rng.randf() < 0.004:
+					var lit := _sprite(deco_tex.ore, pos, self, 1)
+					var gl := _sprite(deco_tex.ore_glow, pos, glow_root, 0)
+					ores[Vector2i(gx, gy)] = [lit, gl]
+				elif m == M.DIRT and depth > 3 and rng.randf() < 0.0008:
+					_add_decor(Vector2i(gx, gy), _sprite(deco_tex.skull, pos, self, 1))
+				elif depth > 5 and get_fill(gx, gy - 1) < 0.5 and get_fill(gx, gy - 2) < 0.5 \
+						and rng.randf() < 0.06:
+					var mush := _sprite(deco_tex.mushroom, Vector2(pos.x, gy * CELL - 5), glow_root, 0)
+					_add_decor(Vector2i(gx, gy), mush)
+					if rng.randf() < 0.5:
+						_add_decor(Vector2i(gx, gy), _light(Vector2(pos.x, gy * CELL - 8), Color("3fe0c0"), 0.55, 0.9))
+			elif depth > 10 and get_fill(gx, gy - 1) >= 0.5 and rng.randf() < 0.035:
+				var worm := _sprite(deco_tex.worm, Vector2(pos.x, gy * CELL + 10), glow_root, 0)
+				_add_decor(Vector2i(gx, gy - 1), worm)
 
 
-func is_solid(c: Vector2i) -> bool:
-	if c.x < 0 or c.x >= WIDTH or c.y >= generated_rows:
-		return true
-	return types.has(c)
+func _light(pos: Vector2, color: Color, scale: float, energy: float) -> PointLight2D:
+	var l := PointLight2D.new()
+	l.texture = deco_tex.light
+	l.texture_scale = scale
+	l.color = color
+	l.energy = energy
+	l.height = 40.0
+	l.position = pos
+	add_child(l)
+	return l
 
 
-func _refresh(c: Vector2i) -> void:
-	if not types.has(c):
-		erase_cell(c)
+func _sprite(t: Texture2D, pos: Vector2, parent: Node, z: int) -> Sprite2D:
+	var s := Sprite2D.new()
+	s.texture = t
+	s.position = pos
+	s.z_index = z
+	s.flip_h = rng.randf() < 0.5
+	parent.add_child(s)
+	return s
+
+
+func _add_decor(cell: Vector2i, n: Node2D) -> void:
+	if not decor.has(cell):
+		decor[cell] = []
+	decor[cell].append(n)
+
+
+# ---------------------------------------------------------------- queries
+
+func get_fill(gx: int, gy: int) -> float:
+	if gx < 0 or gx >= W:
+		return 1.0
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null:
+		return 0.0 if (gy >> 5) < -2 else 1.0
+	return ch.fill[(gy & 31) * C + (gx & 31)]
+
+
+func get_mat(gx: int, gy: int) -> int:
+	if gx < 0 or gx >= W:
+		return M.BEDROCK
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null:
+		return M.STONE
+	return ch.mat[(gy & 31) * C + (gx & 31)]
+
+
+func cell_at(p: Vector2) -> Vector2i:
+	return Vector2i(int(floor(p.x / CELL)), int(floor(p.y / CELL)))
+
+
+func is_air(p: Vector2) -> bool:
+	var c := cell_at(p)
+	return get_fill(c.x, c.y) < 0.5
+
+
+# ---------------------------------------------------------------- digging
+
+## Digs a capsule (segment a-b, radius r). Returns {hit: bool, mat: int}.
+func dig(a: Vector2, b: Vector2, r: float, amount: float) -> Dictionary:
+	var lo := cell_at(Vector2(minf(a.x, b.x) - r, minf(a.y, b.y) - r))
+	var hi := cell_at(Vector2(maxf(a.x, b.x) + r, maxf(a.y, b.y) + r))
+	var hit := false
+	var hit_mat := -1
+	for gy in range(lo.y, hi.y + 1):
+		for gx in range(lo.x, hi.x + 1):
+			var p := Vector2(gx * CELL + 4, gy * CELL + 4)
+			var dist := Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p)
+			if dist > r:
+				continue
+			var f := get_fill(gx, gy)
+			if f <= 0.0:
+				continue
+			var m := get_mat(gx, gy)
+			if m == M.BEDROCK:
+				continue
+			var nf := maxf(0.0, f - amount * (1.0 - 0.6 * dist / r) / HARDNESS[m])
+			_set_fill(gx, gy, nf, f)
+			hit = true
+			hit_mat = m
+	return {"hit": hit, "mat": hit_mat}
+
+
+func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
+	var ch: Chunk = chunks.get(Vector2i(gx >> 5, gy >> 5))
+	if ch == null:
 		return
-	var mask := 0
-	if not is_solid(c + UP): mask |= 1
-	if not is_solid(c + Vector2i(1, 0)): mask |= 2
-	if not is_solid(c + DOWN): mask |= 4
-	if not is_solid(c + Vector2i(-1, 0)): mask |= 8
-	set_cell(c, 0, Vector2i(mask + 16 * _variant(c), types[c]))
-
-
-func get_type(cell: Vector2i) -> int:
-	return types.get(cell, -1)
-
-
-## Adds dig damage to a tile. Returns true if the tile broke.
-func dig(cell: Vector2i, amount: float) -> bool:
-	var t := get_type(cell)
-	if t == -1 or t == T.BEDROCK:
-		return false
-	damage[cell] = damage.get(cell, 0.0) + amount
-	cracks.queue_redraw()
-	if damage[cell] >= HP[t]:
-		damage.erase(cell)
-		types.erase(cell)
+	ch.fill[(gy & 31) * C + (gx & 31)] = nf
+	var crossed := old >= 0.5 and nf < 0.5
+	# update the fill pixel in every chunk image whose 1-cell margin covers this cell
+	for kx in _keys_covering(gx, 1):
+		for ky in _keys_covering(gy, 1):
+			var o: Chunk = chunks.get(Vector2i(kx, ky))
+			if o and o.img:
+				var li: int = gx - kx * C + 1
+				var lj: int = gy - ky * C + 1
+				var px := o.img.get_pixel(li, lj)
+				px.r = nf
+				o.img.set_pixel(li, lj, px)
+				o.vis_dirty = true
+	if crossed:
+		var cell := Vector2i(gx, gy)
 		dug[cell] = true
-		_refresh(cell)
-		for d in [UP, DOWN, Vector2i(1, 0), Vector2i(-1, 0)]:
-			_refresh(cell + d)
-		glow.erase_cell(cell)
-		if glow.get_cell_atlas_coords(cell + UP).y == G.MUSHROOM:
-			glow.erase_cell(cell + UP)
-		if glow.get_cell_atlas_coords(cell + DOWN).y == G.WORM:
-			glow.erase_cell(cell + DOWN)
-		tile_broken.emit(cell, t)
-		return true
-	return false
+		for kx in _keys_covering(gx, R_INT + 1):
+			for ky in _keys_covering(gy, R_INT + 1):
+				var o: Chunk = chunks.get(Vector2i(kx, ky))
+				if o:
+					o.int_dirty = true
+		for k in [Vector2i(gx, gy), Vector2i(gx - 1, gy), Vector2i(gx, gy - 1), Vector2i(gx - 1, gy - 1)]:
+			var o: Chunk = chunks.get(Vector2i(k.x >> 5, k.y >> 5))
+			if o:
+				o.col_dirty = true
+		if ores.has(cell):
+			for n in ores[cell]:
+				n.queue_free()
+			ores.erase(cell)
+			ore_found.emit(Vector2(gx * CELL + 4, gy * CELL + 4))
+		if decor.has(cell):
+			for n in decor[cell]:
+				n.queue_free()
+			decor.erase(cell)
 
 
-func _draw_cracks() -> void:
-	for cell in damage:
-		var t := get_type(cell)
-		if t == -1:
-			continue
-		var p: float = clampf(damage[cell] / HP[t], 0.0, 1.0)
-		var o := Vector2(cell * TILE)
-		var col := Color(0, 0, 0, 0.45 + 0.4 * p)
-		var lines := [
-			[Vector2(8, 8), Vector2(3, 2)], [Vector2(8, 8), Vector2(14, 5)],
-			[Vector2(8, 8), Vector2(5, 14)], [Vector2(8, 8), Vector2(13, 13)],
-			[Vector2(3, 2), Vector2(1, 7)], [Vector2(14, 5), Vector2(15, 1)],
-		]
-		for i in int(ceil(p * lines.size())):
-			cracks.draw_line(o + lines[i][0], o + lines[i][1], col, 1.0)
+## Chunk indices whose window [-margin, C-1+margin] contains global cell g.
+func _keys_covering(g: int, margin: int) -> Array:
+	var out := []
+	for k in range((g - C + 1 - margin) >> 5, ((g + margin) >> 5) + 1):
+		var l := g - k * C
+		if l >= -margin and l < C + margin:
+			out.append(k)
+	return out
 
 
-# ---------------------------------------------------------------- tile art
-
-func _make_tileset() -> TileSet:
-	var cols := 16 * VARIANTS
-	var img := Image.create(TILE * cols, TILE * T.size(), false, Image.FORMAT_RGBA8)
-	for t in T.size():
-		for v in VARIANTS:
-			var base := _base_pattern(t, v)
-			for mask in 16:
-				_paint(img, mask + 16 * v, t, t, v, mask, base)
-	var ts := TileSet.new()
-	ts.tile_size = Vector2i(TILE, TILE)
-	ts.add_physics_layer()
-	var src := TileSetAtlasSource.new()
-	src.texture = make_lit_texture(img)
-	src.texture_region_size = Vector2i(TILE, TILE)
-	ts.add_source(src, 0)
-	var h := TILE / 2.0
-	var poly := PackedVector2Array([Vector2(-h, -h), Vector2(h, -h), Vector2(h, h), Vector2(-h, h)])
-	for t in T.size():
-		for x in cols:
-			src.create_tile(Vector2i(x, t))
-			var td := src.get_tile_data(Vector2i(x, t), 0)
-			td.add_collision_polygon(0)
-			td.set_collision_polygon_points(0, 0, poly)
-	return ts
+func _process(_dt: float) -> void:
+	_flush()
 
 
-## Base texture of a tile type+variant (shared by all 16 edge shapes so digging
-## next to a tile doesn't change its look).
-func _base_pattern(t: int, v: int) -> PackedColorArray:
+func _flush() -> void:
+	for ch: Chunk in chunks.values():
+		if ch.int_dirty:
+			_build_images(ch)
+			ch.int_dirty = false
+			ch.vis_dirty = false
+		elif ch.vis_dirty:
+			ch.tex_fill.update(ch.img)
+			ch.vis_dirty = false
+		if ch.col_dirty:
+			_build_collision(ch)
+			ch.col_dirty = false
+
+
+func _build_images(ch: Chunk) -> void:
+	var n := C + 2
+	var ext := n + 2 * R_INT
+	var ox := ch.key.x * C - 1 - R_INT
+	var oy := ch.key.y * C - 1 - R_INT
+	# distance (in cells) to the nearest air, two-pass chamfer
+	var dist := PackedFloat32Array()
+	dist.resize(ext * ext)
+	for j in ext:
+		for i in ext:
+			dist[j * ext + i] = 0.0 if get_fill(ox + i, oy + j) < 0.5 else 99.0
+	for j in ext:
+		for i in ext:
+			var k := j * ext + i
+			var d := dist[k]
+			if d == 0.0:
+				continue
+			if i > 0: d = minf(d, dist[k - 1] + 1.0)
+			if j > 0:
+				d = minf(d, dist[k - ext] + 1.0)
+				if i > 0: d = minf(d, dist[k - ext - 1] + 1.41)
+				if i < ext - 1: d = minf(d, dist[k - ext + 1] + 1.41)
+			dist[k] = d
+	for j in range(ext - 1, -1, -1):
+		for i in range(ext - 1, -1, -1):
+			var k := j * ext + i
+			var d := dist[k]
+			if d == 0.0:
+				continue
+			if i < ext - 1: d = minf(d, dist[k + 1] + 1.0)
+			if j < ext - 1:
+				d = minf(d, dist[k + ext] + 1.0)
+				if i < ext - 1: d = minf(d, dist[k + ext + 1] + 1.41)
+				if i > 0: d = minf(d, dist[k + ext - 1] + 1.41)
+			dist[k] = d
+	var data := PackedByteArray()
+	data.resize(n * n * 4)
+	var mdata := PackedByteArray()
+	mdata.resize(n * n * 4)
+	for j in n:
+		for i in n:
+			var gx := ch.key.x * C - 1 + i
+			var gy := ch.key.y * C - 1 + j
+			var k := (j * n + i) * 4
+			data[k] = int(clampf(get_fill(gx, gy), 0.0, 1.0) * 255.0)
+			data[k + 1] = int(clampf((dist[(j + R_INT) * ext + i + R_INT] - 1.0) / R_INT, 0.0, 1.0) * 255.0)
+			data[k + 3] = 255
+			mdata[k + get_mat(gx, gy)] = 255
+	ch.img = Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, data)
+	var mimg := Image.create_from_data(n, n, false, Image.FORMAT_RGBA8, mdata)
+	if ch.tex_fill == null:
+		ch.tex_fill = ImageTexture.create_from_image(ch.img)
+		ch.tex_mat = ImageTexture.create_from_image(mimg)
+		ch.rect.material.set_shader_parameter("fill_map", ch.tex_fill)
+		ch.rect.material.set_shader_parameter("mat_map", ch.tex_mat)
+	else:
+		ch.tex_fill.update(ch.img)
+		ch.tex_mat.update(mimg)
+
+
+func _build_collision(ch: Chunk) -> void:
+	var bx := ch.key.x * C
+	var by := ch.key.y * C
+	var s := C + 1
+	var f := PackedFloat32Array()
+	f.resize(s * s)
+	for j in s:
+		for i in s:
+			f[j * s + i] = get_fill(bx + i, by + j)
+	var segs := PackedVector2Array()
+	for j in C:
+		for i in C:
+			var a := f[j * s + i]
+			var b := f[j * s + i + 1]
+			var c := f[(j + 1) * s + i + 1]
+			var d := f[(j + 1) * s + i]
+			var idx := (8 if a >= 0.5 else 0) | (4 if b >= 0.5 else 0) | (2 if c >= 0.5 else 0) | (1 if d >= 0.5 else 0)
+			if idx == 0 or idx == 15:
+				continue
+			var p := Vector2(i * CELL + CELL * 0.5, j * CELL + CELL * 0.5)
+			var top := p + Vector2(_t(a, b) * CELL, 0)
+			var right := p + Vector2(CELL, _t(b, c) * CELL)
+			var bottom := p + Vector2(_t(d, c) * CELL, CELL)
+			var left := p + Vector2(0, _t(a, d) * CELL)
+			match idx:
+				1, 14: segs.append_array([left, bottom])
+				2, 13: segs.append_array([bottom, right])
+				3, 12: segs.append_array([left, right])
+				4, 11: segs.append_array([top, right])
+				6, 9: segs.append_array([top, bottom])
+				7, 8: segs.append_array([left, top])
+				5: segs.append_array([left, top, bottom, right])
+				10: segs.append_array([top, right, left, bottom])
+	ch.shape.segments = segs
+
+
+func _t(a: float, b: float) -> float:
+	return 0.5 if is_equal_approx(a, b) else clampf((0.5 - a) / (b - a), 0.0, 1.0)
+
+
+# ---------------------------------------------------------------- decor art (placeholder until Blender props)
+
+func _make_decor_textures() -> void:
+	var lg := Gradient.new()
+	lg.set_color(0, Color(1, 1, 1, 1))
+	lg.set_color(1, Color(1, 1, 1, 0))
+	lg.add_point(0.4, Color(1, 1, 1, 0.35))
+	var lt := GradientTexture2D.new()
+	lt.gradient = lg
+	lt.fill = GradientTexture2D.FILL_RADIAL
+	lt.fill_from = Vector2(0.5, 0.5)
+	lt.fill_to = Vector2(1.0, 0.5)
+	lt.width = 256
+	lt.height = 256
+	deco_tex.light = lt
+	var gold := Color("f2c14e")
+	# ore: rough stone lump with gold nuggets (lit) + just the gold (glow)
+	var ore := Image.create(14, 12, false, Image.FORMAT_RGBA8)
+	var ore_g := Image.create(14, 12, false, Image.FORMAT_RGBA8)
 	var r := RandomNumberGenerator.new()
-	r.seed = t * 1000 + v * 17 + 5
-	var px := PackedColorArray()
-	px.resize(TILE * TILE)
-	match t:
-		T.DIRT, T.GRASS, T.FOSSIL:
-			_dirt(px, r, PAL.dirt, v)
-		T.STONE, T.ORE:
-			_rocks(px, r, PAL.stone, 5)
-		T.HARD:
-			_rocks(px, r, PAL.hard, 7)
-			_walk(px, r, Color("4d1f2e"), r.randi() % TILE, 0, 14)   # dark red veins
-		T.BEDROCK:
-			_rocks(px, r, PAL.bedrock, 6)
-	if t == T.ORE:
-		for s in ore_specks[v]:
-			_px(px, s.x, s.y, Color("f2c14e"))
-			_px(px, s.x + 1, s.y, Color("c9922f"))
-			_px(px, s.x, s.y + 1, Color("6b4a1a"))
-	if t == T.FOSSIL:
-		var bone := Color("cfc6ae")
-		var hole := Color("140c08")
-		var sx := 4 + v * 2
-		var sy := 4 + v
-		if v == 2:   # ribs
-			for i in 4:
-				for k in 7:
-					_px(px, sx - 2 + k, sy + i * 2, bone if k != 3 else bone.darkened(0.2))
-		else:        # skull
-			var skull := [".xxxx.", "xxxxxx", "xooxox", "xxxxxx", ".xxxx.", ".x.x.."]
-			for yy in skull.size():
-				for xx in skull[yy].length():
-					var ch: String = skull[yy][xx]
-					if ch != ".":
-						_px(px, sx + xx, sy + yy, bone if ch == "x" else hole)
-	return px
-
-
-func _dirt(px: PackedColorArray, r: RandomNumberGenerator, pal: Array, v: int) -> void:
-	var n := FastNoiseLite.new()
-	n.seed = r.randi()
-	n.frequency = 0.2
-	for y in TILE:
-		for x in TILE:
-			var k := n.get_noise_2d(x, y)
-			px[y * TILE + x] = pal[0] if k < -0.3 else (pal[1] if k < 0.2 else pal[2])
-	for i in 12:
-		_px(px, r.randi() % TILE, r.randi() % TILE, pal[3] if i % 2 else pal[0])
-	for i in 2:   # pebbles
-		var x := 1 + r.randi() % 13
-		var y := 1 + r.randi() % 13
-		_px(px, x, y, Color("6e625a"))
-		_px(px, x + 1, y, Color("4a403a"))
-		_px(px, x, y + 1, Color("4a403a"))
-	if v == 1:    # roots
-		_walk(px, r, Color("1a100a"), r.randi() % TILE, 0, 12)
-
-
-func _rocks(px: PackedColorArray, r: RandomNumberGenerator, pal: Array, count: int) -> void:
-	var seeds := []
-	for i in count:
-		seeds.append(Vector2(r.randf() * TILE, r.randf() * TILE))
-	for y in TILE:
-		for x in TILE:
-			var p := Vector2(x + 0.5, y + 0.5)
-			var d1 := 999.0
-			var d2 := 999.0
-			var near := Vector2.ZERO
-			for s in seeds:
-				for ox in [-TILE, 0, TILE]:       # wrap so a tile repeats seamlessly
-					for oy in [-TILE, 0, TILE]:
-						var q: Vector2 = s + Vector2(ox, oy)
-						var d := p.distance_to(q)
-						if d < d1:
-							d2 = d1
-							d1 = d
-							near = q
-						elif d < d2:
-							d2 = d
-			var c: Color
-			if d2 - d1 < 1.2:
-				c = pal[0]                       # crack between stones
-			else:
-				var rel := (p - near)
-				var lit := -(rel.x + rel.y)       # light from top-left
-				c = pal[3] if lit > 3.0 else (pal[2] if lit > -1.5 else pal[1])
-			px[y * TILE + x] = c
-
-
-func _walk(px: PackedColorArray, r: RandomNumberGenerator, c: Color, x: int, y: int, steps: int) -> void:
-	for i in steps:
-		_px(px, x, y, c)
-		y += 1
-		x += r.randi_range(-1, 1)
-
-
-func _px(px: PackedColorArray, x: int, y: int, c: Color) -> void:
-	if x >= 0 and x < TILE and y >= 0 and y < TILE:
-		px[y * TILE + x] = c
-
-
-## Paints one tile: base pattern + edge treatment for the sides that touch air.
-func _paint(img: Image, tx: int, ty: int, t: int, v: int, mask: int, base: PackedColorArray) -> void:
-	var ox := tx * TILE
-	var oy := ty * TILE
-	var er := RandomNumberGenerator.new()
-	er.seed = t * 7919 + v * 104729 + mask * 31
-	var drips := []
-	for i in TILE:
-		drips.append(2 + (er.randi() % 4 if er.randf() < 0.3 else 0))
-	for py in TILE:
-		for px in TILE:
-			var c: Color = base[py * TILE + px]
-			var d := 99
-			if mask & 1: d = mini(d, py)
-			if mask & 2: d = mini(d, TILE - 1 - px)
-			if mask & 4: d = mini(d, TILE - 1 - py)
-			if mask & 8: d = mini(d, px)
-			# rock gets darker the further it is from open air
-			c = c.darkened(clampf((d - 2) / 7.0, 0.0, 1.0) * 0.45)
-			if mask & 1 and py <= 1:
-				c = c.lightened(0.28 if py == 0 else 0.12)          # lit top lip
-			if mask & 4 and TILE - 1 - py < drips[px]:
-				c = OUTLINE if py == TILE - 1 else c.darkened(0.5)  # dark underside
-			if mask & 8 and px == 0:
-				c = c.darkened(0.45)
-			if mask & 2 and px == TILE - 1:
-				c = c.darkened(0.45)
-			if t == T.GRASS and mask & 1 and py < 3 + (px * 5 + v) % 3:
-				c = Color("3f5c2c").lightened(0.15 if py == 0 else 0.0).darkened(er.randf() * 0.2)
-			img.set_pixel(ox + px, oy + py, c)
-	# chunky rounded corners where two open sides meet
-	var corners := [[1 | 8, 0, 0, 1, 1], [1 | 2, TILE - 1, 0, -1, 1],
-		[4 | 8, 0, TILE - 1, 1, -1], [4 | 2, TILE - 1, TILE - 1, -1, -1]]
-	for k in corners:
-		if mask & k[0] == k[0]:
-			for p in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1)]:
-				img.set_pixel(ox + k[1] + p.x * k[3], oy + k[2] + p.y * k[4], Color(0, 0, 0, 0))
-			img.set_pixel(ox + k[1] + k[3], oy + k[2] + k[4], OUTLINE)
-
-
-func _make_glow_tileset() -> TileSet:
-	var img := Image.create(TILE * VARIANTS, TILE * G.size(), false, Image.FORMAT_RGBA8)
-	var r := RandomNumberGenerator.new()
-	r.seed = 7
-	for v in VARIANTS:
-		var ox := v * TILE
-		for s in ore_specks[v]:
-			img.set_pixel(ox + s.x, s.y, Color("ffd36a"))
-			img.set_pixel(ox + s.x + 1, s.y, Color("e0a840"))
-		# glowing mushrooms standing on the floor (bottom of the tile)
-		var oy := G.MUSHROOM * TILE
-		for m in 2 + v % 2:
-			var x := 2 + r.randi() % 12
-			var hgt := 2 + r.randi() % 4
-			for k in hgt:
-				img.set_pixel(ox + x, oy + TILE - 1 - k, Color("9fc9bf"))
-			var top := TILE - 1 - hgt
-			for dx in [-2, -1, 0, 1, 2]:
-				img.set_pixel(ox + clampi(x + dx, 0, TILE - 1), oy + top, Color("2fb8a0"))
-			for dx in [-1, 0, 1]:
-				img.set_pixel(ox + clampi(x + dx, 0, TILE - 1), oy + top - 1, Color("5ff0d4"))
-			img.set_pixel(ox + x, oy + top - 1, Color("c0fff4"))
-		# glow-worm threads hanging from the ceiling (top of the tile)
-		oy = G.WORM * TILE
-		for w in 3 + v:
-			var x := 1 + r.randi() % 14
-			var length := 3 + r.randi() % 10
-			for k in length:
-				img.set_pixel(ox + x, oy + k, Color(0.35, 0.65, 0.7, 0.55))
-			img.set_pixel(ox + x, oy + length, Color("b8fbff"))
-	var ts := TileSet.new()
-	ts.tile_size = Vector2i(TILE, TILE)
-	var src := TileSetAtlasSource.new()
-	src.texture = ImageTexture.create_from_image(img)
-	src.texture_region_size = Vector2i(TILE, TILE)
-	ts.add_source(src, 0)
-	for g in G.size():
-		for v in VARIANTS:
-			src.create_tile(Vector2i(v, g))
-	return ts
-
-
-## Seamless rock texture for the cave back wall.
-func make_wall_texture() -> CanvasTexture:
-	var s := 64
-	var img := Image.create(s, s, false, Image.FORMAT_RGBA8)
-	var r := RandomNumberGenerator.new()
-	r.seed = 4242
-	var pal: Array = PAL.wall
-	var seeds := []
-	for i in 14:
-		seeds.append(Vector2(r.randf() * s, r.randf() * s))
-	for y in s:
-		for x in s:
-			var p := Vector2(x + 0.5, y + 0.5)
-			var d1 := 999.0
-			var d2 := 999.0
-			var near := Vector2.ZERO
-			for sd in seeds:
-				for ox in [-s, 0, s]:
-					for oy in [-s, 0, s]:
-						var q: Vector2 = sd + Vector2(ox, oy)
-						var d := p.distance_to(q)
-						if d < d1:
-							d2 = d1
-							d1 = d
-							near = q
-						elif d < d2:
-							d2 = d
-			var c: Color
-			if d2 - d1 < 1.5:
-				c = pal[0]
-			else:
-				var lit := -((p - near).x + (p - near).y)
-				c = pal[3] if lit > 7.0 else (pal[2] if lit > -2.0 else pal[1])
-			if r.randf() < 0.04:
-				c = c.darkened(0.3)
-			img.set_pixel(x, y, c)
-	return make_lit_texture(img)
-
-
-## Wraps an image with a generated normal map so 2D lights shade its bumps.
-static func make_lit_texture(img: Image, strength := 3.0) -> CanvasTexture:
-	var w := img.get_width()
-	var h := img.get_height()
-	var nrm := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	for y in h:
-		for x in w:
-			var x0 := (x / TILE) * TILE if w > 64 else 0
-			var y0 := (y / TILE) * TILE if w > 64 else 0
-			var cw := TILE if w > 64 else w
-			var ch := TILE if w > 64 else h
-			var hl := _height(img, x0 + posmod(x - 1 - x0, cw), y)
-			var hr := _height(img, x0 + posmod(x + 1 - x0, cw), y)
-			var hu := _height(img, x, y0 + posmod(y - 1 - y0, ch))
-			var hd := _height(img, x, y0 + posmod(y + 1 - y0, ch))
-			var n := Vector3((hl - hr) * strength, (hd - hu) * strength, 1.0).normalized()
-			nrm.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
-	var tex := CanvasTexture.new()
-	tex.diffuse_texture = ImageTexture.create_from_image(img)
-	tex.normal_texture = ImageTexture.create_from_image(nrm)
-	return tex
-
-
-static func _height(img: Image, x: int, y: int) -> float:
-	var c := img.get_pixel(x, y)
-	return c.get_luminance() * c.a
+	r.seed = 3
+	for k in 7:
+		var x := 2 + r.randi() % 9
+		var y := 2 + r.randi() % 7
+		for p in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+			ore.set_pixelv(Vector2i(x, y) + p, gold.darkened(0.25 if p.y == 1 else 0.0))
+			ore_g.set_pixelv(Vector2i(x, y) + p, Color("ffd36a") if p == Vector2i.ZERO else Color("c08a30"))
+		ore.set_pixel(x + 2, y + 1, Color("3a2a14"))
+	deco_tex.ore = ImageTexture.create_from_image(ore)
+	deco_tex.ore_glow = ImageTexture.create_from_image(ore_g)
+	# glowing mushrooms
+	var mu := Image.create(18, 12, false, Image.FORMAT_RGBA8)
+	for m in [[4, 6], [9, 9], [14, 4]]:
+		var x: int = m[0]
+		var hgt: int = m[1]
+		for k in hgt:
+			mu.set_pixel(x, 11 - k, Color("a9d6cb"))
+		var top := 11 - hgt
+		for dx in range(-2, 3):
+			mu.set_pixel(clampi(x + dx, 0, 17), top, Color("2fb8a0"))
+		for dx in range(-1, 2):
+			mu.set_pixel(clampi(x + dx, 0, 17), top - 1, Color("6ff4da"))
+	deco_tex.mushroom = ImageTexture.create_from_image(mu)
+	# glow-worm threads hanging from a ceiling
+	var wo := Image.create(14, 22, false, Image.FORMAT_RGBA8)
+	for w in [[2, 14], [5, 8], [8, 19], [12, 11]]:
+		for k in w[1]:
+			wo.set_pixel(w[0], k, Color(0.35, 0.65, 0.72, 0.5))
+		wo.set_pixel(w[0], w[1], Color("c0fcff"))
+		wo.set_pixel(w[0], w[1] - 1, Color("7fe6f0"))
+	deco_tex.worm = ImageTexture.create_from_image(wo)
+	# buried skull
+	var sk := Image.create(10, 9, false, Image.FORMAT_RGBA8)
+	var rows := ["..xxxxx...", ".xxxxxxx..", "xxxxxxxxx.", "xooxxxoox.", "xooxxxoox.",
+		"xxxxoxxxx.", ".xxxxxxx..", "..x.x.x...", ".........."]
+	for y in rows.size():
+		for x in rows[y].length():
+			var ch: String = rows[y][x]
+			if ch == "x":
+				sk.set_pixel(x, y, Color("cfc6ae").darkened(0.1 * float(y) / 8.0))
+			elif ch == "o":
+				sk.set_pixel(x, y, Color("120b08"))
+	deco_tex.skull = ImageTexture.create_from_image(sk)

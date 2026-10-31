@@ -24,9 +24,21 @@ var player: Player
 var cam := Camera2D.new()
 var dark := CanvasModulate.new()
 var glow_layer := CanvasLayer.new()
-var back_wall := TextureRect.new()
+var back_wall := ColorRect.new()
 var motes := CPUParticles2D.new()
 var vignette := ColorRect.new()
+var bg := CanvasLayer.new()
+var bg_fill := ColorRect.new()
+var sky_clip := Control.new()
+var cave_clip := Control.new()
+var sky_layers := []    # [TextureRect, horizontal scroll, vertical scroll, tint at surface]
+var cave_layers := []   # [TextureRect, scroll, index]
+# fog colours per depth zone (m): backdrop, far, mid, near
+const ZONES := [
+	[0.0, Color("0e252b"), Color("2b616b"), Color("1b444c"), Color("0f2b32")],     # teal caves
+	[150.0, Color("17112a"), Color("4a3870"), Color("33264f"), Color("1d1530")],   # purple deep
+	[400.0, Color("1c0a08"), Color("5c2418"), Color("3d1810"), Color("200c08")],   # red, near the mantle
+]
 var depth_label := Label.new()
 var best_label := Label.new()
 var ore_label := Label.new()
@@ -49,38 +61,42 @@ func _ready() -> void:
 
 	world = World.new()
 
-	# dark rock wall behind the tiles (lit by the lamp, so caves read as caves)
-	back_wall.texture = world.make_wall_texture()
-	back_wall.stretch_mode = TextureRect.STRETCH_TILE
-	back_wall.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
-	back_wall.position = Vector2(0, World.TILE * 0.5)
-	back_wall.size = Vector2(World.WIDTH * World.TILE, 2.0e6)
+	# rock wall behind the caves (lit by the lamp); follows the camera, holes show the far background
+	var wm := ShaderMaterial.new()
+	wm.shader = preload("res://backwall.gdshader")
+	wm.set_shader_parameter("wall_tex", load("res://assets/terrain/wall.png"))
+	wm.set_shader_parameter("wall_n", load("res://assets/terrain/wall_n.png"))
+	wm.set_shader_parameter("mask_tex", load("res://assets/terrain/wall_mask.png"))
+	back_wall.material = wm
+	back_wall.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	back_wall.size = Vector2(900, 560)
 	back_wall.z_index = -1
 	add_child(back_wall)
 
 	add_child(world)
-	world.tile_broken.connect(_on_tile_broken)
+	world.ore_found.connect(_on_ore_found)
 
 	# glowing things live on their own layer: not darkened, they bloom
 	glow_layer.layer = 1
 	glow_layer.follow_viewport_enabled = true
 	add_child(glow_layer)
-	glow_layer.add_child(world.glow)
+	glow_layer.add_child(world.glow_root)
 
 	player = Player.new()
 	player.world = world
-	player.position = Vector2(World.WIDTH * World.TILE / 2.0, -20)
+	player.position = Vector2(World.WIDTH_PX / 2.0, -40)
 	add_child(player)
 	player.digging.connect(_on_digging)
 
-	cam.zoom = Vector2(3, 3)
+	cam.zoom = Vector2(2, 2)
 	cam.position_smoothing_enabled = true
 	cam.position_smoothing_speed = 8.0
 	cam.limit_left = 0
-	cam.limit_right = World.WIDTH * World.TILE
+	cam.limit_right = World.WIDTH_PX
 	player.add_child(cam)
 
 	add_child(dark)
+	_setup_background()
 	_setup_glow()
 	_setup_motes()
 	_setup_hud()
@@ -89,8 +105,10 @@ func _ready() -> void:
 
 func _process(dt: float) -> void:
 	time += dt
-	var depth := maxi(0, int(floor(player.position.y / World.TILE)) + 1)
-	world.ensure_generated(depth + World.AHEAD)
+	var depth := maxi(0, int(floor(player.position.y / World.METER)))
+	world.ensure_generated(player.position.y + 900.0)
+	back_wall.global_position = cam.get_screen_center_position() - back_wall.size / 2.0
+	_update_background(player.position.y / World.METER)
 
 	depth_label.text = "%d m" % depth
 	if depth > best:
@@ -107,9 +125,12 @@ func _process(dt: float) -> void:
 	var t := clampf(depth / 300.0, 0.0, 1.0)
 	RenderingServer.set_default_clear_color(Color("56636f").lerp(Color("040508"), clampf(depth / 12.0, 0.0, 1.0)))
 	var light := clampf(1.0 - depth / 30.0, 0.0, 1.0)
-	dark.color = Color(1, 1, 1).lerp(Color(0.06, 0.065, 0.1), 1.0 - light)
+	dark.color = Color(1, 1, 1).lerp(Color(0.13, 0.15, 0.22), 1.0 - light)
+	if "--bright" in OS.get_cmdline_user_args():
+		dark.color = Color.WHITE
 	back_wall.modulate = Color(1, 1, 1).lerp(Color(0.8, 0.9, 1.15), t)
 	player.lamp_on = light < 1.0
+	player.sprite.modulate = Color(1, 1, 1).lerp(Color(0.72, 0.74, 0.82), 1.0 - light)
 	motes.emitting = depth > 3
 	vignette.material.set_shader_parameter("strength", lerpf(0.25, 0.85, clampf(depth / 60.0, 0.0, 1.0)))
 
@@ -137,15 +158,18 @@ func _process(dt: float) -> void:
 
 
 func _spawn_watcher() -> void:
-	var pc := world.local_to_map(player.position)
 	for i in 30:
-		var c := pc + Vector2i(randi_range(-12, 12), randi_range(-7, 7))
-		if c.x <= 0 or c.x >= World.WIDTH - 1 or c.y < 3:
+		var pos := player.position + Vector2(randf_range(-300, 300), randf_range(-170, 170))
+		if pos.x < 40 or pos.x > World.WIDTH_PX - 40 or pos.y < 60:
 			continue
-		if world.get_type(c) != -1 or world.dug.has(c):
-			continue   # only in natural caves, never in your own tunnel
-		var pos := world.map_to_local(c)
-		if pos.distance_to(player.position) < 110.0:
+		if pos.distance_to(player.position) < 180.0:
+			continue
+		var ok := true
+		for o in [Vector2.ZERO, Vector2(-12, 0), Vector2(12, 0), Vector2(0, -12), Vector2(0, 12)]:
+			var c := world.cell_at(pos + o)
+			if world.get_fill(c.x, c.y) > 0.2 or world.dug.has(c):
+				ok = false   # only in open natural caves, never in your own tunnel
+		if not ok:
 			continue
 		var w := Watcher.new()
 		w.player = player
@@ -155,24 +179,22 @@ func _spawn_watcher() -> void:
 		return
 
 
-func _on_digging(cell: Vector2i) -> void:
-	shake = maxf(shake, 0.15)
+func _on_digging(pos: Vector2, mat: int) -> void:
+	shake = maxf(shake, 0.2)
 	if dust_t <= 0:
-		dust_t = 0.08
-		_burst(cell, World.COLORS[world.get_type(cell)], 3, 40.0)
+		dust_t = 0.06
+		_burst(pos, World.COLORS[mat], 4, 60.0)
 
 
-func _on_tile_broken(cell: Vector2i, type: int) -> void:
-	shake = maxf(shake, 0.5 if type == World.T.DIRT else 0.9)
-	_burst(cell, World.COLORS[type], 14, 90.0)
-	if type == World.T.ORE:
-		ore += 1
-		_burst(cell, Color(2.0, 1.5, 0.5), 10, 120.0, true)
+func _on_ore_found(pos: Vector2) -> void:
+	ore += 1
+	shake = maxf(shake, 0.8)
+	_burst(pos, Color(2.0, 1.5, 0.5), 14, 140.0, true)
 
 
-func _burst(cell: Vector2i, color: Color, amount: int, speed: float, glowing := false) -> void:
+func _burst(pos: Vector2, color: Color, amount: int, speed: float, glowing := false) -> void:
 	var p := CPUParticles2D.new()
-	p.position = world.map_to_local(cell)
+	p.position = pos
 	p.one_shot = true
 	p.explosiveness = 1.0
 	p.amount = amount
@@ -181,17 +203,84 @@ func _burst(cell: Vector2i, color: Color, amount: int, speed: float, glowing := 
 	p.spread = 180.0
 	p.initial_velocity_min = speed * 0.4
 	p.initial_velocity_max = speed
-	p.gravity = Vector2(0, 400)
+	p.gravity = Vector2(0, 600)
 	p.scale_amount_min = 1.0
 	p.scale_amount_max = 2.5
 	p.color = color.lightened(0.15) if not glowing else color
 	p.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	p.emission_rect_extents = Vector2(6, 6)
+	p.emission_rect_extents = Vector2(8, 8)
 	p.z_index = 2
 	var parent: Node = glow_layer if glowing else self
 	parent.add_child(p)
 	p.emitting = true
 	p.finished.connect(p.queue_free)
+
+
+func _setup_background() -> void:
+	bg.layer = -10
+	add_child(bg)
+	bg_fill.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.add_child(bg_fill)
+	for c in [sky_clip, cave_clip]:
+		c.clip_contents = true
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bg.add_child(c)
+	var sky := [["hills_far", 0.08, 0.3, Color("3b4652")], ["hills_near", 0.2, 0.5, Color("2a333c")],
+		["forest", 0.35, 0.7, Color("181d23")]]
+	for d in sky:
+		var t := _bg_rect(d[0], Vector2(1280 / 2 + 1024, 160))
+		sky_clip.add_child(t)
+		sky_layers.append([t, d[1], d[2], d[3]])
+	var cave := [["cave_far", 0.15], ["cave_mid", 0.35], ["cave_near", 0.6]]
+	for i in cave.size():
+		var t := _bg_rect(cave[i][0], Vector2(1280 / 2 + 512, 720 / 2 + 512))
+		cave_clip.add_child(t)
+		cave_layers.append([t, cave[i][1], i])
+
+
+func _bg_rect(name: String, size: Vector2) -> TextureRect:
+	var t := TextureRect.new()
+	t.texture = load("res://assets/bg/%s.png" % name)
+	t.stretch_mode = TextureRect.STRETCH_TILE
+	t.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+	t.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	t.scale = Vector2(2, 2)
+	t.size = size
+	return t
+
+
+func _update_background(depth_m: float) -> void:
+	var vs := get_viewport().get_visible_rect().size
+	var center := cam.get_screen_center_position()
+	var z := cam.zoom.x
+	var horizon := clampf(vs.y / 2.0 - center.y * z, 0.0, vs.y)
+	sky_clip.size = Vector2(vs.x, horizon)
+	cave_clip.position = Vector2(0, horizon)
+	cave_clip.size = Vector2(vs.x, vs.y - horizon)
+	# fog colours blend between depth zones
+	var zc: Array = ZONES[0]
+	for i in range(ZONES.size() - 1):
+		var a: Array = ZONES[i]
+		var b: Array = ZONES[i + 1]
+		if depth_m >= a[0]:
+			var t := clampf((depth_m - a[0]) / (b[0] - a[0]), 0.0, 1.0)
+			zc = [0.0]
+			for k in range(1, 5):
+				zc.append((a[k] as Color).lerp(b[k], t))
+	var under := clampf(depth_m / 6.0, 0.0, 1.0)
+	bg_fill.color = Color("4a5663").lerp(zc[1], under)
+	for L in sky_layers:
+		var t: TextureRect = L[0]
+		var bottom: float = vs.y / 2.0 - center.y * z * L[2] + 40.0
+		t.position = Vector2(-fposmod(center.x * L[1], 1024.0) * 2.0, bottom - 320.0)
+		t.modulate = L[3]
+	for L in cave_layers:
+		var t: TextureRect = L[0]
+		var off: Vector2 = center * L[1]
+		t.position = Vector2(-fposmod(off.x, 512.0), -fposmod(off.y, 512.0)) * 2.0 - cave_clip.position
+		t.modulate = zc[2 + L[2]]
 
 
 func _setup_glow() -> void:
@@ -215,7 +304,7 @@ func _setup_motes() -> void:
 	motes.preprocess = 8.0
 	motes.local_coords = false
 	motes.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	motes.emission_rect_extents = Vector2(230, 140)
+	motes.emission_rect_extents = Vector2(340, 200)
 	motes.direction = Vector2(0, -1)
 	motes.spread = 180.0
 	motes.initial_velocity_min = 2.0
@@ -332,7 +421,7 @@ func _autotest() -> void:
 			out = a.trim_prefix("--autotest=")
 	if out == "":
 		return
-	player.dig_power = 12.0
+	player.dig_power = 9.0
 	await get_tree().create_timer(1.0).timeout
 	get_viewport().get_texture().get_image().save_png(out.replace(".png", "_0.png"))
 	Input.action_press("down")
@@ -345,7 +434,7 @@ func _autotest() -> void:
 			Input.action_release("right")
 			await get_tree().create_timer(0.3).timeout
 		get_viewport().get_texture().get_image().save_png(out.replace(".png", "_%d.png" % (i + 1)))
-		print("autotest depth=", int(player.position.y / World.TILE), " ore=", ore,
+		print("autotest depth=", int(player.position.y / World.METER), " ore=", ore,
 			" watchers=", get_tree().get_nodes_in_group("watcher").size())
 		Input.action_press("down")
 	get_tree().quit()

@@ -1,0 +1,35 @@
+{
+ "cell": 80,
+ "columns": 8,
+ "anims": {
+  "idle": {
+   "row": 0,
+   "frames": 4
+  },
+  "run": {
+   "row": 1,
+   "frames": 8
+  },
+  "jump": {
+   "row": 2,
+   "frames": 1
+  },
+  "fall": {
+   "row": 3,
+   "frames": 1
+  },
+  "dig_side": {
+   "row": 4,
+   "frames": 6
+  },
+  "dig_down": {
+   "row": 5,
+   "frames": 6
+  },
+  "dig_up": {
+   "row": 6,
+   "frames": 6
+  }
+ },
+ "feet_below_center": 26.5
+}
