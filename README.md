@@ -29,3 +29,18 @@ Step 1 prototype: endless generated ground with caves, dirt → stone → hard r
 darkness + helmet lamp, depth counter and best depth.
 
 See [IDEAS.md](IDEAS.md) for the plan and everything coming later.
+
+## Art pipeline
+
+All art is generated, so it can be tweaked and rebuilt:
+
+| What | Command |
+|---|---|
+| Terrain textures + normal maps | `python3 tools/gen_textures.py` |
+| Parallax backgrounds | `python3 tools/gen_backgrounds.py` |
+| Miner sprite sheet (Blender) | `blender -b --factory-startup -P tools/miner_blender.py -- /tmp/miner && python3 tools/miner_sheet.py /tmp/miner` |
+| Cave props (Blender) | `blender -b --factory-startup -P tools/props_blender.py -- /tmp/props && python3 tools/props_sheet.py /tmp/props` |
+
+The miner and props are low-poly 3D models rendered to cel-shaded pixel art with outlines
+(the same idea Dead Cells used). Terrain is a fine dig grid drawn as smooth outlined rock by
+`terrain.gdshader`.
