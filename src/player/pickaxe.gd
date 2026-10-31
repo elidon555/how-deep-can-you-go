@@ -2,7 +2,7 @@ extends Node2D
 class_name Pickaxe
 ## The miner's pickaxe: click (one swing) or hold (keep swinging) the dig button.
 ## With the mouse, the cursor only sets the direction: the swing goes that way and hits the
-## first rock in front of you within arm's reach (a marker shows where). With J / a
+## first rock in front of you within arm's reach. With J / a
 ## controller, the direction keys aim it
 ## (down, up, down+side = diagonal, otherwise the way you face). Rock only breaks when a
 ## swing lands.
@@ -220,15 +220,8 @@ static func _merge(a: Dictionary, b: Dictionary) -> Dictionary:
 	return {"hit": a.hit or b.hit, "mat": a.mat if a.hit else b.mat, "broke": a.broke + b.broke}
 
 
-## Swoosh behind the pick head for the strike + impact frames, and the aim marker.
+## Swoosh behind the pick head for the strike + impact frames.
 func _draw() -> void:
-	if mouse_aim and not player.frozen and player.health > 0:
-		var p := to_local(_target)
-		var rock := world.is_diggable(_target)
-		var c := Color(1, 0.95, 0.8, 0.7 if rock else 0.3)
-		draw_arc(p, AIM_R, 0.0, TAU, 20, c, 1.0)
-		draw_line(p - Vector2(3, 0), p + Vector2(3, 0), c, 1.0)
-		draw_line(p - Vector2(0, 3), p + Vector2(0, 3), c, 1.0)
 	var alpha := 1.0 - _trail_t / TRAIL_TIME
 	if alpha <= 0.0 or not TRAIL.has(kind):
 		return
