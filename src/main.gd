@@ -170,6 +170,8 @@ func _process(dt: float) -> void:
 		run_time += dt
 		Sfx.music(_music(depth_m))
 	hud.set_crew(players.filter(func(p): return p != player))
+	for p in players:
+		p.show_tag(players.size() > 1 and p != player)
 	PlayerInput.menu_open = menus.pause.visible or menus.settings.visible   # (online it doesn't pause)
 	for m in MILESTONES:
 		if depth >= m and not shown.has(m):
@@ -251,7 +253,7 @@ func _add_player(input: PlayerInput) -> Player:
 	var p := Player.new()
 	p.world = world
 	p.input = input
-	p.number = players.size() + 1
+	p.number = _free_number()
 	p.peer = (input as NetInput).peer if input is NetInput else Net.my_id()
 	p.position = drill.position + Vector2(-34 + 24 * players.size(), Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	add_child(p)
@@ -260,15 +262,29 @@ func _add_player(input: PlayerInput) -> Player:
 	p.pick.struck.connect(_on_struck.bind(p))
 	p.pick.hit_thing.connect(_on_hit_thing.bind(p))
 	p.rope_requested.connect(_on_rope_requested.bind(p))
-	p.died.connect(_on_player_died.bind(p))
+	p.went_down.connect(_on_player_down.bind(p))
+	p.bled_out.connect(_on_player_bled_out.bind(p))
+	p.revived.connect(func(): hud.toast("%s is back on their feet." % p.tag_name(), 1.5))
 	p.kicked_dust.connect(fx.dust)
+	p.pinged.connect(func(at): show_ping(at, p.number, p.tag_name()))
 	players.append(p)
 	return p
 
 
+## The lowest player number nobody has (their colour; someone may have left).
+func _free_number() -> int:
+	var n := 1
+	while players.any(func(p): return p.number == n):
+		n += 1
+	return n
+
+
 ## Host: a miner for someone who joined online (their controls arrive over the network).
-func add_remote_player(input: NetInput) -> Player:
-	return _add_player(input)
+func add_remote_player(input: NetInput, display_name := "") -> Player:
+	var p := _add_player(input)
+	p.display_name = display_name
+	p.update_crew_look()
+	return p
 
 
 ## Client: the miner the host has for `peer` (ours is the one made at the start).
@@ -302,7 +318,7 @@ func _input(event: InputEvent) -> void:
 			and not menus.on_title() and not run_over and not Net.is_client():
 		Controls.add_pad_player("p2_", event.device)
 		var p2 := _add_player(PlayerInput.new("p2_", false))
-		hud.toast("Player %d joined!" % p2.number, 1.5)
+		hud.toast("%s joined!" % p2.tag_name(), 1.5)
 		get_viewport().set_input_as_handled()
 
 
@@ -329,16 +345,24 @@ func _frame_camera(dt: float) -> void:
 	cam.zoom = Vector2(z, z)
 
 
-## Down: if anyone else is still standing, you're back in the drill shortly (your bag is lost);
-## if nobody is, the run is over.
-func _on_player_died(p: Player) -> void:
-	p.lose_bag()
+## Down: a crewmate can help them up (hold E on them) before they bleed out. If nobody is
+## left standing, the run is over.
+func _on_player_down(p: Player) -> void:
 	if players.all(func(q): return q.health <= 0):
-		_game_over("You died. The ore you carried is lost.")
+		_game_over("Everyone is down. The ore you carried is lost.")
 		return
-	hud.toast("Player %d is down. Back in the drill in %d s." % [p.number, int(RESPAWN_TIME)], 2.5)
+	hud.toast("%s is down! Hold E on them to help them up." % p.tag_name(), 3.0)
+
+
+## Nobody helped in time: their bag is lost and they're back in the drill shortly.
+func _on_player_bled_out(p: Player) -> void:
+	p.lose_bag()
 	p.frozen = true
 	p.visible = false
+	if players.all(func(q): return q.health <= 0):
+		_game_over("Everyone is down. The ore you carried is lost.")
+		return
+	hud.toast("%s didn't make it. Back in the drill in %d s." % [p.tag_name(), int(RESPAWN_TIME)], 2.5)
 	await get_tree().create_timer(RESPAWN_TIME).timeout
 	if run_over or not is_instance_valid(p):
 		return
@@ -512,6 +536,20 @@ func _on_workbench_used(p: Player) -> void:
 	_show_to(p, "shop")
 
 
+## A crew marker at a spot, in that player's colour (on every screen, online).
+func show_ping(at: Vector2, number: int, who: String) -> void:
+	Net.echo(&"main", &"show_ping", [at, number, who])
+	for old: Ping in get_tree().get_nodes_in_group("ping_%d" % number):
+		old.queue_free()                 # one marker per player at a time
+	var m := Ping.new()
+	m.position = at
+	m.color = Player.CREW_COLORS[(number - 1) % Player.CREW_COLORS.size()]
+	m.who = who
+	m.add_to_group("ping_%d" % number)
+	glow_layer.add_child(m)
+	Sfx.play("sonar_ping", at, -10.0, 0.05)
+
+
 ## Opens a menu (shop, sonar, "note:<id>") on the screen of the miner who asked for it: here,
 ## or on their machine online (it tells the host when it closes, see _on_menu_closed).
 func _show_to(p: Player, menu: String) -> void:
@@ -666,6 +704,8 @@ func _host_game(port: int) -> void:
 func go_online() -> void:
 	if session:
 		return
+	player.display_name = Settings.player_name
+	player.update_crew_look()
 	session = NetSession.new()
 	session.main = self
 	add_child(session)

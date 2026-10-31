@@ -98,8 +98,8 @@ func set_health(health: int, max_health: int) -> void:
 func set_crew(others: Array) -> void:
 	var lines := []
 	for p: Player in others:
-		lines.append("P%d  %s   Ore %d ($%d)  Coal %d" % [p.number,
-			"♥".repeat(maxi(p.health, 0)) if p.health > 0 else "down", p.ore_count, p.ore_value, p.coal])
+		var state := "♥".repeat(p.health) if p.health > 0 else ("down %ds" % ceili(p.bleed) if p.downed else "out")
+		lines.append("%s  %s   ore $%d  coal %d" % [p.tag_name(), state, p.ore_value, p.coal])
 	_crew.text = "\n".join(lines)
 	_crew.visible = not lines.is_empty()
 
@@ -107,7 +107,9 @@ func set_crew(others: Array) -> void:
 func _crew_label() -> Label:
 	var l := Label.new()
 	l.visible = false
-	l.position = Vector2(1280 - 300, 176)
+	l.position = Vector2(1280 - 20 - 360, 176)
+	l.size = Vector2(360, 0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	l.add_theme_font_size_override("font_size", 20)
 	l.add_theme_color_override("font_color", Color("9fd8ff"))
 	l.add_theme_color_override("font_outline_color", Color.BLACK)

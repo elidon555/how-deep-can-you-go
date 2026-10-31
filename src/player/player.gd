@@ -7,10 +7,13 @@ class_name Player
 
 signal health_changed(health: int, max_health: int)
 signal bag_changed
-signal died
+signal went_down                       # health ran out: down, bleeding out, a crewmate can help
+signal bled_out                        # nobody helped in time (main respawns them in the drill)
+signal revived
 signal rope_requested(feet: Vector2)   # main decides if there's a rope left to hang
 signal kicked_dust(at: Vector2, strength: float)   # steps, jumps, landings
 signal breath_changed(left: float)                 # 0..1 while underwater, 1 = full
+signal pinged(at: Vector2)                         # marked a spot for the crew
 
 const SPEED := 150.0
 const ACCEL := 1300.0
@@ -30,23 +33,29 @@ const LAVA_HURT_EVERY := 0.45
 const ROLL_SPEED := 270.0
 const ROLL_TIME := 0.32        # untouchable for the whole roll
 const ROLL_COOLDOWN := 0.55
+const BLEED_OUT := 30.0         # seconds down before it's too late to help them up
 
+# each miner's work clothes and name tag: blue, red, green, violet (by player number)
+const CREW_COLORS := [Color("3f8fd8"), Color("d84a3f"), Color("4fb84a"), Color("9a5ad8")]
+const CREW_SHADER := preload("res://src/player/crew_color.gdshader")
 const SHEET := "res://assets/sprites/miner.png"
 const SHEET_INFO := "res://assets/sprites/miner.json"
 # fps and whether the animation loops; rows/frame counts come from miner.json
 const ANIM_SPEED := {
 	"idle": [4.0, true], "run": [13.0, true], "jump": [10.0, false], "fall": [6.0, true],
 	"land": [14.0, false], "climb": [9.0, true], "hurt": [10.0, false], "roll": [18.0, false],
-	"swim": [8.0, true],
+	"swim": [8.0, true], "down": [3.0, true],
 }
 # used while the sheet doesn't have an animation yet
-const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land", "swim": "fall"}
+const ANIM_FALLBACK := {"land": "idle", "climb": "fall", "hurt": "fall", "roll": "land", "swim": "fall",
+	"down": "hurt"}
 
 var world: World
 var pick := Pickaxe.new()
 var interactor := Interactor.new()
 var input := PlayerInput.new()   # whose controls drive this player (set before adding)
-var number := 1                  # player 1, 2 ...
+var number := 1                  # player 1, 2 ... (sets their colour)
+var display_name := ""           # shown on their name tag ("" = "P<number>")
 var peer := 1                    # online: the machine whose controls drive this miner (1 = host)
 var puppet := false              # online client: shows the host's miner, doesn't simulate it
 # what you carry (each player has their own bag)
@@ -86,6 +95,10 @@ var _last_step_frame := -1
 var _cone := PointLight2D.new()
 var _glow := PointLight2D.new()
 var _lamp_dir := 0               # where the helmet lamp points: 0 ahead, 1 down, -1 up
+var _tag := Label.new()          # name over their head (shown when there's a crew)
+var downed := false              # out of health, on the ground, waiting for help
+var bleed := 0.0                 # seconds left to help them up
+var _revive_spot: ReviveSpot = null
 
 
 func _ready() -> void:
@@ -119,6 +132,9 @@ func _physics_process(dt: float) -> void:
 		pick.show_trail(dt)
 		return
 	input.update(self)
+	if downed:
+		_lie_there(dt)
+		return
 	var dir := 0.0 if frozen else input.axis("left", "right")
 	if dir != 0:
 		facing = int(sign(dir))
@@ -139,6 +155,8 @@ func _physics_process(dt: float) -> void:
 		pick.update(dt, dir)
 		if input.just_pressed("rope"):
 			rope_requested.emit(global_position + Vector2(0, HALF_HEIGHT))
+	if not frozen and input.just_pressed("ping"):
+		pinged.emit(aim_point())
 	_update_lamp(dt)
 	_invuln_t -= dt
 	_hurt_t -= dt
@@ -370,7 +388,50 @@ func hurt(damage: int, from: Vector2) -> void:
 	Sfx.play("player_hurt", global_position)
 	health_changed.emit(health, max_health)
 	if health == 0:
-		died.emit()
+		_go_down()
+
+
+## Out of health: down on the ground. A crewmate can help them up (ReviveSpot) until they
+## bleed out.
+func _go_down() -> void:
+	downed = true
+	bleed = BLEED_OUT
+	rope = null
+	_revive_spot = ReviveSpot.new()
+	_revive_spot.downed = self
+	add_child(_revive_spot)
+	went_down.emit()
+
+
+func _lie_there(dt: float) -> void:
+	bleed -= dt
+	velocity.x = move_toward(velocity.x, 0.0, FRICTION * dt)
+	velocity.y = minf(velocity.y + GRAVITY * dt, MAX_FALL)
+	move_and_slide()
+	sprite.visible = true
+	_animate(dt)
+	if bleed <= 0.0:
+		_get_up()
+		bled_out.emit()
+
+
+## A crewmate helped them up: back on their feet with a sliver of health.
+func revive() -> void:
+	if not downed:
+		return
+	_get_up()
+	health = 1
+	_invuln_t = 2.0
+	Sfx.play("repair", global_position, -4.0)
+	health_changed.emit(health, max_health)
+	revived.emit()
+
+
+func _get_up() -> void:
+	downed = false
+	if _revive_spot:
+		_revive_spot.queue_free()
+		_revive_spot = null
 
 
 func is_hurt() -> bool:
@@ -378,6 +439,7 @@ func is_hurt() -> bool:
 
 
 func heal_full() -> void:
+	_get_up()
 	max_health = Progress.max_health()
 	if health != max_health:
 		health = max_health
@@ -402,7 +464,46 @@ func _setup_sprite() -> void:
 		var unlit := CanvasItemMaterial.new()
 		unlit.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED
 		sprite.material = unlit
+	else:
+		var m := ShaderMaterial.new()
+		m.shader = CREW_SHADER
+		sprite.material = m
 	add_child(sprite)
+	_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_tag.size = Vector2(80, 10)
+	_tag.position = Vector2(-40, -HALF_HEIGHT - 16)
+	_tag.add_theme_font_size_override("font_size", 8)
+	_tag.add_theme_color_override("font_outline_color", Color.BLACK)
+	_tag.add_theme_constant_override("outline_size", 3)
+	_tag.visible = false
+	_tag.z_index = 4
+	var unshaded := CanvasItemMaterial.new()
+	unshaded.light_mode = CanvasItemMaterial.LIGHT_MODE_UNSHADED   # readable in the dark
+	_tag.material = unshaded
+	add_child(_tag)
+	update_crew_look()
+
+
+func crew_color() -> Color:
+	return CREW_COLORS[(number - 1) % CREW_COLORS.size()]
+
+
+func tag_name() -> String:
+	return display_name if display_name != "" else "P%d" % number
+
+
+## Clothes and name tag in this player's colour (after their number or name changes).
+func update_crew_look() -> void:
+	if sprite.material is ShaderMaterial:
+		var c := crew_color()
+		(sprite.material as ShaderMaterial).set_shader_parameter("hue", c.h)
+		(sprite.material as ShaderMaterial).set_shader_parameter("saturation", 1.0 if number == 1 else 1.25)
+	_tag.text = tag_name()
+	_tag.add_theme_color_override("font_color", crew_color().lightened(0.35))
+
+
+func show_tag(on: bool) -> void:
+	_tag.visible = on and visible
 
 
 func _setup_lamp() -> void:
@@ -445,7 +546,9 @@ func _update_lamp(dt: float) -> void:
 func _animate(dt: float) -> void:
 	var dig := pick.anim()
 	var want := "idle"
-	if dig != "":
+	if downed:
+		want = "down"
+	elif dig != "":
 		want = dig
 	elif _hurt_t > 0.0:
 		want = "hurt"
@@ -508,35 +611,40 @@ static func _cone_texture() -> ImageTexture:
 # ---------------------------------------------------------------- online co-op
 
 func net_state() -> Array:
-	return [peer, number, sprite.frame, facing, sprite.visible, visible, health, max_health, breath,
+	return [peer, number, display_name, sprite.frame, facing, sprite.visible, visible, health, max_health, breath,
 		ore_count, ore_value, coal, ropes, sold_value, _lamp_dir, pick.kind, pick.trail_age(),
-		interactor.prompt_text(), frozen]
+		interactor.prompt_text(), frozen, downed, bleed]
 
 
 func net_apply(s: Array) -> void:
 	peer = s[0]
-	number = s[1]
-	sprite.frame = s[2]
-	facing = s[3]
+	if number != s[1] or display_name != s[2]:
+		number = s[1]
+		display_name = s[2]
+		update_crew_look()
+	sprite.frame = s[3]
+	facing = s[4]
 	sprite.flip_h = facing < 0
-	sprite.visible = s[4]
-	visible = s[5]
-	if health != s[6] or max_health != s[7]:
-		health = s[6]
-		max_health = s[7]
+	sprite.visible = s[5]
+	visible = s[6]
+	if health != s[7] or max_health != s[8]:
+		health = s[7]
+		max_health = s[8]
 		health_changed.emit(health, max_health)
-	if breath != s[8]:
-		breath = s[8]
+	if breath != s[9]:
+		breath = s[9]
 		breath_changed.emit(breath / BREATH)
 	var bag := [ore_count, ore_value, coal, ropes, sold_value]
-	if bag != s.slice(9, 14):
-		ore_count = s[9]
-		ore_value = s[10]
-		coal = s[11]
-		ropes = s[12]
-		sold_value = s[13]
+	if bag != s.slice(10, 15):
+		ore_count = s[10]
+		ore_value = s[11]
+		coal = s[12]
+		ropes = s[13]
+		sold_value = s[14]
 		bag_changed.emit()
-	_lamp_dir = s[14]
-	pick.show_swing(s[15], s[16])
-	interactor.show_prompt(s[17])
-	frozen = s[18]
+	_lamp_dir = s[15]
+	pick.show_swing(s[16], s[17])
+	interactor.show_prompt(s[18])
+	frozen = s[19]
+	downed = s[20]
+	bleed = s[21]

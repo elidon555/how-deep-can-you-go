@@ -21,6 +21,9 @@ func _physics_process(dt: float) -> void:
 	# a key that just closed a menu must not also re-open something
 	var blocked := player.frozen or _was_frozen or player.health <= 0
 	_was_frozen = player.frozen
+	if player.downed:
+		_set_prompt("You're down! A crewmate can help you up (%d s)" % ceili(player.bleed))
+		return
 	if blocked:
 		_set_prompt("")
 		return

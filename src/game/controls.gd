@@ -9,18 +9,20 @@ const KEYS := {
 	"rope": [KEY_Q],
 	"interact": [KEY_E],
 	"roll": [KEY_SHIFT],
+	"ping": [KEY_F],
 	"restart": [KEY_R],
 }
-const MOUSE := {"dig": MOUSE_BUTTON_LEFT, "rope": MOUSE_BUTTON_RIGHT}
+const MOUSE := {"dig": MOUSE_BUTTON_LEFT, "rope": MOUSE_BUTTON_RIGHT, "ping": MOUSE_BUTTON_MIDDLE}
 const PAD := {
 	"left": JOY_BUTTON_DPAD_LEFT, "right": JOY_BUTTON_DPAD_RIGHT,
 	"up": JOY_BUTTON_DPAD_UP, "down": JOY_BUTTON_DPAD_DOWN,
 	"jump": JOY_BUTTON_A, "dig": JOY_BUTTON_X, "rope": JOY_BUTTON_Y,
 	"interact": JOY_BUTTON_B, "restart": JOY_BUTTON_BACK, "roll": JOY_BUTTON_RIGHT_SHOULDER,
+	"ping": JOY_BUTTON_LEFT_SHOULDER,
 }
 const STICK := {"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0]}
-const HELP := "A/D move · Space/W jump · Shift roll · hold Left click to dig the way you point (or J + W/A/S/D) · Q/Right-click rope · E use · R restart"
+const HELP := "A/D move · W/Space jump · Shift roll · Left click dig (or J + W/A/S/D) · Q rope · E use · F ping · R restart"
 
 
 static func setup() -> void:

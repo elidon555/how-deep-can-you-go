@@ -24,16 +24,21 @@ Or open `project.godot` in the Godot editor and press F5.
 | Dig (click = one swing, hold = keep swinging) | Left click: swings the way the mouse points, hitting the first rock in front (arm's reach) · or J | X |
 | Aim the pick with J / controller | W up · S down · S + A/D diagonal · otherwise the way you face | Stick / D-pad |
 | Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
-| Use a station (helm, furnace, workbench, medkit) / hold to repair a breach | E | B |
+| Use a station (helm, furnace, workbench, medkit) / hold to repair a breach or help a downed crewmate up | E | B |
+| Ping a spot for the crew | F or middle click | LB |
 | Restart | R | Back |
 
 **Local co-op:** a second player presses **Start** on a controller to join (that controller is
-theirs; player one keeps keyboard + mouse). The camera frames both. A downed player is back in
-the drill after a few seconds while the other plays on; the run ends when everyone is down or
-the drill is wrecked. Menus answer either player.
+theirs; player one keeps keyboard + mouse). The camera frames both. Menus answer either player.
+
+**The crew:** each miner has their own colour (blue, red, green, violet) and a name tag. Out of
+health, you're **down**: a crewmate holds E on you for 2 s to help you up. Nobody comes within
+30 s and you've bled out: your bag is lost and you're back in the drill shortly. The run ends
+when everyone is down or the drill is wrecked. **Pings** (F / middle click) mark a spot for the
+whole crew, with an arrow at the screen's edge when it's out of view.
 
 **Online co-op (up to 4):** title screen → **Play online**. One player picks **Host a game**
-(the toast shows the addresses to share); the others type that address and **Join**, any time
+(the toast shows the addresses to share); the others type that address (and their name) and **Join**, any time
 during the run. Everyone crews the same drill. The host's machine runs the game, so the host's
 money and upgrades are the crew's. Only the host restarts runs, and everyone comes along to the
 next one. Over the internet the host has to forward the port (default 24680, UDP) on their router.
@@ -99,8 +104,9 @@ All game code is in `src/` (one system per file):
 | `pickaxe.gd` | Swings: aim (mouse direction or keys), room check, impact, hitting creatures |
 | `interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
 | `player_input.gd` | One player's controls (action prefix, mouse or not); all player input goes through it |
+| `revive_spot.gd`, `crew_color.gdshader` | Helping a downed crewmate up (hold E) / each miner's clothes in their colour |
 | **creatures/** | `crawler.gd`, `bat.gd`, `worm.gd`, `watcher.gd`, `spawner.gd` (who spawns where) |
-| **fx/** | `fx.gd` (particles, impacts, hit-stop), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
+| **fx/** | `fx.gd` (particles, impacts, hit-stop), `ping.gd` (crew markers), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
 | **net/** (online co-op) | |
 | `net.gd` | Autoload `Net`: hosting / joining (ENet), the handshake, sending messages, echoing the host's calls |
 | `net_session.gd` | One online run: who's in the crew, what's sent 20×/s, menus and buying for remote players |

@@ -5,6 +5,7 @@ class_name OnlineMenu
 
 signal host_pressed(port: int)
 
+var _name := LineEdit.new()
 var _address := LineEdit.new()
 var _port := SpinBox.new()
 var _status := UiStyle.label("", 18, UiStyle.DIM)
@@ -21,6 +22,13 @@ func _ready() -> void:
 	var box := UiStyle.centered_box(self, 520)
 	box.add_child(UiStyle.label("Play together", 36))
 	box.add_child(UiStyle.label("Up to %d miners crew the same drill." % Net.MAX_PLAYERS, 18, UiStyle.DIM))
+	_name.placeholder_text = "your name"
+	_name.max_length = 14
+	_name.text = Settings.player_name
+	_name.custom_minimum_size = Vector2(300, 42)
+	_name.add_theme_font_size_override("font_size", 22)
+	_name.text_changed.connect(func(t): Settings.player_name = t.strip_edges())
+	box.add_child(_name)
 	box.add_child(UiStyle.button("Host a game", func(): host_pressed.emit(int(_port.value))))
 	box.add_child(UiStyle.label("— or join one —", 18, UiStyle.DIM))
 	_address.placeholder_text = "host's address (e.g. 192.168.1.20)"
@@ -55,6 +63,7 @@ func open() -> void:
 
 func close() -> void:
 	visible = false
+	Settings.save()
 	if Net.is_client() and Net.run.is_empty():
 		Net.leave()                 # gave up waiting
 

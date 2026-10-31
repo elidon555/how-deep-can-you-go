@@ -31,7 +31,7 @@ func _ready() -> void:
 		main.world.record = true
 		Progress.changed.connect(_send_progress)
 	else:
-		Net.send(1, "ready")
+		Net.send(1, "ready", {"name": Settings.player_name})
 
 
 ## Host: what a joining client needs to load this run.
@@ -76,7 +76,7 @@ func receive(from: int, kind: String, data: Variant) -> void:
 func _host_receive(from: int, kind: String, data: Variant) -> void:
 	match kind:
 		"ready":
-			_add_peer(from)
+			_add_peer(from, str(data.get("name", "")).left(14) if data is Dictionary else "")
 		"input":
 			var p: Player = _ready_peers.get(from)
 			if p and data is Array:
@@ -118,15 +118,15 @@ func _echo(data: Array) -> void:
 # ---------------------------------------------------------------- host: the crew
 
 ## A client loaded the world: give them a miner in the drill and everything that's changed.
-func _add_peer(peer: int) -> void:
+func _add_peer(peer: int, display_name: String) -> void:
 	if _ready_peers.has(peer) or is_full():
 		return
-	var p: Player = main.add_remote_player(NetInput.new(peer))
+	var p: Player = main.add_remote_player(NetInput.new(peer), display_name)
 	_ready_peers[peer] = p
 	for key: Vector2i in main.world.touched:
 		Net.send(peer, "chunk", NetWorld.pack_chunk(main.world, key))
 	_send_progress()
-	main.hud.toast("Player %d joined the crew." % p.number, 2.0)
+	main.hud.toast("%s joined the crew." % p.tag_name(), 2.0)
 
 
 ## Host: someone disconnected (their miner leaves with them).
@@ -134,7 +134,7 @@ func peer_left(peer: int) -> void:
 	var p: Player = _ready_peers.get(peer)
 	_ready_peers.erase(peer)
 	if p and is_instance_valid(p):
-		main.hud.toast("Player %d left." % p.number, 2.0)
+		main.hud.toast("%s left." % p.tag_name(), 2.0)
 		main.remove_player(p)
 
 

@@ -117,6 +117,13 @@ class Driver extends Node:
 		await _wait(0.4)
 		_check("the client's controls move their miner", remote.global_position.x < x0 - 20.0,
 			"%.0f -> %.0f" % [x0, remote.global_position.x])
+		_check("the client's name is on their miner", remote.tag_name() == "Tester", remote.tag_name())
+		await _ask("press", ["ping", 0.1])
+		await _wait(0.4)
+		var pings: Array = await _ask("pings", remote.number)
+		_check("their ping shows for the crew", get_tree().get_nodes_in_group("ping_%d" % remote.number).size() == 1
+			and pings[0] == 1, str(pings))
+		await _ask("shot", "client_ping")
 		var where: Array = await _ask("players")
 		var host_where := []
 		for p: Player in m.players:
@@ -264,6 +271,7 @@ class Driver extends Node:
 
 	func _client() -> void:
 		await _wait(delay)                      # (the host is starting up)
+		Settings.player_name = "Tester"
 		Net.join("127.0.0.1", port)
 		await _until(func(): return main() != null and main().get("session") != null, 20.0)
 		print("client: in the run, seed %d" % main().world.seed)
@@ -299,6 +307,8 @@ class Driver extends Node:
 				await _wait(data)
 				Input.action_release("dig")
 				Input.action_release("down")
+			"pings":
+				r = [get_tree().get_nodes_in_group("ping_%d" % int(data)).size()]
 			"count":
 				r = [get_tree().get_nodes_in_group("creature").size()]
 			"money":
