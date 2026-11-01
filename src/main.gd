@@ -8,6 +8,7 @@ extends Node2D
 
 static var skip_title := false  # set when restarting a run, so it goes straight back in
 static var daily_run := false   # this run is today's Daily Dig
+static var resume := {}         # a saved run to put back (RunSave), set by "Continue"
 
 const MILESTONES := {
 	10: "The daylight is gone", 25: "It's very quiet down here", 50: "Something is watching you",
@@ -80,6 +81,8 @@ func _ready() -> void:
 
 	drill.world = world
 	drill.puppet = Net.is_client()
+	var want_drill: String = str(Net.run.get("drill", "rustbucket")) if Net.is_client() else Settings.drill
+	drill.variant = want_drill if Unlocks.DRILLS.has(want_drill) and (Net.is_client() or Unlocks.unlocked(want_drill)) else "rustbucket"
 	add_child(drill)
 	liquids.world = world
 	liquids.drill = drill
@@ -99,6 +102,8 @@ func _ready() -> void:
 	player = _add_player(PlayerInput.new())
 	player.puppet = Net.is_client()
 	player.role = Settings.role
+	player.helmet = Settings.helmet if Unlocks.unlocked(Settings.helmet) else "brass"
+	player.update_crew_look()
 	player.health_changed.connect(hud.set_health)
 	player.bag_changed.connect(_update_bag)
 	player.breath_changed.connect(hud.set_breath)
@@ -153,6 +158,10 @@ func _ready() -> void:
 	tips.main = self
 	if not Progress.dry_run:
 		add_child(tips)
+	if not resume.is_empty():
+		RunSave.restore(self, resume)
+		resume = {}
+		RunSave.clear()                  # (a save is used once)
 	if not Net.is_client():              # (a client sees the host's)
 		contracts.main = self
 		add_child(contracts)
@@ -194,6 +203,9 @@ func _process(dt: float) -> void:
 			shown[m] = true
 			hud.toast(MILESTONES[m])
 	_update_light(depth, dt)
+	if fmod(time, 2.0) < dt:
+		for u in Unlocks.fresh():            # (each machine its own)
+			hud.note("Unlocked: %s! Pick it in the Hangar." % u, 3.5)
 	hud.set_drill(drill, depth_m)
 
 	shake = maxf(shake - dt * 6.0, 0.0)
@@ -300,10 +312,11 @@ func _free_number() -> int:
 
 
 ## Host: a miner for someone who joined online (their controls arrive over the network).
-func add_remote_player(input: NetInput, display_name := "", role := "miner") -> Player:
+func add_remote_player(input: NetInput, display_name := "", role := "miner", helmet := "brass") -> Player:
 	var p := _add_player(input)
 	p.display_name = display_name
 	p.role = role if role in Roles.ALL else "miner"
+	p.helmet = helmet if Unlocks.HELMETS.has(helmet) else "brass"
 	p.update_crew_look()
 	return p
 
@@ -427,6 +440,8 @@ func _on_brood_spawned(b: Broodmother) -> void:
 	b.woke.connect(func(): hud.set_boss("THE BROODMOTHER", 1.0))
 	b.health_changed.connect(func(f): hud.set_boss("THE BROODMOTHER", f))
 	b.died.connect(func(pos):
+		Progress.brood_killed = true
+		Progress.save()
 		hud.set_boss("", 0.0)
 		kills += 1
 		fx.gore(pos)
@@ -693,7 +708,8 @@ func _restart(to_title := false) -> void:
 	if Net.is_host():
 		if World.fixed_seed < 0:
 			World.fixed_seed = randi() & 0x7fffffff   # picked here so the crew gets the same one
-		Net.new_run({"seed": World.fixed_seed, "daily": daily_run})
+		Net.new_run({"seed": World.fixed_seed, "daily": daily_run,
+			"drill": Settings.drill if Unlocks.unlocked(Settings.drill) else "rustbucket"})
 	skip_title = not to_title
 	get_tree().paused = false
 	get_tree().reload_current_scene()
@@ -710,6 +726,19 @@ func _setup_menus() -> void:
 		World.fixed_seed = Progress.daily_seed()
 		_restart())
 	menus.host.connect(_host_game)
+	menus.save_and_quit.connect(func():
+		RunSave.save(self)
+		_restart(true))
+	menus.continue_run.connect(func():
+		var d := RunSave.read()
+		if d.is_empty():
+			return
+		resume = d
+		daily_run = bool(d.daily)
+		World.fixed_seed = int(d.seed)
+		skip_title = true
+		get_tree().paused = false
+		get_tree().reload_current_scene())
 	if Net.is_client():
 		daily_run = bool(Net.run.get("daily", false))
 	menus.pause.seed_text.text = ("Daily Dig %s · " % Progress.today() if daily_run else "") + "Seed %d" % world.seed

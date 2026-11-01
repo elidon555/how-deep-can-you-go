@@ -23,17 +23,21 @@ Or open `project.godot` in the Godot editor and press F5.
 | Jump | Space or W | A |
 | Dig (click = one swing, hold = keep swinging) | Left click: swings the way the mouse points, hitting the first rock in front (arm's reach) · or J | X |
 | Aim the pick with J / controller | W up · S down · S + A/D diagonal · otherwise the way you face | Stick / D-pad |
-| Hang a rope (climb with W / S, jump off with Space) | Q or right click | Y |
-| Use a station (helm, furnace, workbench, medkit) / hold to repair a breach or help a downed crewmate up | E | B |
+| Use the tool in hand (grapple, flare, dynamite, extinguisher) | Right click or Q | Y |
+| Switch tool | Tab or mouse wheel | Right stick click |
+| Use a station / hold E to repair a breach, a fuse box, beat out a fire, help a downed crewmate up · tap E to carry them | E | B |
 | Ping a spot for the crew | F or middle click | LB |
 | Restart | R | Back |
 
 **Local co-op:** a second player presses **Start** on a controller to join (that controller is
 theirs; player one keeps keyboard + mouse). The camera frames both. Menus answer either player.
 
-**The crew:** each miner has their own colour (blue, red, green, violet) and a name tag. Out of
-health, you're **down**: a crewmate holds E on you for 2 s to help you up. Nobody comes within
-30 s and you've bled out: your bag is lost and you're back in the drill shortly. The run ends
+**The crew:** each miner has their own colour (blue, red, green, violet) and a name tag, and a
+**role** picked on the title screen: **miner** (digs harder, carries more), **engineer**
+(repairs twice as fast), **gunner** (turrets reload faster) or **medic** (helps the downed up
+fast). Out of health, you're **down**: a crewmate holds E on you to help you up, or taps E to
+carry you to the medkit. Nobody comes within 30 s and you've bled out: your bag is lost and
+you're back in the drill shortly. The run ends
 when everyone is down or the drill is wrecked. **Pings** (F / middle click) mark a spot for the
 whole crew, with an arrow at the screen's edge when it's out of view.
 
@@ -54,24 +58,38 @@ Set it to `false` for the real economy.
 
 - **The drill** is the crew's base. The **helm** sets its speed; it bores down in bites,
   chewing only the rock in front of its cutters, and drops through caves it breaks into.
-  Inside: **sonar** (see caves, ore and creatures), **gunner's seat** (two hull turrets),
-  **coolant** (vent heat), **workbench** (sell ore, upgrades, ropes), **furnace** (coal ->
-  fuel; fuel is unlimited for now), **medkit**. Braces grip the walls when it stops; the
-  telescoping ladders come down whenever someone is outside.
-- **Danger to the drill:** heat (rises with depth, cutting magma, lava), hull breaches
-  (boulders, crawlers, the burrowing worm, crashes) that leak hull until you hold E on them,
-  and flooding (breached in water: the cabin fills, the engine drowns, the pump drains it).
-- **Going outside:** dig (mouse aims the swing, it hits the first rock that way), ropes,
-  dodge roll, swim (watch your breath), stay out of lava. Carry ore back to sell.
-- **The world is procedurally generated** from a seed every run: topsoil, the **crystal
-  caverns** (~150-300 m), deep basalt, the **magma layer** (400 m+), with wandering layer
-  boundaries; caves; ore (copper, silver, gold, amethyst) and coal; **water and lava** that
-  really flow (water on lava -> rock); loose boulders; **ruined camps** of the crews who dug
-  here before, with crates and **miners' notes** telling their story.
-- **Creatures:** watching eyes, crawlers, bat roosts, and below 40 m the worm, which tunnels
-  through rock to ram the drill.
-- Upgrades, best depth and found notes are saved (`user://progress.json`); settings in
-  `user://settings.cfg`.
+  Inside: **sonar**, **gunner's seat** (two hull turrets), **coolant** (vent heat),
+  **workbench** (sell ore, upgrades, modules, restock), **furnace** (drives the generator),
+  **medkit**, and two **fuse boxes** on the walls. Braces grip the walls when it stops.
+- **Power:** the furnace's generator runs Low / Normal / Boost (E at the furnace). The head,
+  turrets, pump and modules all draw on it; too little browns everything out (slower head,
+  stuttering lights, slow turrets) and a long brownout blows a fuse; Boost on a light load
+  wastes heat. A blown fuse kills what's on its box until someone holds E on it.
+- **Danger to the drill:** heat, hull breaches (boulders, crawlers, borers, the worm, crashes),
+  flooding through breaches in water, and **fire** (overheating, sparking fuses, blasts): it
+  spreads, eats the hull and burns the crew. Beat it out (hold E), spray it (extinguisher),
+  or let the sprinklers or the flood put it out.
+- **Modules** built at the workbench show on the hull: cargo hold (keeps the ore the head
+  grinds), floodlights, sprinklers, a defence drone, a crew bunk.
+- **Going outside:** dig (mouse aims the swing), the **grapple** (unlimited, a short cooldown:
+  hook rock, get hauled up, climb onto ledges or hang and hook again; hook the hull to climb
+  back in at a door), **flares** (creatures keep away), **dynamite**, dodge roll, swim. Your
+  bag holds so much (the ore sled upgrade carries more). Sell ore at the workbench.
+- **Radio jobs** come in from the surface: sell so much ore, hunt so many creatures, or rescue
+  a miner trapped in a cave below (carry them to the drill), each before a deadline depth.
+- **Quakes** past 50 m: rubble fills tunnels near you, the shaft above the drill caves in.
+- **The world is procedurally generated** from a seed every run: topsoil, the **fungal
+  caves** (~60-140 m, glowing mushroom forests), the **crystal caverns** (~150-300 m), the
+  **ice** (~300-400 m, slippery), the **magma layer** (400 m+) with **ancient halls** and
+  their relics, the cavern above the Floor. Layer boundaries wander; ore and coal; water and
+  lava that flow; boulders; **ruined camps** with crates and **miners' notes**.
+- **Creatures:** watching eyes, crawlers, bat roosts, **mite swarms** (they get in through
+  breaches), **borers** (tunnel to the drill, chew in, gnaw fuse boxes), the burrowing worm,
+  the **Broodmother** (a mid-boss in the ice), and the Eye at the bottom.
+- **Between runs:** upgrades, best depth and notes are kept; **unlocks** (drills with their
+  own trade-offs, helmet colours) are picked in the **Hangar**. **Save and quit** from the
+  pause menu, then **Continue** on the title screen (single player).
+- Saves: `user://progress.json`, `user://run.save`; settings in `user://settings.cfg`.
 
 ## Code layout
 
@@ -86,26 +104,36 @@ All game code is in `src/` (one system per file):
 | `settings.gd` | Autoload `Settings`: volumes, fullscreen, audio buses |
 | `game_config.gd` | Playtest switches from `project.godot` `[game]` |
 | `lore.gd` | The miners' notes and dealing them out per run |
+| `contracts.gd` | Radio jobs (sell, hunt, rescue) |
+| `unlocks.gd` | Drill variants and helmet colours, and what unlocks them |
+| `run_save.gd` | Saving a run and continuing it |
 | **world/** | |
 | `world.gd` | The dig grid: chunks, fill/damage/material/liquid per cell, digging, chunk images + collision |
 | `world_gen.gd` | Making the world from the seed: noise, layers, caves, ore, liquid pockets, boulders, props |
-| `camps.gd` / `camp_items.gd` | Ruined camps (generated) / their crates and notes |
+| `camps.gd` / `ruins.gd` / `camp_items.gd` | Ruined camps / ancient halls (generated) / crates, notes, relics |
+| `quakes.gd` | Quakes and cave-ins |
 | `liquids.gd` | Water + lava flow simulation, drawn by `liquid_*.gdshader` |
 | `terrain*.gdshader` / `terrain_common.gdshaderinc` | Smooth rock with outlines, cracks, materials; crystal/magma glow |
-| `boulder.gd`, `rope.gd`, `backdrop.gd`, `backwall.gdshader` | Falling boulders, ropes, parallax backgrounds, cave back wall |
+| `boulder.gd`, `backdrop.gd`, `backwall.gdshader` | Falling boulders, parallax backgrounds (per layer), cave back wall |
 | **drill/** | |
 | `drill.gd` | The machine: hull, fuel, speed, damage, breaches, stations, braces, ladders |
 | `drill_cutter.gd` | Boring down in bites, reamers, falling into caves, crashes |
 | `drill_heat.gd` / `drill_flood.gd` / `drill_guns.gd` | Heat + coolant / flooding + pump / turrets + gunner's seat |
+| `drill_power.gd` / `junction.gd` | The generator, brownouts / the fuse boxes |
+| `drill_fires.gd` | Fire in the cabin (spreading, damage, putting it out) |
+| `drill_modules.gd`, `drone.gd` | Modules built onto the drill / the defence drone |
 | `stations.gd`, `station.gd` | Helm, furnace, workbench, medkit, sonar, gunner seat, coolant, breaches |
-| `drill_art.gd`, `drill_ladder.gd`, `turret.gd` | How it looks (sprites + lights + effects), telescoping ladders, turrets |
+| `drill_art.gd`, `turret.gd` | How it looks (sprites + lights + effects), turrets |
 | **player/** | |
 | `player.gd` | Movement, roll, ropes/ladders, swimming + breath, health, bag, animation, lamp |
 | `pickaxe.gd` | Swings: aim (mouse direction or keys), room check, impact, hitting creatures |
 | `interactor.gd` | Per-player "use the thing in front of you" (E / hold E) |
 | `player_input.gd` | One player's controls (action prefix, mouse or not); all player input goes through it |
-| `revive_spot.gd`, `crew_color.gdshader` | Helping a downed crewmate up (hold E) / each miner's clothes in their colour |
-| **creatures/** | `crawler.gd`, `bat.gd`, `worm.gd`, `watcher.gd`, `spawner.gd` (who spawns where) |
+| `player_tools.gd`, `thrown.gd`, `ore_sled.gd` | The tool belt (grapple, flares, dynamite, extinguisher) / thrown things / the sled |
+| `roles.gd` | Crew roles and their perks |
+| `revive_spot.gd`, `survivor.gd` | Helping a downed crewmate up or carrying them / trapped survivors (rescue jobs) |
+| `crew_color.gdshader` | Each miner's clothes in their colour, helmets in theirs |
+| **creatures/** | `crawler.gd`, `bat.gd`, `mite.gd`, `borer.gd`, `worm.gd`, `watcher.gd`, `broodmother.gd`, `the_eye.gd`, `creature_sprite.gd` (sheet + glow helper), `spawner.gd` (who spawns where) |
 | **fx/** | `fx.gd` (particles, impacts, hit-stop), `ping.gd` (crew markers), `sfx.gd` (autoload `Sfx`: sounds, ambience, music), `art.gd` (sprites + normal maps) |
 | **net/** (online co-op) | |
 | `net.gd` | Autoload `Net`: hosting / joining (ENet), the handshake, sending messages, echoing the host's calls |
@@ -113,7 +141,7 @@ All game code is in `src/` (one system per file):
 | `net_input.gd` | A remote miner's controls (and packing this machine's to send) |
 | `net_world.gd` | Dug rock + liquid: changed cells in batches, whole chunks for late joiners |
 | `net_entities.gd` | Snapshots of the drill, miners, creatures and things; smoothing them on clients |
-| **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / online / run summary / notes), `ui_style.gd` |
+| **ui/** | `hud.gd`, `shop.gd`, `sonar_view.gd`, `menus.gd` (title / pause / settings / online / hangar / run summary / notes), `ui_style.gd` |
 
 **How online works:** the host simulates everything; clients generate the same world from the
 seed, send their controls, and show what the host sends back. A synced thing joins group `net`
@@ -131,10 +159,14 @@ godot --headless --path . --fixed-fps 60 res://tests/systems_test.tscn
 ```
 
 `feel_test` checks digging never gets stuck and how fast each direction is per material;
-`systems_test` plays through the drill (riding it, braces, ladders, furnace, workbench + shop,
-breaches, heat + coolant, sonar, the worm vs the turrets), layers, camps + notes, bats, water
-and lava, mouse aiming, ropes, a crawler fight, the dodge roll and a falling boulder, and prints
-PASS/FAIL. Tests use a fixed world seed and never write the real save.
+`systems_test` plays through the drill (riding it, braces, grappling back in, hatches,
+furnace, workbench + shop, breaches, heat + coolant, flooding, power and fuses, fire, the
+modules), the tools (flares, dynamite, the grapple), the bag, radio jobs and a rescue, quakes,
+the ice, ruins, mites, a borer breaking in, the Broodmother, unlocks, saving and continuing,
+the layers, sonar and the worm vs the turrets, mouse aiming, climbing out of a shaft, camps +
+notes, bats, water and lava, gas, a crawler fight, the roll, co-op (colours, pings, helping a
+crewmate up, carrying them to the medkit), the bottom and a falling boulder, and prints
+PASS/FAIL. Tests use a fixed world seed, no random spawns, and never write the real saves.
 
 ```
 tests/net_test.sh                # online: a host and two clients as separate processes on localhost

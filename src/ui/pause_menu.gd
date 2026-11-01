@@ -7,6 +7,7 @@ class_name PauseMenu
 signal settings_pressed
 signal restart_pressed
 signal title_pressed
+signal save_pressed
 
 
 func _ready() -> void:
@@ -24,6 +25,8 @@ func _ready() -> void:
 	var restart := UiStyle.button("Restart run", func(): restart_pressed.emit())
 	restart.visible = not Net.is_client()
 	box.add_child(restart)
+	if not Net.is_online():              # (a run online belongs to the crew)
+		box.add_child(UiStyle.button("Save and quit", func(): save_pressed.emit()))
 	box.add_child(UiStyle.button("Leave the game" if Net.is_client() else "Quit to title",
 		func(): title_pressed.emit()))
 	box.add_child(seed_text)

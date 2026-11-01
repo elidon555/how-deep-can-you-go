@@ -116,6 +116,7 @@ class Workbench extends Station:
 		var v := p.take_ore_value() + drill.take_cargo()
 		if v > 0:
 			Progress.add_money(v)
+			Progress.record_sale(v)
 			Sfx.play("coins", global_position)
 		p.restock()
 		drill.workbench_used.emit(p)

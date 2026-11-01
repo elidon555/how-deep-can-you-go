@@ -24,7 +24,8 @@ func update(dt: float) -> void:
 	var depth := drill.global_position.y / World.METER
 	var ambient := clampf((depth - 200.0) / 350.0, 0.0, 1.0) * 60.0
 	if drill.cutter.drilling and drill.cutter.chew_mat >= 0:
-		heat += FROM_CUTTING[drill.cutter.chew_mat] * (2.0 if drill.speed == Drill.Speed.FULL else 1.0) * dt
+		heat += FROM_CUTTING[drill.cutter.chew_mat] * (2.0 if drill.speed == Drill.Speed.FULL else 1.0) \
+			* Unlocks.drill(drill.variant).heat * dt
 	heat = move_toward(heat, ambient, COOLING * dt)
 	var under := drill.world.liquid_at(drill.global_position + Vector2(0, 100))   # what the head sits in
 	if under.y == Liquids.LAVA and under.x > 0.2:

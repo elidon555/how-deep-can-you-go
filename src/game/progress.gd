@@ -30,6 +30,9 @@ var found_notes: Array = []   # Lore.NOTES ids you've read, ever
 var beaten := false           # the Floor has been opened at least once
 var daily := {}               # date ("2026-10-31") -> best depth on that day's Daily Dig
 var tips_seen: Array = []     # first-run hints already shown (Tips)
+var brood_killed := false     # the Broodmother has been killed at least once
+var lifetime_sold := 0        # ore sold, all runs together (Unlocks)
+var unlocks_seen: Array = []  # Unlocks already announced
 var dry_run := false   # tests: keep everything in memory
 var mirroring := false # online client: money and upgrades are the host's (the crew's), not saved
 
@@ -97,6 +100,11 @@ func find_note(id: int) -> void:
 
 func add_money(amount: int) -> void:
 	money += amount
+	save()
+
+
+func record_sale(amount: int) -> void:
+	lifetime_sold += amount
 	save()
 
 
@@ -170,6 +178,7 @@ func end_mirror() -> void:
 	found_notes.clear()
 	tips_seen.clear()
 	daily.clear()
+	unlocks_seen.clear()
 	_load()
 	changed.emit()
 
@@ -183,7 +192,8 @@ func save() -> void:
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify({"money": money, "best": best, "levels": levels, "notes": found_notes,
-			"beaten": beaten, "daily": daily, "tips": tips_seen}))
+			"beaten": beaten, "daily": daily, "tips": tips_seen, "brood": brood_killed, "sold": lifetime_sold,
+			"unlocks": unlocks_seen}))
 	changed.emit()
 
 
@@ -200,6 +210,10 @@ func _load() -> void:
 			beaten = bool(d.get("beaten", false))
 			for t in d.get("tips", []):
 				tips_seen.append(str(t))
+			brood_killed = bool(d.get("brood", false))
+			lifetime_sold = int(d.get("sold", 0))
+			for u in d.get("unlocks", []):
+				unlocks_seen.append(str(u))
 			for k in d.get("daily", {}):
 				daily[k] = int(d.daily[k])
 	elif FileAccess.file_exists(OLD_BEST_PATH):

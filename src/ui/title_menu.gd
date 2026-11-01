@@ -5,6 +5,8 @@ class_name TitleMenu
 signal start_pressed
 signal daily_pressed
 signal online_pressed
+signal hangar_pressed
+signal continue_pressed
 signal settings_pressed
 
 var _notice := UiStyle.label("", 20, Color("e05a4a"))    # e.g. "The host ended the game."
@@ -30,17 +32,30 @@ func _ready() -> void:
 	_notice.visible = false
 	col.add_child(_notice)
 	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, 150)        # the drill shows through here
+	gap.custom_minimum_size = Vector2(0, 90)         # the drill shows through here
 	col.add_child(gap)
-	for b in [UiStyle.button("Start digging", func(): start_pressed.emit()), UiStyle.role_button(),
-			UiStyle.button("Daily Dig (best today: %d m)" % Progress.daily.get(Progress.today(), 0),
-				func(): daily_pressed.emit()),
-			UiStyle.button("Play online", func(): online_pressed.emit()),
-			UiStyle.button("Settings", func(): settings_pressed.emit()),
-			UiStyle.button("Quit", func(): get_tree().quit())]:
+	var buttons := []
+	if RunSave.exists():
+		buttons.append(UiStyle.button("Continue (%d m)" % RunSave.depth(), func(): continue_pressed.emit()))
+	buttons.append_array([UiStyle.button("Start digging", func(): start_pressed.emit()),
+		UiStyle.button("Daily Dig (best today: %d m)" % Progress.daily.get(Progress.today(), 0), func(): daily_pressed.emit()),
+		UiStyle.button("Play online", func(): online_pressed.emit())])
+	for b in buttons:
 		var row := CenterContainer.new()
 		row.add_child(b)
 		col.add_child(row)
+	var role := CenterContainer.new()
+	role.add_child(UiStyle.role_button())
+	col.add_child(role)
+	var small := HBoxContainer.new()            # the rest, side by side
+	small.alignment = BoxContainer.ALIGNMENT_CENTER
+	small.add_theme_constant_override("separation", 10)
+	for b in [UiStyle.button("Hangar", func(): hangar_pressed.emit()),
+			UiStyle.button("Settings", func(): settings_pressed.emit()),
+			UiStyle.button("Quit", func(): get_tree().quit())]:
+		b.custom_minimum_size = Vector2(150, 42)
+		small.add_child(b)
+	col.add_child(small)
 	col.add_child(UiStyle.label("Best depth: %d m   ·   Notes found: %d / %d" % [
 		Progress.best, Progress.found_notes.size(), Lore.NOTES.size()], 20, UiStyle.DIM))
 	if Progress.beaten:

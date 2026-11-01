@@ -21,6 +21,9 @@ func _ready() -> void:
 	p = main.player
 	p.pick.mouse_aim = false     # aim with the keys, like J / a controller
 	main.fx.hitstop_enabled = false
+	main.spawner.set_process(false)   # no random creatures: each section makes what it tests
+	main.quakes.set_process(false)
+	main.contracts.set_process(false)
 	var saved_money := Progress.money
 	var saved_levels := Progress.levels.duplicate()
 	await _drill_ride()
@@ -40,6 +43,8 @@ func _ready() -> void:
 	await _jobs_and_quakes()
 	_calm()
 	await _deep_things()
+	_calm()
+	await _unlocks_and_saving()
 	_calm()
 	_layers()
 	await _sonar_and_worm()
@@ -78,6 +83,10 @@ func _calm() -> void:
 	d.thermal.heat = 0.0
 	d.thermal.overheated = false
 	d.hull = d.max_hull
+	for c in get_tree().get_nodes_in_group("creature"):
+		if not c is Broodmother:
+			c.queue_free()
+	p.drop_carried()
 
 
 func _check(name: String, ok: bool, info := "") -> void:
@@ -732,6 +741,8 @@ func _gear() -> void:
 func _jobs_and_quakes() -> void:
 	var d: Drill = main.drill
 	var c: Contracts = main.contracts
+	c.set_process(true)
+	c._t = 999.0                          # (no random offers while testing)
 	c.jobs.clear()
 	var money := Progress.money
 	c._offer()
@@ -762,6 +773,7 @@ func _jobs_and_quakes() -> void:
 		await _frames(5)
 		_check("carried into the drill, they're rescued", not is_instance_valid(s) or s.is_queued_for_deletion())
 		_check("and your hands are free again", p.carrying == null)
+	c.set_process(false)
 	# a quake: a tunnel near the miner fills back in, and the shaft above the drill caves in
 	var t := d.global_position + Vector2(-300, 200)
 	w.dig(t, t + Vector2(120, 0), 14.0, 99.0)
@@ -864,6 +876,52 @@ func _deep_things() -> void:
 		m.queue_free()
 	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	p.heal_full()
+	await _frames(10)
+
+
+## Unlocks (drills, helmets) and saving a run to continue it.
+func _unlocks_and_saving() -> void:
+	var d: Drill = main.drill
+	var best := Progress.best
+	Progress.best = 0
+	_check("the Mole drill is locked at first", not Unlocks.unlocked("mole"))
+	Progress.best = 220
+	_check("reaching 200 m unlocks it", Unlocks.unlocked("mole"))
+	var seen := Progress.unlocks_seen.duplicate()
+	Progress.unlocks_seen.clear()
+	_check("new unlocks are announced once", Unlocks.fresh().size() > 0 and Unlocks.fresh().is_empty())
+	Progress.unlocks_seen = seen
+	Progress.best = best
+	var hull := d.max_hull
+	d.variant = "tortoise"
+	d.apply_upgrades()
+	_check("a Tortoise has more hull", d.max_hull > hull, "%.0f -> %.0f" % [hull, d.max_hull])
+	d.variant = "rustbucket"
+	d.apply_upgrades()
+	p.helmet = "frost"
+	p.update_crew_look()
+	_check("helmets recolour", (p.sprite.material as ShaderMaterial).get_shader_parameter("helmet_hue") > 0.0)
+	p.helmet = "brass"
+	p.update_crew_look()
+	# save, change things, put the save back
+	var hole := d.global_position + Vector2(-280, 140)
+	w.dig(hole, hole, 14.0, 99.0)
+	var drill_at := d.global_position
+	p.ore_count = 3
+	p.ore_value = 9
+	RunSave.save(main)
+	_check("a run saves", RunSave.exists() and RunSave.depth() == int(d.global_position.y / World.METER))
+	w.place_rock(w.cell_at(hole).x, w.cell_at(hole).y, World.M.DIRT)
+	d.global_position += Vector2(0, 40)
+	p.ore_count = 0
+	RunSave.restore(main, RunSave.read())
+	_check("continuing puts the ground back", w.is_air(hole))
+	_check("and the drill", d.global_position.distance_to(drill_at) < 0.5)
+	_check("and what you carried", p.ore_count == 3 and p.ore_value == 9)
+	RunSave.clear()
+	_check("a used save is gone", not RunSave.exists())
+	p.lose_bag()
+	p.global_position = d.global_position + Vector2(-30, Drill.FLOOR - Player.HALF_HEIGHT - 1)
 	await _frames(10)
 
 

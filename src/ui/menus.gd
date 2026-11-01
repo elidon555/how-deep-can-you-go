@@ -8,6 +8,8 @@ signal start_run
 signal restart(to_title: bool)
 signal daily
 signal host(port: int)
+signal save_and_quit
+signal continue_run
 
 var title := TitleMenu.new()
 var pause := PauseMenu.new()
@@ -15,12 +17,13 @@ var settings := SettingsMenu.new()
 var game_over := GameOver.new()
 var note_view := NoteView.new()
 var online := OnlineMenu.new()
+var hangar := HangarMenu.new()
 var can_pause := func() -> bool: return true    # the game says when Esc may pause
 
 
 func _ready() -> void:
 	layer = 20
-	for m in [title, pause, settings, game_over, note_view, online]:
+	for m in [title, pause, settings, game_over, note_view, online, hangar]:
 		add_child(m)
 	title.visible = false
 	title.start_pressed.connect(func():
@@ -29,6 +32,9 @@ func _ready() -> void:
 		start_run.emit())
 	title.daily_pressed.connect(func(): daily.emit())
 	title.online_pressed.connect(online.open)
+	title.hangar_pressed.connect(hangar.open)
+	title.continue_pressed.connect(func(): continue_run.emit())
+	pause.save_pressed.connect(func(): save_and_quit.emit())
 	online.host_pressed.connect(func(port): host.emit(port))
 	title.settings_pressed.connect(settings.open)
 	pause.settings_pressed.connect(settings.open)
@@ -56,6 +62,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Esc pauses, unless something else used it first (shop, sonar, the turret seat) or a menu
 	# is already up
 	if Controls.any_pressed(event, "ui_cancel") and not title.visible and not pause.visible \
-			and not note_view.visible and not game_over.visible and not online.visible and can_pause.call():
+			and not note_view.visible and not game_over.visible and not online.visible and not hangar.visible \
+			and can_pause.call():
 		pause.open()
 		get_viewport().set_input_as_handled()

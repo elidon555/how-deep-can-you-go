@@ -58,6 +58,7 @@ var pick := Pickaxe.new()
 var interactor := Interactor.new()
 var tools := PlayerTools.new()
 var role := "miner"              # Roles: miner / engineer / gunner / medic
+var helmet := "brass"            # Unlocks: helmet colour
 var carrying: Player = null      # a downed crewmate on your shoulders
 var carried_by: Player = null    # (downed) who's carrying you
 var sled: OreSled = null         # follows you once the ore sled is bought
@@ -519,6 +520,7 @@ func update_crew_look() -> void:
 		var c := crew_color()
 		(sprite.material as ShaderMaterial).set_shader_parameter("hue", c.h)
 		(sprite.material as ShaderMaterial).set_shader_parameter("saturation", 1.0 if number == 1 else 1.25)
+		(sprite.material as ShaderMaterial).set_shader_parameter("helmet_hue", Unlocks.helmet_hue(helmet))
 	_tag.text = tag_name()
 	_tag.add_theme_color_override("font_color", crew_color().lightened(0.35))
 
@@ -634,7 +636,7 @@ static func _cone_texture() -> ImageTexture:
 func net_state() -> Array:
 	return [peer, number, display_name, sprite.frame, facing, sprite.visible, visible, health, max_health, breath,
 		ore_count, ore_value, coal, 0, sold_value, _lamp_dir, pick.kind, pick.trail_age(),
-		interactor.prompt_text(), frozen, downed, bleed, tools.net_state(), role, carrying != null]
+		interactor.prompt_text(), frozen, downed, bleed, tools.net_state(), role, carrying != null, helmet]
 
 
 func net_apply(s: Array) -> void:
@@ -670,3 +672,6 @@ func net_apply(s: Array) -> void:
 	bleed = s[21]
 	tools.net_apply(s[22])
 	role = s[23]
+	if helmet != s[25]:
+		helmet = s[25]
+		update_crew_look()

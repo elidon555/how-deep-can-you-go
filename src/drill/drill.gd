@@ -70,6 +70,7 @@ var cargo_count := 0           # ore the head ground through, kept in the cargo 
 var cargo_value := 0
 var art := DrillArt.new()
 var puppet := false            # online client: shows the host's drill, doesn't run it
+var variant := "rustbucket"    # Unlocks.DRILLS: which drill this is (its stats and hull tint)
 var running := false           # the head is turning (engine on, not stalled)
 var _medkit: Stations.Medkit
 var _engine := AudioStreamPlayer2D.new()
@@ -136,7 +137,8 @@ func place(at_x: float) -> void:
 
 func apply_upgrades() -> void:
 	max_fuel = Progress.drill_fuel()
-	max_hull = Progress.drill_hull()
+	max_hull = Progress.drill_hull() * Unlocks.drill(variant).hull
+	art.modulate = Unlocks.drill(variant).tint
 	modules.build()
 	fuel = minf(fuel, max_fuel)
 	changed.emit()

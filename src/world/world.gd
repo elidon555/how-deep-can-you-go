@@ -83,9 +83,9 @@ var terrain_glow_shader: Shader = preload("res://src/world/terrain_glow.gdshader
 var liquids: Liquids             # set by main; told when a chunk's liquid changes
 var gen: WorldGen               # makes the chunks (world_gen.gd)
 # online co-op (NetWorld): the host records what changes; a client shows the host's ground
-var record := false             # host: note every changed cell in `changes` / `touched`
+var record := false             # host online: note every changed cell in `changes`
 var changes := {}               # cells changed since NetWorld last sent them
-var touched := {}               # chunk keys changed since the run began (for late joiners)
+var touched := {}               # chunk keys changed since the run began (late joiners, RunSave)
 var puppet := false             # client: generated the same, but only the host changes it
                                 # (no ore, gas or caving in here; entities come from the host)
 
@@ -216,8 +216,7 @@ func set_liquid(gx: int, gy: int, amount: float, kind: int) -> void:
 		ch.has_liquid = true
 	if liquids:
 		liquids.cell_changed(gx, gy)
-	if record:
-		_note_change(gx, gy)
+	_note_change(gx, gy)
 
 
 ## Liquid at a world point: Vector2(amount, kind).
@@ -238,8 +237,7 @@ func place_rock(gx: int, gy: int, mat: int) -> void:
 	ch.liquid[k] = 0.0
 	ch.ltype[k] = Liquids.NONE
 	_closed(gx, gy)
-	if record:
-		_note_change(gx, gy)
+	_note_change(gx, gy)
 
 
 ## A cell turned solid: redraw (depth darkening) and rebuild collision around it.
@@ -345,8 +343,7 @@ func _set_fill(gx: int, gy: int, nf: float, old: float) -> void:
 	ch.fill[(gy & 31) * C + (gx & 31)] = nf
 	ch.dmg[(gy & 31) * C + (gx & 31)] = 0.0
 	_set_pixel(gx, gy, nf, 0.0)
-	if record:
-		_note_change(gx, gy)
+	_note_change(gx, gy)
 	if old >= 0.5 and nf < 0.5:
 		if not puppet:
 			opened.emit(gx, gy)
@@ -388,13 +385,14 @@ func _set_dmg(gx: int, gy: int, d: float) -> void:
 		return
 	ch.dmg[(gy & 31) * C + (gx & 31)] = d
 	_set_pixel(gx, gy, ch.fill[(gy & 31) * C + (gx & 31)], d)
-	if record:
-		_note_change(gx, gy)
+	_note_change(gx, gy)
 
 
+## A cell changed: remember its chunk (late joiners, saving the run); online, the cell too.
 func _note_change(gx: int, gy: int) -> void:
-	changes[Vector2i(gx, gy)] = true
 	touched[Vector2i(gx >> 5, gy >> 5)] = true
+	if record:
+		changes[Vector2i(gx, gy)] = true
 
 
 ## Client: a cell as the host has it now (NetWorld). Ore and props in a cell that opens go,

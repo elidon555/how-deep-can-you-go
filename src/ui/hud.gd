@@ -146,10 +146,10 @@ func set_breath(left: float) -> void:
 func set_bag(p: Player) -> void:
 	var cap := p.bag_space() + p.ore_count + p.coal
 	_ore.text = ("Ore: %d ($%d)" % [p.ore_count, p.ore_value] if p.ore_count > 0 else "Ore: 0") \
-		+ "   Coal: %d   Bag %d/%d" % [p.coal, p.ore_count + p.coal, cap]
+		+ "   Coal: %d" % p.coal
 	var t := p.tools.current()
 	var n := p.tools.count(t)
-	_ropes.text = "%s%s   [Tab]" % [PlayerTools.NAMES[t], "" if n < 0 else " ×%d" % n]
+	_ropes.text = "Bag %d/%d   %s%s [Tab]" % [p.ore_count + p.coal, cap, PlayerTools.NAMES[t], "" if n < 0 else " ×%d" % n]
 
 
 func set_drill(d: Drill, player_depth: float) -> void:
@@ -225,10 +225,10 @@ class DrillPanel extends Control:
 		var leaks := drill.get_breaches().size()
 		var blink := fmod(Time.get_ticks_msec() / 1000.0, 0.8) < 0.55
 		if not drill.fires.fires().is_empty() and blink:
-			draw_string(font, Vector2(12, 156), "FIRE! Beat it out (hold E) or spray it",
+			draw_string(font, Vector2(12, 156), "FIRE! Beat it out (E) or spray it",
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ff8a3a"))
 		elif (pw.blown[0] or pw.blown[1]) and blink:
-			draw_string(font, Vector2(12, 156), "FUSE BLOWN — hold E on the %s fuse box" % ("left" if pw.blown[0] else "right"),
+			draw_string(font, Vector2(12, 156), "FUSE BLOWN — %s fuse box (hold E)" % ("left" if pw.blown[0] else "right"),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("ffd04a"))
 		elif drill.flooding.leaking > 0 and blink:
 			draw_string(font, Vector2(12, 156), "FLOODING %d%% — patch the breaches!" % int(drill.flooding.level * 100.0),

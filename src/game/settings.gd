@@ -11,6 +11,8 @@ var fullscreen := false
 var last_address := ""
 var player_name := ""     # shown over your miner online ("" = P1, P2 ...)
 var role := "miner"       # Roles: what you play as
+var drill := "rustbucket" # Unlocks: the drill you take down (the host's, online)
+var helmet := "brass"     # Unlocks: your helmet's colour
 
 
 func _ready() -> void:
@@ -28,6 +30,8 @@ func _ready() -> void:
 		last_address = cfg.get_value("online", "last_address", last_address)
 		player_name = cfg.get_value("online", "player_name", player_name)
 		role = cfg.get_value("game", "role", role)
+		drill = cfg.get_value("game", "drill", drill)
+		helmet = cfg.get_value("game", "helmet", helmet)
 	apply()
 
 
@@ -48,6 +52,8 @@ func save() -> void:
 	cfg.set_value("online", "last_address", last_address)
 	cfg.set_value("online", "player_name", player_name)
 	cfg.set_value("game", "role", role)
+	cfg.set_value("game", "drill", drill)
+	cfg.set_value("game", "helmet", helmet)
 	cfg.save(PATH)
 
 

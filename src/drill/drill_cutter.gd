@@ -46,7 +46,8 @@ func update(dt: float, running: bool) -> void:
 	_bite_t -= dt
 	judder = Vector2.ZERO
 	if running:
-		_bite_power += Progress.drill_power() * HEAD_POWER[drill.speed] * drill.power.ratio() * dt
+		_bite_power += Progress.drill_power() * Unlocks.drill(drill.variant).power * HEAD_POWER[drill.speed] \
+			* drill.power.ratio() * dt
 		_bite_clock -= dt
 		if _bite_clock <= 0.0:         # a bite: all the saved-up cutting at once
 			_bite_clock = BITE
